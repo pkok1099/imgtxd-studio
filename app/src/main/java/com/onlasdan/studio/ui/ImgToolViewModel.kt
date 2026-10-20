@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.onlasdan.studio.core.ImgArchive
 import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.core.ImgVersion
+import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.ProcessType
 import com.onlasdan.studio.txd.TxdBuilder
 import com.onlasdan.studio.txd.TxdEntry
 import com.onlasdan.studio.txd.TxdParser
@@ -58,7 +60,8 @@ data class ImgToolUiState(
     val activeTxdOriginalPath: String? = null,
     val isTxdShizuku: Boolean = false,
     val selectedTxdEntry: TxdEntry? = null,
-    val isTxdLoading: Boolean = false
+    val isTxdLoading: Boolean = false,
+    val hasTxdUnsavedChanges: Boolean = false
 ) {
     val hasMorePages: Boolean
         get() = displayedEntries.size < filteredEntries.size
@@ -271,6 +274,7 @@ class ImgToolViewModel : ViewModel() {
         _uiState.update {
             it.copy(
                 isLoading = false,
+                hasUnsavedChanges = true,
                 entries = allEntries,
                 filteredEntries = filtered,
                 displayedEntries = displayed,
@@ -352,43 +356,95 @@ class ImgToolViewModel : ViewModel() {
     fun extractSelected(destinationDir: File, isShizuku: Boolean = false, destRestrictedPath: String? = null) {
         val selected = _uiState.value.selectedEntries.toList()
         if (selected.isEmpty()) return
+        val archive = _uiState.value.archive ?: return
 
         viewModelScope.launch {
-            val archive = _uiState.value.archive ?: return@launch
-            _uiState.update { it.copy(isLoading = true, progress = Pair(0, selected.size), statusMessage = "Extracting ${selected.size} files...") }
-            try {
-                withContext(Dispatchers.IO) {
-                    for ((idx, entry) in selected.withIndex()) {
-                        if (isShizuku && destRestrictedPath != null) {
-                            val tempFile = File.createTempFile("extract_", entry.cleanName)
-                            archive.extract(entry, tempFile)
-                            val remoteDest = "$destRestrictedPath/${entry.cleanName}"
-                            ShizukuManager.copyFromLocal(tempFile, remoteDest)
-                            tempFile.delete()
-                        } else {
-                            val target = File(destinationDir, entry.cleanName)
-                            archive.extract(entry, target)
+            _uiState.update { it.copy(isLoading = true) }
+            val res = DefaultProcessRepository.executeProcess(
+                type = ProcessType.EXTRACT,
+                title = "Mengekstrak ${selected.size} berkas",
+                targetFile = archive.archiveName,
+                totalSteps = selected.size
+            ) { onProgress ->
+                try {
+                    withContext(Dispatchers.IO) {
+                        for ((idx, entry) in selected.withIndex()) {
+                            onProgress(idx, selected.size, "Mengekstrak ${entry.cleanName} (${idx + 1}/${selected.size})")
+                            if (isShizuku && destRestrictedPath != null) {
+                                val tempFile = File.createTempFile("extract_", entry.cleanName)
+                                archive.extract(entry, tempFile)
+                                val remoteDest = "$destRestrictedPath/${entry.cleanName}"
+                                ShizukuManager.copyFromLocal(tempFile, remoteDest)
+                                tempFile.delete()
+                            } else {
+                                val target = File(destinationDir, entry.cleanName)
+                                archive.extract(entry, target)
+                            }
+                            onProgress(idx + 1, selected.size, "Selesai ${entry.cleanName}")
                         }
-                        _uiState.update { it.copy(progress = Pair(idx + 1, selected.size)) }
                     }
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        progress = null,
-                        selectedEntries = emptySet(),
-                        isSelecting = false,
-                        statusMessage = "Extracted ${selected.size} files successfully"
-                    )
+            }
+
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    progress = null,
+                    selectedEntries = emptySet(),
+                    isSelecting = false,
+                    statusMessage = if (res.isSuccess) "Berhasil mengekstrak ${selected.size} berkas ke ${destinationDir.name}" else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
+            }
+        }
+    }
+
+    fun extractAll(destinationDir: File, isShizuku: Boolean = false, destRestrictedPath: String? = null) {
+        val archive = _uiState.value.archive ?: return
+        val allEntries = archive.entries
+        if (allEntries.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val res = DefaultProcessRepository.executeProcess(
+                type = ProcessType.EXTRACT,
+                title = "Mengekstrak semua berkas",
+                targetFile = archive.archiveName,
+                totalSteps = allEntries.size
+            ) { onProgress ->
+                try {
+                    withContext(Dispatchers.IO) {
+                        for ((idx, entry) in allEntries.withIndex()) {
+                            onProgress(idx, allEntries.size, "Mengekstrak ${entry.cleanName} (${idx + 1}/${allEntries.size})")
+                            if (isShizuku && destRestrictedPath != null) {
+                                val tempFile = File.createTempFile("extract_", entry.cleanName)
+                                archive.extract(entry, tempFile)
+                                val remoteDest = "$destRestrictedPath/${entry.cleanName}"
+                                ShizukuManager.copyFromLocal(tempFile, remoteDest)
+                                tempFile.delete()
+                            } else {
+                                val target = File(destinationDir, entry.cleanName)
+                                archive.extract(entry, target)
+                            }
+                            onProgress(idx + 1, allEntries.size, "Selesai ${entry.cleanName}")
+                        }
+                    }
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        progress = null,
-                        errorMessage = "Batch extraction failed: ${e.localizedMessage}"
-                    )
-                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    progress = null,
+                    statusMessage = if (res.isSuccess) "Berhasil mengekstrak ${allEntries.size} berkas ke ${destinationDir.name}" else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
             }
         }
     }
@@ -519,49 +575,75 @@ class ImgToolViewModel : ViewModel() {
             val originalPath = _uiState.value.originalPath
             val isShizukuBacked = _uiState.value.isShizukuBacked
 
-            _uiState.update { it.copy(isLoading = true, progress = Pair(0, archive.entryCount), statusMessage = "Rebuilding archive...") }
-            try {
-                withContext(Dispatchers.IO) {
-                    archive.rebuild { current, total ->
-                        _uiState.update { it.copy(progress = Pair(current, total)) }
-                    }
+            _uiState.update { it.copy(isLoading = true) }
+            val res = DefaultProcessRepository.executeProcess(
+                type = ProcessType.REBUILD,
+                title = "Rebuild & rapikan arsip",
+                targetFile = archive.archiveName,
+                totalSteps = archive.entryCount
+            ) { onProgress ->
+                try {
+                    withContext(Dispatchers.IO) {
+                        archive.rebuild { current, total ->
+                            onProgress(current, total, "Menyusun ulang sektor ($current / $total)")
+                        }
 
-                    // If file was opened from Shizuku (Android/data), write changes back to original file
-                    if (isShizukuBacked && originalPath != null) {
-                        _uiState.update { it.copy(statusMessage = "Menyimpan kembali ke direktori game via Shizuku...") }
-                        ShizukuManager.copyFromLocal(archive.imgFile, originalPath)
-                        if (archive.version == ImgVersion.VER1 && archive.dirFile != null) {
-                            val dirOriginal = originalPath.substringBeforeLast(".") + ".dir"
-                            ShizukuManager.copyFromLocal(archive.dirFile, dirOriginal)
+                        if (isShizukuBacked && originalPath != null) {
+                            onProgress(archive.entryCount, archive.entryCount, "Menyimpan ke folder game via Shizuku...")
+                            ShizukuManager.copyFromLocal(archive.imgFile, originalPath)
+                            if (archive.version == ImgVersion.VER1 && archive.dirFile != null) {
+                                val dirOriginal = originalPath.substringBeforeLast(".") + ".dir"
+                                ShizukuManager.copyFromLocal(archive.dirFile, dirOriginal)
+                            }
                         }
                     }
-                }
-                val allEntries = archive.entries
-                val query = _uiState.value.searchQuery
-                val filtered = filterList(allEntries, query)
-                val displayed = filtered.take(PAGE_SIZE)
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        progress = null,
-                        entries = allEntries,
-                        filteredEntries = filtered,
-                        displayedEntries = displayed,
-                        statusMessage = if (isShizukuBacked)
-                            "Archive berhasil direbuild dan disimpan kembali ke game!"
-                        else
-                            "Archive rebuilt and compacted successfully!"
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        progress = null,
-                        errorMessage = "Rebuild failed: ${e.localizedMessage}"
-                    )
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
             }
+
+            val allEntries = archive.entries
+            val query = _uiState.value.searchQuery
+            val filtered = filterList(allEntries, query)
+            val displayed = filtered.take(PAGE_SIZE)
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    progress = null,
+                    hasUnsavedChanges = false,
+                    entries = allEntries,
+                    filteredEntries = filtered,
+                    displayedEntries = displayed,
+                    statusMessage = if (res.isSuccess) {
+                        if (isShizukuBacked)
+                            "Arsip berhasil direbuild dan disimpan kembali ke game!"
+                        else
+                            "Arsip berhasil direbuild dan dirapikan!"
+                    } else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
+            }
+        }
+    }
+
+    fun closeArchive() {
+        _uiState.update {
+            it.copy(
+                archive = null,
+                entries = emptyList(),
+                filteredEntries = emptyList(),
+                displayedEntries = emptyList(),
+                selectedEntries = emptySet(),
+                isSelecting = false,
+                searchQuery = "",
+                currentPage = 0,
+                hasMorePages = false,
+                hasUnsavedChanges = false,
+                originalPath = null,
+                isShizukuBacked = false,
+                statusMessage = "Arsip IMG ditutup."
+            )
         }
     }
 
@@ -736,35 +818,41 @@ class ImgToolViewModel : ViewModel() {
     fun exportAllTextures(destinationDir: File) {
         val list = _uiState.value.txdEntries
         if (list.isEmpty()) return
+        val targetName = _uiState.value.activeTxdName ?: "tekstur.txd"
 
         viewModelScope.launch {
             _uiState.update { it.copy(isTxdLoading = true) }
-            try {
-                var exported = 0
-                withContext(Dispatchers.IO) {
-                    destinationDir.mkdirs()
-                    for (entry in list) {
-                        val bmp = entry.bitmap ?: continue
-                        val targetFile = File(destinationDir, "${entry.name}.png")
-                        targetFile.outputStream().use { out ->
-                            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+            val res = DefaultProcessRepository.executeProcess(
+                type = ProcessType.EXPORT_ALL,
+                targetFile = targetName,
+                title = "Ekspor Semua PNG ($targetName)"
+            ) { onProgress ->
+                try {
+                    var exported = 0
+                    withContext(Dispatchers.IO) {
+                        destinationDir.mkdirs()
+                        for ((idx, entry) in list.withIndex()) {
+                            val bmp = entry.bitmap ?: continue
+                            val targetFile = File(destinationDir, "${entry.name}.png")
+                            targetFile.outputStream().use { out ->
+                                bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                            }
+                            exported++
+                            onProgress(idx + 1, list.size, "Mengekspor ${entry.name}.png ($exported/${list.size})")
                         }
-                        exported++
                     }
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
-                _uiState.update {
-                    it.copy(
-                        isTxdLoading = false,
-                        statusMessage = "Berhasil mengekspor $exported tekstur ke ${destinationDir.absolutePath}"
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isTxdLoading = false,
-                        errorMessage = "Gagal ekspor semua tekstur: ${e.localizedMessage}"
-                    )
-                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    isTxdLoading = false,
+                    statusMessage = if (res.isSuccess) "Berhasil mengekspor ${list.size} tekstur ke ${destinationDir.name}" else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
             }
         }
     }
@@ -843,66 +931,73 @@ class ImgToolViewModel : ViewModel() {
         val sourceImgEntry = _uiState.value.activeTxdSourceEntry
         val originalPath = _uiState.value.activeTxdOriginalPath
         val isShizukuTxd = _uiState.value.isTxdShizuku
+        val targetName = _uiState.value.activeTxdName ?: "tekstur.txd"
 
         viewModelScope.launch {
             _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Memproses auto-replace ${matches.size} tekstur...") }
-            try {
-                var replacedCount = 0
-                withContext(Dispatchers.IO) {
-                    for ((entry, imagePath) in matches) {
-                        val imageFile = if (isShizuku || ShizukuManager.isRestrictedPath(imagePath)) {
-                            val tmp = File(context.cacheDir, "autoreplace_tmp_" + File(imagePath).name)
-                            ShizukuManager.copyToLocal(imagePath, tmp)
-                            tmp
-                        } else {
-                            File(imagePath)
+            var replacedCount = 0
+            val res = DefaultProcessRepository.executeProcess(
+                type = ProcessType.AUTO_REPLACE,
+                targetFile = targetName,
+                title = "Auto Replace ($targetName)"
+            ) { onProgress ->
+                try {
+                    withContext(Dispatchers.IO) {
+                        for ((idx, match) in matches.withIndex()) {
+                            val (entry, imagePath) = match
+                            val imageFile = if (isShizuku || ShizukuManager.isRestrictedPath(imagePath)) {
+                                val tmp = File(context.cacheDir, "autoreplace_tmp_" + File(imagePath).name)
+                                ShizukuManager.copyToLocal(imagePath, tmp)
+                                tmp
+                            } else {
+                                File(imagePath)
+                            }
+
+                            val newBitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
+                            if (imageFile != File(imagePath)) {
+                                imageFile.delete()
+                            }
+
+                            if (newBitmap != null) {
+                                TxdBuilder.replaceTexture(entry, newBitmap)
+                                replacedCount++
+                            }
+                            onProgress(idx + 1, matches.size, "Mengganti ${entry.name} (${idx + 1}/${matches.size})")
                         }
 
-                        val newBitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
-                        if (imageFile != File(imagePath)) {
-                            imageFile.delete()
-                        }
+                        if (replacedCount > 0) {
+                            TxdBuilder.buildToFile(currentEntries, tempTxdFile)
 
-                        if (newBitmap != null) {
-                            TxdBuilder.replaceTexture(entry, newBitmap)
-                            replacedCount++
-                        }
-                    }
+                            val archive = _uiState.value.archive
+                            if (sourceImgEntry != null && archive != null) {
+                                archive.replace(sourceImgEntry, tempTxdFile)
 
-                    if (replacedCount > 0) {
-                        TxdBuilder.buildToFile(currentEntries, tempTxdFile)
+                                val imgOriginalPath = _uiState.value.originalPath
+                                if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                                    ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                                }
+                            }
 
-                        val archive = _uiState.value.archive
-                        if (sourceImgEntry != null && archive != null) {
-                            archive.replace(sourceImgEntry, tempTxdFile)
-
-                            val imgOriginalPath = _uiState.value.originalPath
-                            if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
-                                ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                            if (isShizukuTxd && originalPath != null) {
+                                ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
                             }
                         }
-
-                        if (isShizukuTxd && originalPath != null) {
-                            ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
-                        }
                     }
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
+            }
 
-                val updatedList = currentEntries.toList()
-                _uiState.update {
-                    it.copy(
-                        isTxdLoading = false,
-                        txdEntries = updatedList,
-                        statusMessage = "Berhasil mengganti $replacedCount tekstur secara otomatis!"
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isTxdLoading = false,
-                        errorMessage = "Gagal auto-replace tekstur: ${e.localizedMessage}"
-                    )
-                }
+            val updatedList = currentEntries.toList()
+            _uiState.update {
+                it.copy(
+                    isTxdLoading = false,
+                    txdEntries = updatedList,
+                    hasTxdUnsavedChanges = true,
+                    statusMessage = if (res.isSuccess) "Berhasil mengganti $replacedCount tekstur secara otomatis!" else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
             }
         }
     }

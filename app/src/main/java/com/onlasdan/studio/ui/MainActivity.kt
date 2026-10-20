@@ -4,7 +4,6 @@ import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -16,10 +15,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,7 +24,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,7 +39,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.core.ImgEntry
-import com.onlasdan.studio.core.ImgVersion
+import com.onlasdan.studio.process.AppProcess
+import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.ProcessStatus
+import com.onlasdan.studio.ui.framework.ArchiveEntryCard
+import com.onlasdan.studio.ui.framework.ArchiveScreen
+import com.onlasdan.studio.ui.framework.ContextualDockItem
+import com.onlasdan.studio.ui.framework.ContextualPillDock
+import com.onlasdan.studio.ui.sheets.AboutBottomSheet
+import com.onlasdan.studio.ui.sheets.ImgEntryBottomSheet
+import com.onlasdan.studio.ui.sheets.MoreActionsBottomSheet
+import com.onlasdan.studio.ui.sheets.ProcessDetailBottomSheet
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.ui.theme.SectionHeaderStyle
 import com.onlasdan.studio.ui.theme.SemanticColors
@@ -73,7 +79,6 @@ class MainActivity : ComponentActivity() {
             if (Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 viewModel.updatePermissionStatus()
             } else {
-                // Request Shizuku permission as soon as binder is received
                 Shizuku.requestPermission(ShizukuManager.SHIZUKU_REQUEST_CODE)
             }
         }
@@ -83,7 +88,7 @@ class MainActivity : ComponentActivity() {
         viewModel.updatePermissionStatus()
     }
 
-    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
         if (requestCode == ShizukuManager.SHIZUKU_REQUEST_CODE) {
             viewModel.updatePermissionStatus()
         }
@@ -247,7 +252,6 @@ class MainActivity : ComponentActivity() {
         val isSameUri = uri != null && curPath != null && uri.toString() == curPath
 
         if (isNewIntent && (isSamePath || isSameUri)) {
-            // Already showing this exact archive, focus window
             return
         }
 
@@ -273,21 +277,34 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: ImgToolViewModel) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
+    val currentProcess by DefaultProcessRepository.currentProcess.collectAsState()
     val recentFiles by AppSettings.getRecentFilesFlow(context).collectAsState(initial = emptyList())
 
-    var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
-    var txdSearchQuery by rememberSaveable { mutableStateOf("") }
-    var showQuickMenuSheet by rememberSaveable { mutableStateOf(false) }
+    // Tabs: "home", "archive", "txd"
     var activeDockTab by rememberSaveable { mutableStateOf(if (uiState.archive != null) "archive" else "home") }
-    var sheetEntryName by rememberSaveable { mutableStateOf<String?>(null) }
-    var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
+    var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
 
+    // Lazy list states
+    val archiveListState = rememberLazyListState()
+    val homeListState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Sub-sheets & Dialogs
+    var selectedImgEntryForSheet by remember { mutableStateOf<ImgEntry?>(null) }
+    var showMoreActionsSheet by rememberSaveable { mutableStateOf(false) }
+    var showQuickMenuSheet by rememberSaveable { mutableStateOf(false) }
+    var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
+    var showAboutSheet by rememberSaveable { mutableStateOf(false) }
+    var selectedProcessForDetail by remember { mutableStateOf<AppProcess?>(null) }
+    var showBusyProcessDialog by remember { mutableStateOf(false) }
+    var showUnsavedClosePrompt by remember { mutableStateOf(false) }
+
+    // Sub-operations dialogs / pickers
     var entryToRename by remember { mutableStateOf<ImgEntry?>(null) }
     var showRebuildDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
@@ -298,10 +315,8 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     var showAddFilePicker by remember { mutableStateOf(false) }
     var entryToReplace by remember { mutableStateOf<ImgEntry?>(null) }
     var showExtractSelectedPicker by remember { mutableStateOf(false) }
+    var showExtractAllPicker by remember { mutableStateOf(false) }
     var entryToExtract by remember { mutableStateOf<ImgEntry?>(null) }
-
-    val snackbarHostState = remember { SnackbarHostState() }
-    val listState = rememberLazyListState()
 
     LaunchedEffect(uiState.archive) {
         if (uiState.archive != null) {
@@ -315,28 +330,10 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         }
     }
 
-    BackHandler(enabled = isSearchExpanded || uiState.isSelecting || (activeDockTab == "txd" && uiState.isTxdViewerOpen) || (activeDockTab != "home" && uiState.archive == null)) {
-        when {
-            isSearchExpanded -> {
-                isSearchExpanded = false
-                viewModel.setSearchQuery("")
-            }
-            uiState.isSelecting -> {
-                viewModel.clearSelection()
-            }
-            activeDockTab == "txd" && uiState.isTxdViewerOpen -> {
-                viewModel.closeTxdViewer()
-                activeDockTab = if (uiState.archive != null) "archive" else "home"
-            }
-            activeDockTab != "home" -> {
-                activeDockTab = "home"
-            }
-        }
-    }
-
+    // Pagination for archive list
     val shouldLoadMore by remember {
         derivedStateOf {
-            val layoutInfo = listState.layoutInfo
+            val layoutInfo = archiveListState.layoutInfo
             val totalItems = layoutInfo.totalItemsCount
             val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             totalItems > 0 && lastVisible >= totalItems - 20
@@ -344,14 +341,14 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     }
 
     LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore) {
+        if (shouldLoadMore && uiState.hasMorePages) {
             viewModel.loadNextPage()
         }
     }
 
     LaunchedEffect(uiState.searchQuery, uiState.archive) {
         if (uiState.displayedEntries.isNotEmpty()) {
-            listState.scrollToItem(0)
+            archiveListState.scrollToItem(0)
         }
     }
 
@@ -366,405 +363,433 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         }
     }
 
-    // Permission launcher for MANAGE_EXTERNAL_STORAGE
+    // Storage permission launcher
     val manageStorageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
         viewModel.updatePermissionStatus()
     }
 
-    val isShizukuReady = remember { ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission() }
+    // Check if there is an active running process on current window
+    val isCurrentFileBusy = currentProcess != null && currentProcess?.status == ProcessStatus.RUNNING
 
-    val dockItems = listOf(
-        DockTabItem(
+    // BACK NAVIGATION RULES (Priority 1 -> 5)
+    val isAnySheetOpen = selectedImgEntryForSheet != null ||
+            showMoreActionsSheet ||
+            showQuickMenuSheet ||
+            showSettingsSheet ||
+            showAboutSheet ||
+            selectedProcessForDetail != null ||
+            showBusyProcessDialog ||
+            showUnsavedClosePrompt
+
+    val canHandleBack = isAnySheetOpen ||
+            isSearchExpanded ||
+            uiState.isSelecting ||
+            (isCurrentFileBusy && activeDockTab != "home") ||
+            activeDockTab != "home"
+
+    BackHandler(enabled = canHandleBack) {
+        when {
+            // Rule 1: Sheet terbuka -> tutup sheet
+            selectedProcessForDetail != null -> selectedProcessForDetail = null
+            selectedImgEntryForSheet != null -> selectedImgEntryForSheet = null
+            showMoreActionsSheet -> showMoreActionsSheet = false
+            showQuickMenuSheet -> showQuickMenuSheet = false
+            showSettingsSheet -> showSettingsSheet = false
+            showAboutSheet -> showAboutSheet = false
+            showBusyProcessDialog -> showBusyProcessDialog = false
+            showUnsavedClosePrompt -> showUnsavedClosePrompt = false
+
+            // Rule 2: Mode seleksi aktif / search aktif -> keluar seleksi / tutup search
+            isSearchExpanded -> {
+                isSearchExpanded = false
+                viewModel.setSearchQuery("")
+            }
+            uiState.isSelecting -> {
+                viewModel.clearSelection()
+            }
+
+            // Rule 3: Proses sedang berjalan -> Tampilkan dialog konfirmasi (JANGAN batalkan)
+            isCurrentFileBusy -> {
+                showBusyProcessDialog = true
+            }
+
+            // Rule 4: Navigasi hierarkis berkas
+            activeDockTab == "txd" -> {
+                if (uiState.activeTxdSourceEntry != null) {
+                    // TXD dibuka dari dalam IMG -> kembali ke IMG
+                    viewModel.closeTxdViewer()
+                    activeDockTab = "archive"
+                } else {
+                    // TXD mandiri -> kembali ke Beranda (berkas tetap di memori)
+                    activeDockTab = "home"
+                }
+            }
+            activeDockTab == "archive" -> {
+                // Dari IMG -> kembali ke Beranda (berkas tetap di memori)
+                activeDockTab = "home"
+            }
+            // Rule 5: Dari Home -> BackHandler disabled, keluar aplikasi
+        }
+    }
+
+    // DOCK ITEMS: HOME
+    val homeDockItems = listOf(
+        ContextualDockItem(
             id = "home",
             icon = Icons.Outlined.Home,
             contentDescription = "Beranda",
-            isSelected = (activeDockTab == "home"),
+            isSelected = true,
             onClick = {
-                activeDockTab = "home"
-                isSearchExpanded = false
+                coroutineScope.launch { homeListState.animateScrollToItem(0) }
             }
         ),
-        DockTabItem(
+        ContextualDockItem(
             id = "archive",
             icon = Icons.Outlined.FolderOpen,
             contentDescription = "Arsip IMG",
-            isSelected = (activeDockTab == "archive"),
+            showDotBadge = uiState.archive != null,
             onClick = {
-                activeDockTab = "archive"
+                if (uiState.archive != null) {
+                    activeDockTab = "archive"
+                } else {
+                    showOpenArchivePicker = true
+                }
             }
         ),
-        DockTabItem(
+        ContextualDockItem(
             id = "txd",
             icon = Icons.Outlined.Palette,
             contentDescription = "Tekstur TXD",
-            isSelected = (activeDockTab == "txd"),
+            showDotBadge = uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty(),
             onClick = {
-                activeDockTab = "txd"
+                if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
+                    activeDockTab = "txd"
+                } else {
+                    showOpenTxdPicker = true
+                }
             }
         ),
-        DockTabItem(
+        ContextualDockItem(
+            id = "recent",
+            icon = Icons.Outlined.History,
+            contentDescription = "Berkas terbaru",
+            onClick = {
+                coroutineScope.launch { homeListState.animateScrollToItem(2) }
+            }
+        ),
+        ContextualDockItem(
             id = "menu",
             icon = Icons.Outlined.MoreHoriz,
             contentDescription = "Menu aplikasi & opsi",
-            isSelected = showQuickMenuSheet,
             onClick = {
                 showQuickMenuSheet = true
             }
         )
     )
 
+    // DOCK ITEMS: IMG NORMAL
+    val archiveStandardDockItems = listOf(
+        ContextualDockItem(
+            id = "home",
+            icon = Icons.Outlined.Home,
+            contentDescription = "Kembali ke Beranda",
+            onClick = { activeDockTab = "home" }
+        ),
+        ContextualDockItem(
+            id = "search",
+            icon = Icons.Outlined.Search,
+            contentDescription = "Cari entri arsip",
+            isSelected = isSearchExpanded,
+            onClick = { isSearchExpanded = !isSearchExpanded }
+        ),
+        ContextualDockItem(
+            id = "add",
+            icon = Icons.Outlined.Add,
+            contentDescription = "Tambah berkas ke arsip",
+            onClick = { showAddFilePicker = true }
+        ),
+        ContextualDockItem(
+            id = "save",
+            icon = Icons.Outlined.Save,
+            contentDescription = "Simpan arsip IMG",
+            showDotBadge = uiState.hasUnsavedChanges,
+            isEnabled = uiState.hasUnsavedChanges,
+            onClick = { viewModel.rebuildArchive() }
+        ),
+        ContextualDockItem(
+            id = "more",
+            icon = Icons.Outlined.MoreHoriz,
+            contentDescription = "Opsi lainnya",
+            onClick = { showMoreActionsSheet = true }
+        )
+    )
+
+    // DOCK ITEMS: IMG SELECTION MODE
+    val archiveSelectionDockItems = listOf(
+        ContextualDockItem(
+            id = "export",
+            icon = Icons.Outlined.FileDownload,
+            contentDescription = "Ekspor berkas terpilih",
+            onClick = { showExtractSelectedPicker = true }
+        ),
+        ContextualDockItem(
+            id = "delete",
+            icon = Icons.Outlined.Delete,
+            contentDescription = "Hapus berkas terpilih",
+            onClick = { showDeleteSelectedDialog = true }
+        ),
+        ContextualDockItem(
+            id = "select_all",
+            icon = Icons.Outlined.Checklist,
+            contentDescription = "Pilih semua entri",
+            onClick = { viewModel.selectAll() }
+        ),
+        ContextualDockItem(
+            id = "cancel",
+            icon = Icons.Outlined.Close,
+            contentDescription = "Batalkan seleksi",
+            onClick = { viewModel.clearSelection() }
+        )
+    )
+
     Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            topBar = {
-                Surface(
-                    color = MaterialTheme.colorScheme.background,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isSearchExpanded && ((activeDockTab == "archive" && uiState.archive != null) || (activeDockTab == "txd" && (uiState.isTxdViewerOpen || uiState.activeTxdName != null)))) {
-                        // Expanding pill search bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = {
-                                isSearchExpanded = false
-                                if (activeDockTab == "archive") viewModel.setSearchQuery("") else txdSearchQuery = ""
-                            }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                    contentDescription = "Tutup pencarian",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            val currentQuery = if (activeDockTab == "archive") uiState.searchQuery else txdSearchQuery
-                            OutlinedTextField(
-                                value = currentQuery,
-                                onValueChange = {
-                                    if (activeDockTab == "archive") viewModel.setSearchQuery(it) else txdSearchQuery = it
-                                },
-                                placeholder = {
-                                    Text(if (activeDockTab == "archive") "Cari entri, misal cj.dff..." else "Cari tekstur, misal cj_face...")
-                                },
-                                leadingIcon = {
-                                    Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                },
-                                trailingIcon = {
-                                    if (currentQuery.isNotEmpty()) {
-                                        IconButton(onClick = {
-                                            if (activeDockTab == "archive") viewModel.setSearchQuery("") else txdSearchQuery = ""
-                                        }) {
-                                            Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
-                                        }
+        when (activeDockTab) {
+            "home" -> {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    HomeScreen(
+                        listState = homeListState,
+                        hasStoragePermission = uiState.hasStoragePermission,
+                        onGrantStorage = {
+                            manageStorageLauncher.launch(StorageHelper.getManageStorageIntent(context))
+                        },
+                        recentFiles = recentFiles,
+                        onOpenImg = { showOpenArchivePicker = true },
+                        onOpenTxd = { showOpenTxdPicker = true },
+                        onOpenRecent = { item ->
+                            WindowLauncher.open(
+                                context = context,
+                                filePath = item.path,
+                                fileType = item.type,
+                                isShizuku = item.isShizuku,
+                                onSingleWindowAction = {
+                                    if (item.type == LauncherFileType.IMG) {
+                                        viewModel.openArchiveFromPath(context, item.path, item.isShizuku)
+                                        activeDockTab = "archive"
+                                    } else {
+                                        viewModel.openStandaloneTxd(context, item.path, item.isShizuku)
+                                        activeDockTab = "txd"
                                     }
-                                },
-                                shape = CircleShape,
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(50.dp)
-                            )
-                        }
-                    } else {
-                        // Normal header for Home, Archive, and TXD
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 20.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            if (activeDockTab == "txd" && (uiState.isTxdViewerOpen || uiState.activeTxdName != null)) {
-                                IconButton(
-                                    onClick = {
-                                        viewModel.closeTxdViewer()
-                                        activeDockTab = if (uiState.archive != null) "archive" else "home"
-                                    },
-                                    modifier = Modifier.padding(end = 4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                        contentDescription = "Tutup editor TXD",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                val titleText = when (activeDockTab) {
-                                    "home" -> "ImgTxd Studio"
-                                    "archive" -> uiState.archive?.archiveName ?: "Arsip IMG"
-                                    else -> uiState.activeTxdName ?: "Tekstur TXD"
-                                }
-                                val subtitleText = when (activeDockTab) {
-                                    "home" -> "Editor arsip IMG & tekstur TXD"
-                                    "archive" -> if (uiState.archive != null)
-                                        "${uiState.archive?.version} • ${uiState.entries.size} file"
-                                    else
-                                        "Belum ada arsip terbuka"
-                                    else -> if (uiState.txdEntries.isNotEmpty())
-                                        "${uiState.txdEntries.size} tekstur RenderWare"
-                                    else
-                                        "Belum ada tekstur terbuka"
-                                }
-
-                                Text(
-                                    text = titleText,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontFamily = FontFamily.Serif,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = subtitleText,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = if ((activeDockTab == "archive" && uiState.archive != null) || (activeDockTab == "txd" && uiState.txdEntries.isNotEmpty())) FontFamily.Monospace else FontFamily.SansSerif,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (activeDockTab == "archive" && uiState.isShizukuBacked) {
-                                        AssistChip(
-                                            onClick = {},
-                                            shape = CircleShape,
-                                            label = {
-                                                Text(
-                                                    "Shizuku",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = SemanticColors.OnSuccessContainer
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.Outlined.Bolt,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(12.dp),
-                                                    tint = SemanticColors.Success
-                                                )
-                                            },
-                                            colors = AssistChipDefaults.assistChipColors(
-                                                containerColor = SemanticColors.SuccessContainer
-                                            ),
-                                            border = BorderStroke(1.dp, SemanticColors.Success.copy(alpha = 0.4f)),
-                                            modifier = Modifier.height(24.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                // Shizuku Status Icon Button
-                                IconButton(
-                                    onClick = {
-                                        if (!ShizukuManager.isShizukuAvailable()) {
-                                            Toast.makeText(context, "Shizuku service tidak terdeteksi. Buka aplikasi Shizuku terlebih dahulu.", Toast.LENGTH_LONG).show()
-                                        } else if (!ShizukuManager.hasPermission()) {
-                                            ShizukuManager.requestPermission()
-                                        } else {
-                                            Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                ) {
-                                    val tint = if (ShizukuManager.hasPermission()) SemanticColors.Success else SemanticColors.Warning
-                                    Icon(Icons.Outlined.Bolt, contentDescription = "Status koneksi Shizuku", tint = tint)
-                                }
-
-                                if (activeDockTab == "archive" && uiState.archive != null) {
-                                    IconButton(onClick = { isSearchExpanded = true }) {
-                                        Icon(Icons.Outlined.Search, contentDescription = "Cari entri arsip", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    IconButton(onClick = { showRebuildDialog = true }) {
-                                        Icon(Icons.Outlined.Build, contentDescription = "Rebuild dan rapikan arsip", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                } else if (activeDockTab == "txd" && uiState.txdEntries.isNotEmpty()) {
-                                    IconButton(onClick = { isSearchExpanded = true }) {
-                                        Icon(Icons.Outlined.Search, contentDescription = "Cari tekstur", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-
-                                IconButton(onClick = { showQuickMenuSheet = true }) {
-                                    Icon(Icons.Outlined.MoreHoriz, contentDescription = "Menu cepat & opsi", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = MaterialTheme.colorScheme.background
-        ) { padding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                when (activeDockTab) {
-                    "home" -> {
-                        HomeScreen(
-                            hasStoragePermission = uiState.hasStoragePermission,
-                            onGrantStorage = {
-                                manageStorageLauncher.launch(StorageHelper.getManageStorageIntent(context))
-                            },
-                            recentFiles = recentFiles,
-                            onOpenImg = { showOpenArchivePicker = true },
-                            onOpenTxd = { showOpenTxdPicker = true },
-                            onOpenRecent = { item ->
-                                WindowLauncher.open(
-                                    context = context,
-                                    filePath = item.path,
-                                    fileType = item.type,
-                                    isShizuku = item.isShizuku,
-                                    onSingleWindowAction = {
-                                        if (item.type == LauncherFileType.IMG) {
-                                            viewModel.openArchiveFromPath(context, item.path, item.isShizuku)
-                                            activeDockTab = "archive"
-                                        } else {
-                                            viewModel.openStandaloneTxd(context, item.path, item.isShizuku)
-                                            activeDockTab = "txd"
-                                        }
-                                    }
-                                )
-                            }
-                        )
-                    }
-                    "archive" -> {
-                        if (uiState.archive == null) {
-                            EmptyArchiveScreen(onOpenArchive = { showOpenArchivePicker = true })
-                        } else {
-                            ArchiveEntriesScreen(
-                                uiState = uiState,
-                                listState = listState,
-                                onToggleSelect = { viewModel.toggleSelection(it) },
-                                onShowOptions = { sheetEntryName = it.cleanName },
-                                onOpenTxd = {
-                                    viewModel.openTxdFromEntry(context, it)
-                                    activeDockTab = "txd"
                                 }
                             )
                         }
-                    }
-                    "txd" -> {
-                        if (uiState.isTxdViewerOpen || uiState.activeTxdName != null) {
-                            TxdEditorScreen(
-                                txdName = uiState.activeTxdName ?: "Tekstur TXD",
-                                textures = uiState.txdEntries,
-                                isLoading = uiState.isTxdLoading,
-                                statusMessage = uiState.statusMessage,
-                                errorMessage = uiState.errorMessage,
-                                onClose = {
-                                    viewModel.closeTxdViewer()
-                                    activeDockTab = if (uiState.archive != null) "archive" else "home"
-                                },
-                                onExportSingle = { entry, destDir ->
-                                    viewModel.exportSingleTexture(entry, destDir)
-                                },
-                                onExportAll = { destDir ->
-                                    viewModel.exportAllTextures(destDir)
-                                },
-                                onReplaceTexture = { entry, imagePath, isShizuku ->
-                                    viewModel.replaceTexture(context, entry, imagePath, isShizuku)
-                                },
-                                onAutoReplace = { matches, isShizuku ->
-                                    viewModel.autoReplaceTextures(context, matches, isShizuku)
-                                },
-                                onClearMessages = { viewModel.clearMessages() },
-                                showDock = false,
-                                externalSearchQuery = txdSearchQuery
-                            )
-                        } else {
-                            EmptyTxdScreen(onOpenTxd = { showOpenTxdPicker = true })
-                        }
-                    }
+                    )
+
+                    ContextualPillDock(
+                        items = homeDockItems,
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
                 }
             }
-        }
 
-        // Extended FAB Tambah Berkas (Only on archive tab when archive is loaded & not selecting)
-        if (activeDockTab == "archive" && uiState.archive != null && !uiState.isSelecting) {
-            ExtendedFloatingActionButton(
-                onClick = { showAddFilePicker = true },
-                icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
-                text = { Text("Tambah Berkas", fontWeight = FontWeight.SemiBold) },
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 20.dp, bottom = 96.dp)
-            )
-        }
+            "archive" -> {
+                val activeArchiveProcess = if (currentProcess?.targetFile == uiState.archive?.archiveName) currentProcess else null
 
-        // Floating Pill Dock
-        FloatingPillDock(
-            items = dockItems,
-            isSelectionMode = (activeDockTab == "archive" && uiState.isSelecting),
-            selectedCount = uiState.selectedEntries.size,
-            onExtractSelected = { showExtractSelectedPicker = true },
-            onDeleteSelected = { showDeleteSelectedDialog = true },
-            onCancelSelection = { viewModel.clearSelection() },
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+                ArchiveScreen(
+                    title = uiState.archive?.archiveName ?: "Arsip IMG",
+                    subtitle = if (uiState.archive != null)
+                        "${uiState.archive?.version?.name ?: "IMG"} • ${uiState.entries.size} file"
+                    else
+                        "Belum ada arsip terbuka",
+                    isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
+                    onShizukuClick = {
+                        if (!ShizukuManager.isShizukuAvailable()) {
+                            Toast.makeText(context, "Shizuku service tidak terdeteksi. Buka aplikasi Shizuku terlebih dahulu.", Toast.LENGTH_LONG).show()
+                        } else if (!ShizukuManager.hasPermission()) {
+                            ShizukuManager.requestPermission()
+                        } else {
+                            Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    items = uiState.displayedEntries,
+                    keyExtractor = { "${it.cleanName}_${it.offsetInSectors}" },
+                    listState = archiveListState,
+                    emptyTitle = "Belum Ada Arsip IMG Terbuka",
+                    emptyDescription = "Pilih berkas arsip .img untuk melihat dan mengelola entri model 3D dan tekstur game.",
+                    emptyActionLabel = "Buka IMG",
+                    onEmptyAction = { showOpenArchivePicker = true },
+                    isSearching = isSearchExpanded,
+                    searchQuery = uiState.searchQuery,
+                    searchPlaceholder = "Cari entri, misal cj.dff...",
+                    onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                    onCloseSearch = {
+                        isSearchExpanded = false
+                        viewModel.setSearchQuery("")
+                    },
+                    activeProcess = activeArchiveProcess,
+                    onProcessPillClick = {
+                        activeArchiveProcess?.let { selectedProcessForDetail = it }
+                    },
+                    dockContent = {
+                        ContextualPillDock(
+                            items = if (uiState.isSelecting) archiveSelectionDockItems else archiveStandardDockItems
+                        )
+                    },
+                    itemContent = { entry ->
+                        val isTxd = entry.cleanName.endsWith(".txd", ignoreCase = true)
+                        val icon = when {
+                            entry.cleanName.endsWith(".dff", ignoreCase = true) -> Icons.Outlined.ViewInAr
+                            entry.cleanName.endsWith(".txd", ignoreCase = true) -> Icons.Outlined.Image
+                            entry.cleanName.endsWith(".col", ignoreCase = true) -> Icons.Outlined.Shield
+                            entry.cleanName.endsWith(".ipl", ignoreCase = true) -> Icons.Outlined.Map
+                            else -> Icons.Outlined.Description
+                        }
+                        val sizeKb = entry.sizeInBytes / 1024
+
+                        ArchiveEntryCard(
+                            title = entry.cleanName,
+                            subtitle = "Sektor: ${entry.offsetInSectors} • ${entry.sizeInSectors} sek (~$sizeKb KB)",
+                            icon = icon,
+                            bitmap = null,
+                            isSelected = uiState.selectedEntries.contains(entry),
+                            isSelectionMode = uiState.isSelecting,
+                            onClick = {
+                                if (uiState.isSelecting) {
+                                    viewModel.toggleSelection(entry)
+                                } else {
+                                    selectedImgEntryForSheet = entry
+                                }
+                            },
+                            onLongClick = {
+                                viewModel.toggleSelection(entry)
+                            }
+                        )
+                    },
+                    snackbarHostState = snackbarHostState
+                )
+            }
+
+            "txd" -> {
+                val activeTxdProcess = if (currentProcess?.targetFile == (uiState.activeTxdName ?: "Tekstur TXD")) currentProcess else null
+
+                TxdEditorScreen(
+                    txdName = uiState.activeTxdName ?: "Tekstur TXD",
+                    textures = uiState.txdEntries,
+                    isLoading = uiState.isTxdLoading,
+                    statusMessage = uiState.statusMessage,
+                    errorMessage = uiState.errorMessage,
+                    hasUnsavedChanges = uiState.hasTxdUnsavedChanges,
+                    activeProcess = activeTxdProcess,
+                    onSaveTxd = {
+                        // In single window mode, TXD saved inside IMG is rebuilt automatically
+                    },
+                    onProcessClick = {
+                        activeTxdProcess?.let { selectedProcessForDetail = it }
+                    },
+                    onClose = {
+                        viewModel.closeTxdViewer()
+                        activeDockTab = if (uiState.archive != null) "archive" else "home"
+                    },
+                    onExportSingle = { entry, destDir ->
+                        viewModel.exportSingleTexture(entry, destDir)
+                    },
+                    onExportAll = { destDir ->
+                        viewModel.exportAllTextures(destDir)
+                    },
+                    onReplaceTexture = { entry, imagePath, isShizuku ->
+                        viewModel.replaceTexture(context, entry, imagePath, isShizuku)
+                    },
+                    onAutoReplace = { matches, isShizuku ->
+                        viewModel.autoReplaceTextures(context, matches, isShizuku)
+                    },
+                    onClearMessages = { viewModel.clearMessages() },
+                    showDock = true,
+                    onOpenHome = { activeDockTab = "home" },
+                    onOpenImg = { activeDockTab = "archive" },
+                    onOpenWindowMode = { showSettingsSheet = true },
+                    onOpenSettings = { showSettingsSheet = true },
+                    onOpenAbout = { showAboutSheet = true }
+                )
+            }
+        }
     }
 
     // --- Bottom Sheets & Dialogs ---
 
-    // File Options Bottom Sheet
-    sheetEntryName?.let { name ->
-        val selectedEntry = uiState.entries.find { it.cleanName == name }
-        if (selectedEntry != null) {
-            FileOptionsBottomSheet(
-                entry = selectedEntry,
-                onDismissRequest = { sheetEntryName = null },
-                onOpenTxd = if (selectedEntry.cleanName.endsWith(".txd", ignoreCase = true)) {
-                    { viewModel.openTxdFromEntry(context, selectedEntry) }
-                } else null,
-                onExtract = { entryToExtract = selectedEntry },
-                onReplace = { entryToReplace = selectedEntry },
-                onRename = { entryToRename = selectedEntry },
-                onDelete = {
-                    viewModel.clearSelection()
-                    viewModel.toggleSelection(selectedEntry)
-                    showDeleteSelectedDialog = true
+    // 1. Img Entry Bottom Sheet (Tap Entri IMG)
+    selectedImgEntryForSheet?.let { entry ->
+        ImgEntryBottomSheet(
+            entry = entry,
+            onDismissRequest = { selectedImgEntryForSheet = null },
+            onOpenTxd = if (entry.cleanName.endsWith(".txd", ignoreCase = true)) {
+                {
+                    selectedImgEntryForSheet = null
+                    viewModel.openTxdFromEntry(context, entry)
+                    activeDockTab = "txd"
                 }
-            )
-        }
+            } else null,
+            onExtract = {
+                entryToExtract = entry
+                selectedImgEntryForSheet = null
+            },
+            onReplace = {
+                entryToReplace = entry
+                selectedImgEntryForSheet = null
+            },
+            onRename = {
+                entryToRename = entry
+                selectedImgEntryForSheet = null
+            },
+            onDelete = {
+                selectedImgEntryForSheet = null
+                viewModel.clearSelection()
+                viewModel.toggleSelection(entry)
+                showDeleteSelectedDialog = true
+            }
+        )
     }
 
-    // Quick Menu Bottom Sheet
-    if (showQuickMenuSheet) {
-        QuickMenuBottomSheet(
-            onDismissRequest = { showQuickMenuSheet = false },
-            hasActiveArchive = uiState.archive != null,
-            isShizukuActive = isShizukuReady,
-            onOpenArchive = { showOpenArchivePicker = true },
-            onOpenTxd = { showOpenTxdPicker = true },
-            onAddFile = { showAddFilePicker = true },
-            onRebuildArchive = { showRebuildDialog = true },
-            onSelectAll = { viewModel.selectAll() },
-            onOpenSettings = { showSettingsSheet = true },
-            onRequestShizuku = {
+    // 2. Sheet "Lainnya" untuk IMG
+    if (showMoreActionsSheet) {
+        MoreActionsBottomSheet(
+            onDismissRequest = { showMoreActionsSheet = false },
+            fileName = uiState.archive?.archiveName ?: "Arsip IMG",
+            isTxd = false,
+            isFileBusy = isCurrentFileBusy,
+            onExportAll = {
+                showMoreActionsSheet = false
+                showExtractAllPicker = true
+            },
+            onRenameFile = null,
+            onRebuildArchive = {
+                showMoreActionsSheet = false
+                showRebuildDialog = true
+            },
+            onOpenWindowMode = {
+                showMoreActionsSheet = false
+                showSettingsSheet = true
+            },
+            onOpenSettings = {
+                showMoreActionsSheet = false
+                showSettingsSheet = true
+            },
+            onOpenAbout = {
+                showMoreActionsSheet = false
+                showAboutSheet = true
+            },
+            onCloseFile = {
+                showMoreActionsSheet = false
+                if (uiState.hasUnsavedChanges) {
+                    showUnsavedClosePrompt = true
+                } else {
+                    viewModel.closeArchive()
+                    activeDockTab = "home"
+                }
+            },
+            onOpenShizuku = {
                 if (!ShizukuManager.isShizukuAvailable()) {
-                    Toast.makeText(context, "Shizuku service tidak terdeteksi. Buka aplikasi Shizuku terlebih dahulu.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Shizuku service tidak terdeteksi.", Toast.LENGTH_SHORT).show()
                 } else if (!ShizukuManager.hasPermission()) {
                     ShizukuManager.requestPermission()
                 } else {
@@ -774,17 +799,144 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // Settings Bottom Sheet
+    // 3. Quick Menu Bottom Sheet (Dari Home)
+    if (showQuickMenuSheet) {
+        QuickMenuBottomSheet(
+            onDismissRequest = { showQuickMenuSheet = false },
+            hasActiveArchive = uiState.archive != null,
+            isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
+            onOpenArchive = { showOpenArchivePicker = true },
+            onOpenTxd = { showOpenTxdPicker = true },
+            onAddFile = { showAddFilePicker = true },
+            onRebuildArchive = { showRebuildDialog = true },
+            onSelectAll = { viewModel.selectAll() },
+            onOpenSettings = { showSettingsSheet = true },
+            onRequestShizuku = {
+                if (!ShizukuManager.isShizukuAvailable()) {
+                    Toast.makeText(context, "Shizuku service tidak terdeteksi.", Toast.LENGTH_SHORT).show()
+                } else if (!ShizukuManager.hasPermission()) {
+                    ShizukuManager.requestPermission()
+                } else {
+                    Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    // 4. Settings Bottom Sheet
     if (showSettingsSheet) {
         SettingsBottomSheet(onDismissRequest = { showSettingsSheet = false })
     }
 
-    // --- In-App File Pickers ---
+    // 5. About Bottom Sheet
+    if (showAboutSheet) {
+        AboutBottomSheet(onDismissRequest = { showAboutSheet = false })
+    }
 
-    // 1. Open IMG Archive Picker
+    // 6. Process Detail Bottom Sheet
+    selectedProcessForDetail?.let { proc ->
+        ProcessDetailBottomSheet(
+            process = proc,
+            onDismissRequest = { selectedProcessForDetail = null },
+            onCancelProcess = { id -> DefaultProcessRepository.cancelProcess(id) }
+        )
+    }
+
+    // 7. Busy Process Dialog (Back Navigation Rule 3)
+    if (showBusyProcessDialog) {
+        AlertDialog(
+            onDismissRequest = { showBusyProcessDialog = false },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = {
+                Text(
+                    text = "Proses Sedang Berjalan",
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBusyProcessDialog = false
+                        activeDockTab = "home"
+                    },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("Lanjut di Latar Belakang", fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showBusyProcessDialog = false },
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Text("Tetap di Sini", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+
+    // 8. Unsaved Close Prompt Dialog
+    if (showUnsavedClosePrompt) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedClosePrompt = false },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text("Tutup Tanpa Menyimpan?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Arsip ini memiliki perubahan yang belum direbuild/disimpan ke file. Menutup sekarang akan membatalkan perubahan yang belum tersimpan.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showUnsavedClosePrompt = false
+                        viewModel.closeArchive()
+                        activeDockTab = "home"
+                    },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text("Tutup Saja", fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showUnsavedClosePrompt = false },
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
+    // --- File Pickers ---
+
+    // Open IMG Archive Picker
     if (showOpenArchivePicker) {
         FilePickerDialog(
-            title = "Buka Archive IMG",
+            title = "Buka Arsip IMG",
             mode = PickerMode.OPEN_IMG,
             onDismissRequest = { showOpenArchivePicker = false },
             onFileSelected = { path, isShizuku ->
@@ -802,10 +954,32 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // 2. Add File Picker
+    // Open TXD Picker
+    if (showOpenTxdPicker) {
+        FilePickerDialog(
+            title = "Buka Berkas Tekstur (TXD)",
+            mode = PickerMode.OPEN_TXD,
+            onDismissRequest = { showOpenTxdPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showOpenTxdPicker = false
+                WindowLauncher.open(
+                    context = context,
+                    filePath = path,
+                    fileType = LauncherFileType.TXD,
+                    isShizuku = isShizuku,
+                    onSingleWindowAction = {
+                        viewModel.openStandaloneTxd(context, path, isShizuku)
+                        activeDockTab = "txd"
+                    }
+                )
+            }
+        )
+    }
+
+    // Add File Picker
     if (showAddFilePicker) {
         FilePickerDialog(
-            title = "Pilih File untuk Ditambahkan",
+            title = "Pilih Berkas untuk Ditambahkan",
             mode = PickerMode.PICK_FILE,
             onDismissRequest = { showAddFilePicker = false },
             onFileSelected = { path, isShizuku ->
@@ -815,7 +989,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // 3. Replace File Picker
+    // Replace File Picker
     entryToReplace?.let { entry ->
         FilePickerDialog(
             title = "Ganti ${entry.cleanName}",
@@ -831,7 +1005,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // 4. Extract Single Entry Picker
+    // Extract Single Entry Picker
     entryToExtract?.let { entry ->
         FilePickerDialog(
             title = "Ekstrak ${entry.cleanName} ke Folder...",
@@ -852,10 +1026,10 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // 5. Extract Selected Entries Picker
+    // Extract Selected Entries Picker
     if (showExtractSelectedPicker) {
         FilePickerDialog(
-            title = "Ekstrak ${uiState.selectedEntries.size} File ke Folder...",
+            title = "Ekstrak ${uiState.selectedEntries.size} Berkas ke Folder...",
             mode = PickerMode.SELECT_FOLDER,
             onDismissRequest = { showExtractSelectedPicker = false },
             onFileSelected = { path, isShizuku ->
@@ -869,29 +1043,24 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // 6. Standalone TXD Picker
-    if (showOpenTxdPicker) {
+    // Extract All Entries Picker
+    if (showExtractAllPicker) {
         FilePickerDialog(
-            title = "Buka File Tekstur (TXD)",
-            mode = PickerMode.OPEN_TXD,
-            onDismissRequest = { showOpenTxdPicker = false },
+            title = "Ekstrak Seluruh Berkas Arsip ke Folder...",
+            mode = PickerMode.SELECT_FOLDER,
+            onDismissRequest = { showExtractAllPicker = false },
             onFileSelected = { path, isShizuku ->
-                showOpenTxdPicker = false
-                WindowLauncher.open(
-                    context = context,
-                    filePath = path,
-                    fileType = LauncherFileType.TXD,
+                showExtractAllPicker = false
+                viewModel.extractAll(
+                    destinationDir = File(path),
                     isShizuku = isShizuku,
-                    onSingleWindowAction = {
-                        viewModel.openStandaloneTxd(context, path, isShizuku)
-                        activeDockTab = "txd"
-                    }
+                    destRestrictedPath = if (isShizuku) path else null
                 )
             }
         )
     }
 
-    // Rename Dialog (Small AlertDialog: 28dp)
+    // Rename Dialog (28dp)
     entryToRename?.let { entry ->
         var newNameText by remember { mutableStateOf(entry.cleanName) }
         AlertDialog(
@@ -937,7 +1106,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // Rebuild Confirm Dialog (Small AlertDialog: 28dp)
+    // Rebuild Confirm Dialog (28dp)
     if (showRebuildDialog) {
         AlertDialog(
             onDismissRequest = { showRebuildDialog = false },
@@ -947,8 +1116,8 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             text = {
                 Text(
                     "Rebuild akan menyusun ulang seluruh entri secara berurutan dan membersihkan ruang sektor kosong yang terfragmentasi.\n\n" +
-                    (if (uiState.isShizukuBacked) "Perubahan akan otomatis disimpan kembali ke folder game via Shizuku.\n\n" else "") +
-                    "Pastikan arsip memiliki cadangan sebelum memulai rebuild.",
+                            (if (uiState.isShizukuBacked) "Perubahan akan otomatis disimpan kembali ke folder game via Shizuku.\n\n" else "") +
+                            "Pastikan arsip memiliki cadangan sebelum memulai rebuild.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -976,7 +1145,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
-    // Delete Selected Confirm Dialog (Small AlertDialog: 28dp)
+    // Delete Selected Confirm Dialog (28dp)
     if (showDeleteSelectedDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteSelectedDialog = false },
@@ -1014,123 +1183,9 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun EntryRow(
-    entry: ImgEntry,
-    isSelectedProvider: () -> Boolean,
-    isSelectionMode: Boolean,
-    onToggleSelect: () -> Unit,
-    onShowOptions: () -> Unit,
-    onOpenTxd: (() -> Unit)? = null
-) {
-    val isSelected = isSelectedProvider()
-    val isTxd = entry.cleanName.endsWith(".txd", ignoreCase = true) && onOpenTxd != null
-
-    val icon = when {
-        entry.cleanName.endsWith(".dff", ignoreCase = true) -> Icons.Outlined.ViewInAr
-        entry.cleanName.endsWith(".txd", ignoreCase = true) -> Icons.Outlined.Image
-        entry.cleanName.endsWith(".col", ignoreCase = true) -> Icons.Outlined.Shield
-        entry.cleanName.endsWith(".ipl", ignoreCase = true) -> Icons.Outlined.Map
-        else -> Icons.Outlined.Description
-    }
-
-    val sizeKb = entry.sizeInBytes / 1024
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = {
-                    if (isSelectionMode) {
-                        onToggleSelect()
-                    } else if (isTxd) {
-                        onOpenTxd?.invoke()
-                    } else {
-                        onShowOptions()
-                    }
-                },
-                onLongClick = { onToggleSelect() }
-            ),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-            else
-                MaterialTheme.colorScheme.surfaceContainer
-        ),
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (isSelected)
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-            else
-                MaterialTheme.colorScheme.outlineVariant
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            if (isSelectionMode) {
-                Checkbox(
-                    checked = isSelected,
-                    onCheckedChange = { onToggleSelect() },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = MaterialTheme.colorScheme.primary,
-                        checkmarkColor = MaterialTheme.colorScheme.onPrimary,
-                        uncheckedColor = MaterialTheme.colorScheme.outline
-                    )
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = if (isTxd) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.cleanName,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Medium,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "Sektor: ${entry.offsetInSectors} • ${entry.sizeInSectors} sek (~$sizeKb KB)",
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            IconButton(onClick = onShowOptions) {
-                Icon(
-                    imageVector = Icons.Outlined.MoreVert,
-                    contentDescription = "Opsi berkas ${entry.cleanName}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun HomeScreen(
+    listState: androidx.compose.foundation.lazy.LazyListState,
     hasStoragePermission: Boolean,
     onGrantStorage: () -> Unit,
     recentFiles: List<RecentFileItem>,
@@ -1139,6 +1194,7 @@ private fun HomeScreen(
     onOpenRecent: (RecentFileItem) -> Unit
 ) {
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -1160,13 +1216,13 @@ private fun HomeScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Akses Semua File Diperlukan",
+                                text = "Akses Semua Berkas Diperlukan",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
                             Text(
-                                text = "Android memerlukan izin penyimpanan untuk memodifikasi file game secara langsung.",
+                                text = "Android memerlukan izin penyimpanan untuk memodifikasi berkas game secara langsung.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
@@ -1387,259 +1443,6 @@ private fun RecentFileRow(item: RecentFileItem, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EmptyArchiveScreen(onOpenArchive: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) {
-            Column(
-                modifier = Modifier.padding(28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.FolderOpen,
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Text(
-                    text = "Belum Ada Arsip IMG Terbuka",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Pilih berkas arsip .img untuk melihat dan mengelola entri model 3D dan tekstur game.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onOpenArchive,
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
-                ) {
-                    Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Buka IMG", fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmptyTxdScreen(onOpenTxd: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) {
-            Column(
-                modifier = Modifier.padding(28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Palette,
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                Text(
-                    text = "Belum Ada Tekstur TXD Terbuka",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Buka berkas .txd untuk melihat gambar tekstur, ekspor ke format PNG, atau mengganti gambar mod game.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(4.dp))
-                Button(
-                    onClick = onOpenTxd,
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
-                ) {
-                    Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Buka TXD", fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ArchiveEntriesScreen(
-    uiState: ImgToolUiState,
-    listState: androidx.compose.foundation.lazy.LazyListState,
-    onToggleSelect: (ImgEntry) -> Unit,
-    onShowOptions: (ImgEntry) -> Unit,
-    onOpenTxd: (ImgEntry) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Loading / Progress bar
-        if (uiState.isLoading) {
-            if (uiState.progress != null) {
-                val (current, total) = uiState.progress!!
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    LinearProgressIndicator(
-                        progress = { if (total > 0) current.toFloat() / total else 0f },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(CircleShape),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "${uiState.statusMessage ?: "Memproses..."} ($current / $total)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                )
-            }
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            item(key = "archive_header_info", contentType = "header_info") {
-                val total = uiState.filteredEntries.size
-                val shown = uiState.displayedEntries.size
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (uiState.searchQuery.isNotBlank()) "Hasil Pencarian" else "Daftar Berkas",
-                        fontFamily = FontFamily.Serif,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = if (total == 0) "Tidak ada entri"
-                        else if (shown < total) "Menampilkan $shown dari $total entri"
-                        else "Total $total entri",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-            }
-
-            items(
-                items = uiState.displayedEntries,
-                key = { "${it.cleanName}_${it.offsetInSectors}" },
-                contentType = { "img_entry" }
-            ) { entry ->
-                EntryRow(
-                    entry = entry,
-                    isSelectedProvider = { uiState.selectedEntries.contains(entry) },
-                    isSelectionMode = uiState.isSelecting,
-                    onToggleSelect = { onToggleSelect(entry) },
-                    onShowOptions = { onShowOptions(entry) },
-                    onOpenTxd = { onOpenTxd(entry) }
-                )
-            }
-
-            if (uiState.hasMorePages) {
-                item(key = "pagination_loader", contentType = "loader") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "Memuat entri (${uiState.displayedEntries.size} / ${uiState.filteredEntries.size})...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun TamperedScreen() {
     BackHandler {
         AppIntegrity.terminate()
@@ -1687,8 +1490,8 @@ fun TamperedScreen() {
                     )
                     Text(
                         text = "Aplikasi ini mendeteksi perubahan nama paket (repackaging) atau modifikasi kode yang tidak sah. " +
-                               "Demi integritas sistem dan keamanan file game Anda, ImgTxd Studio tidak diizinkan berjalan dalam kondisi yang telah diubah.\n\n" +
-                               "Aplikasi akan otomatis ditutup.",
+                                "Demi integritas sistem dan keamanan berkas game Anda, ImgTxd Studio tidak diizinkan berjalan dalam kondisi yang telah diubah.\n\n" +
+                                "Aplikasi akan otomatis ditutup.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

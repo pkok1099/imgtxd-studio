@@ -96,6 +96,7 @@ class TxdEditorActivity : ComponentActivity() {
                             isLoading = uiState.isLoading || uiState.isSaving,
                             statusMessage = uiState.statusMessage,
                             errorMessage = uiState.errorMessage,
+                            hasUnsavedChanges = uiState.hasUnsavedChanges,
                             onClose = { finish() },
                             onExportSingle = { entry, destDir ->
                                 viewModel.exportSingleTexture(entry, destDir)
@@ -111,7 +112,9 @@ class TxdEditorActivity : ComponentActivity() {
                             },
                             onClearMessages = {
                                 viewModel.clearMessages()
-                            }
+                            },
+                            showDock = true,
+                            onOpenHome = { finish() }
                         )
 
                         // Unsaved Changes Prompt Dialog on New File Request
