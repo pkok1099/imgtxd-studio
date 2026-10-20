@@ -1,12 +1,17 @@
 package com.onlasdan.studio.ui
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.onlasdan.studio.core.ImgArchive
 import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.core.ImgVersion
+import com.onlasdan.studio.txd.TxdBuilder
+import com.onlasdan.studio.txd.TxdEntry
+import com.onlasdan.studio.txd.TxdParser
 import com.onlasdan.studio.util.ShizukuManager
 import com.onlasdan.studio.util.StorageHelper
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 data class ImgToolUiState(
     val archive: ImgArchive? = null,
@@ -34,7 +40,18 @@ data class ImgToolUiState(
     val errorMessage: String? = null,
     val hasStoragePermission: Boolean = false,
     val originalPath: String? = null,
-    val isShizukuBacked: Boolean = false
+    val isShizukuBacked: Boolean = false,
+
+    // TXD Studio States
+    val isTxdViewerOpen: Boolean = false,
+    val txdEntries: List<TxdEntry> = emptyList(),
+    val activeTxdName: String? = null,
+    val activeTxdSourceEntry: ImgEntry? = null,
+    val activeTxdTempFile: File? = null,
+    val activeTxdOriginalPath: String? = null,
+    val isTxdShizuku: Boolean = false,
+    val selectedTxdEntry: TxdEntry? = null,
+    val isTxdLoading: Boolean = false
 ) {
     val hasMorePages: Boolean
         get() = displayedEntries.size < filteredEntries.size
@@ -491,6 +508,243 @@ class ImgToolViewModel : ViewModel() {
                         isLoading = false,
                         progress = null,
                         errorMessage = "Rebuild failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    // --- TXD Studio Integration ---
+
+    fun openTxdFromEntry(context: Context, imgEntry: ImgEntry) {
+        val archive = _uiState.value.archive ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, statusMessage = "Mengekstrak dan membaca ${imgEntry.cleanName}...") }
+            try {
+                val tempTxdFile = File(context.cacheDir, "opened_txd_" + imgEntry.cleanName)
+                withContext(Dispatchers.IO) {
+                    archive.extract(imgEntry, tempTxdFile)
+                }
+
+                val parser = withContext(Dispatchers.IO) {
+                    TxdParser.parse(tempTxdFile)
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        isTxdViewerOpen = true,
+                        txdEntries = parser.textures,
+                        activeTxdName = imgEntry.cleanName,
+                        activeTxdSourceEntry = imgEntry,
+                        activeTxdTempFile = tempTxdFile,
+                        activeTxdOriginalPath = null,
+                        isTxdShizuku = false,
+                        selectedTxdEntry = parser.textures.firstOrNull(),
+                        statusMessage = "Berhasil memuat ${parser.textures.size} tekstur dari ${imgEntry.cleanName}"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = "Gagal membaca TXD: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun openStandaloneTxd(context: Context, path: String, isShizuku: Boolean) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, statusMessage = "Membuka file TXD...") }
+            try {
+                val txdFile = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
+                    val temp = File(context.cacheDir, "opened_standalone_" + File(path).name)
+                    val ok = withContext(Dispatchers.IO) {
+                        ShizukuManager.copyToLocal(path, temp)
+                    }
+                    if (!ok) throw IOException("Gagal menyalin file dari Shizuku: $path")
+                    temp
+                } else {
+                    File(path)
+                }
+
+                val parser = withContext(Dispatchers.IO) {
+                    TxdParser.parse(txdFile)
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        isTxdViewerOpen = true,
+                        txdEntries = parser.textures,
+                        activeTxdName = File(path).name,
+                        activeTxdSourceEntry = null,
+                        activeTxdTempFile = txdFile,
+                        activeTxdOriginalPath = path,
+                        isTxdShizuku = isShizuku,
+                        selectedTxdEntry = parser.textures.firstOrNull(),
+                        statusMessage = "Berhasil memuat ${parser.textures.size} tekstur dari ${File(path).name}"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = "Gagal membuka TXD: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectTxdEntry(entry: TxdEntry?) {
+        _uiState.update { it.copy(selectedTxdEntry = entry) }
+    }
+
+    fun closeTxdViewer() {
+        val temp = _uiState.value.activeTxdTempFile
+        try {
+            if (_uiState.value.activeTxdSourceEntry != null && temp != null && temp.exists()) {
+                temp.delete()
+            }
+        } catch (ignored: Throwable) {}
+
+        _uiState.update {
+            it.copy(
+                isTxdViewerOpen = false,
+                txdEntries = emptyList(),
+                activeTxdName = null,
+                activeTxdSourceEntry = null,
+                activeTxdTempFile = null,
+                activeTxdOriginalPath = null,
+                selectedTxdEntry = null
+            )
+        }
+    }
+
+    fun exportSingleTexture(entry: TxdEntry, destinationDir: File) {
+        val bitmap = entry.bitmap ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true) }
+            try {
+                withContext(Dispatchers.IO) {
+                    destinationDir.mkdirs()
+                    val targetFile = File(destinationDir, "${entry.name}.png")
+                    targetFile.outputStream().use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        statusMessage = "Tekstur diekspor ke ${destinationDir.name}/${entry.name}.png"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Gagal ekspor tekstur: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun exportAllTextures(destinationDir: File) {
+        val list = _uiState.value.txdEntries
+        if (list.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true) }
+            try {
+                var exported = 0
+                withContext(Dispatchers.IO) {
+                    destinationDir.mkdirs()
+                    for (entry in list) {
+                        val bmp = entry.bitmap ?: continue
+                        val targetFile = File(destinationDir, "${entry.name}.png")
+                        targetFile.outputStream().use { out ->
+                            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        }
+                        exported++
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        statusMessage = "Berhasil mengekspor $exported tekstur ke ${destinationDir.absolutePath}"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Gagal ekspor semua tekstur: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun replaceTexture(context: Context, targetEntry: TxdEntry, imagePath: String, isShizuku: Boolean) {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val currentEntries = _uiState.value.txdEntries
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true) }
+            try {
+                withContext(Dispatchers.IO) {
+                    val imageFile = if (isShizuku || ShizukuManager.isRestrictedPath(imagePath)) {
+                        val tmp = File(context.cacheDir, "replace_img_tmp_" + File(imagePath).name)
+                        ShizukuManager.copyToLocal(imagePath, tmp)
+                        tmp
+                    } else {
+                        File(imagePath)
+                    }
+
+                    val newBitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
+                        ?: throw IOException("Gagal membaca file gambar: ${imageFile.name}")
+
+                    if (imageFile != File(imagePath)) {
+                        imageFile.delete()
+                    }
+
+                    TxdBuilder.replaceTexture(targetEntry, newBitmap)
+                    TxdBuilder.buildToFile(currentEntries, tempTxdFile)
+
+                    val archive = _uiState.value.archive
+                    if (sourceImgEntry != null && archive != null) {
+                        archive.replace(sourceImgEntry, tempTxdFile)
+
+                        val imgOriginalPath = _uiState.value.originalPath
+                        if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                            ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                        }
+                    }
+
+                    if (isShizukuTxd && originalPath != null) {
+                        ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
+                    }
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        selectedTxdEntry = targetEntry,
+                        statusMessage = "Tekstur ${targetEntry.name} berhasil diganti!"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Gagal mengganti tekstur: ${e.localizedMessage}"
                     )
                 }
             }

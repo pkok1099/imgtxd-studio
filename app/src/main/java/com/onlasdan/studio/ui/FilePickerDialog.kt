@@ -36,7 +36,9 @@ import java.io.File
 
 enum class PickerMode {
     OPEN_IMG,
+    OPEN_TXD,
     PICK_FILE,
+    PICK_FOLDER,
     SELECT_FOLDER
 }
 
@@ -197,8 +199,11 @@ fun FilePickerDialog(
                     PickerMode.OPEN_IMG -> items.filter {
                         it.isDirectory || it.name.endsWith(".img", ignoreCase = true) || it.name.endsWith(".dir", ignoreCase = true)
                     }
+                    PickerMode.OPEN_TXD -> items.filter {
+                        it.isDirectory || it.name.endsWith(".txd", ignoreCase = true)
+                    }
                     PickerMode.PICK_FILE -> items
-                    PickerMode.SELECT_FOLDER -> items.filter { it.isDirectory }
+                    PickerMode.PICK_FOLDER, PickerMode.SELECT_FOLDER -> items.filter { it.isDirectory }
                 }
 
                 fileItems = filtered.sortedWith(compareBy<UnifiedFileItem> { !it.isDirectory }.thenBy { it.name.lowercase() })
@@ -550,7 +555,7 @@ fun FilePickerDialog(
                 }
 
                 // If folder picker mode
-                if (mode == PickerMode.SELECT_FOLDER) {
+                if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER) {
                     HorizontalDivider()
                     Row(
                         modifier = Modifier

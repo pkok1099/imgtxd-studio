@@ -140,6 +140,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
 
     // In-App File Picker Dialog States
     var showOpenArchivePicker by remember { mutableStateOf(false) }
+    var showOpenTxdPicker by remember { mutableStateOf(false) }
     var showAddFilePicker by remember { mutableStateOf(false) }
     var entryToReplace by remember { mutableStateOf<ImgEntry?>(null) }
     var showExtractSelectedPicker by remember { mutableStateOf(false) }
@@ -263,6 +264,11 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                                 Icon(Icons.Default.Close, contentDescription = "Clear Selection")
                             }
                         }
+                    }
+
+                    // Open TXD button (Standalone Texture Viewer)
+                    IconButton(onClick = { showOpenTxdPicker = true }) {
+                        Icon(Icons.Default.Palette, contentDescription = "Buka File TXD")
                     }
 
                     // Open archive button (In-App File Explorer)
@@ -432,23 +438,34 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                             )
                             Spacer(Modifier.height(16.dp))
                             Text(
-                                text = "No Archive Opened",
+                                text = "GTA Img & TXD Studio",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "Open a GTA .img archive (VER1 or VER2). With Shizuku, you can access Android/data game folders directly!",
+                                text = "Buka arsip game GTA .img atau file tekstur .txd secara mandiri. Dengan Shizuku, Anda dapat memodifikasi file game di Android/data secara langsung tanpa root!",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(Modifier.height(20.dp))
-                            Button(
-                                onClick = { showOpenArchivePicker = true }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Icon(Icons.Default.FileOpen, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Pilih File IMG")
+                                Button(
+                                    onClick = { showOpenArchivePicker = true }
+                                ) {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Buka IMG")
+                                }
+                                OutlinedButton(
+                                    onClick = { showOpenTxdPicker = true }
+                                ) {
+                                    Icon(Icons.Default.Palette, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Buka TXD")
+                                }
                             }
                         }
                     }
@@ -503,7 +520,8 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                             onExtract = { entryToExtract = entry },
                             onReplace = { entryToReplace = entry },
                             onRename = { entryToRename = entry },
-                            onDelete = { viewModel.deleteSelected() }
+                            onDelete = { viewModel.deleteSelected() },
+                            onOpenTxd = { viewModel.openTxdFromEntry(context, entry) }
                         )
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                     }
@@ -620,6 +638,38 @@ fun MainScreen(viewModel: ImgToolViewModel) {
         )
     }
 
+    // 6. Standalone TXD Picker
+    if (showOpenTxdPicker) {
+        FilePickerDialog(
+            title = "Buka File Tekstur (TXD)",
+            mode = PickerMode.OPEN_TXD,
+            onDismissRequest = { showOpenTxdPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showOpenTxdPicker = false
+                viewModel.openStandaloneTxd(context, path, isShizuku)
+            }
+        )
+    }
+
+    // 7. TXD Texture Viewer Dialog
+    if (uiState.isTxdViewerOpen) {
+        TxdViewerDialog(
+            txdName = uiState.activeTxdName ?: "Tekstur TXD",
+            textures = uiState.txdEntries,
+            isLoading = uiState.isTxdLoading,
+            onDismissRequest = { viewModel.closeTxdViewer() },
+            onExportSingle = { entry, destDir ->
+                viewModel.exportSingleTexture(entry, destDir)
+            },
+            onExportAll = { destDir ->
+                viewModel.exportAllTextures(destDir)
+            },
+            onReplaceTexture = { entry, imagePath, isShizuku ->
+                viewModel.replaceTexture(context, entry, imagePath, isShizuku)
+            }
+        )
+    }
+
     // Rename Dialog
     entryToRename?.let { entry ->
         var newNameText by remember { mutableStateOf(entry.cleanName) }
@@ -723,7 +773,8 @@ fun EntryRow(
     onExtract: () -> Unit,
     onReplace: () -> Unit,
     onRename: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onOpenTxd: (() -> Unit)? = null
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -732,6 +783,8 @@ fun EntryRow(
             onClick = {
                 if (isSelectionMode) {
                     onToggleSelect()
+                } else if (entry.cleanName.endsWith(".txd", ignoreCase = true) && onOpenTxd != null) {
+                    onOpenTxd()
                 } else {
                     menuExpanded = true
                 }
@@ -786,6 +839,16 @@ fun EntryRow(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false }
                     ) {
+                        if (entry.cleanName.endsWith(".txd", ignoreCase = true) && onOpenTxd != null) {
+                            DropdownMenuItem(
+                                text = { Text("Buka Tekstur (TXD)") },
+                                leadingIcon = { Icon(Icons.Default.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onOpenTxd()
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Extract") },
                             leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) },

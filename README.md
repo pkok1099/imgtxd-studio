@@ -10,6 +10,12 @@ Modern, high-performance, and open-source GTA `.img` archive manager built speci
   - Modify game files directly in restricted storage folders on Android 11, 12, 13, 14, 15, and 16 without needing root or a PC.
   - High-throughput I/O using batch privileged processes (`stat -c` O(1) metadata retrieval).
 
+- **Built-in RenderWare TXD Studio (Texture Dictionary):**
+  - **FOSS RenderWare Parser & Serializer:** Open, view, and modify `.txd` files directly inside `.img` archives or as standalone files from device storage or `Android/data` via Shizuku.
+  - **Wide Format Support:** Decodes and displays DXT1, DXT3, DXT5 (S3TC), RGBA32, RGB24, 16-bit (565, 1555, 4444), 8-bit paletted, and ETC1 textures with transparency checkerboard preview.
+  - **In-Place Texture Replacement:** Replace any texture with user images (`.png` / `.jpg`). If opened from an `.img` archive, automatically updates the archive in-place without manual extraction or repack.
+  - **Export & Batch Export:** Export individual textures or batch export all textures in a TXD dictionary to lossless `.png` images.
+
 - **Full Format Support (VER1 & VER2):**
   - GTA San Andreas (`.img` VER2 with embedded directory table).
   - GTA III and GTA Vice City (`.img` VER1 with companion `.dir` directory files).
