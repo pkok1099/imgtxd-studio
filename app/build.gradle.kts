@@ -24,10 +24,11 @@ android {
         create("release") {
             val keystoreFile = file("studio.keystore")
             if (keystoreFile.exists()) {
+                val pass = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: "onlasdan_studio_key_2026"
                 storeFile = keystoreFile
-                storePassword = "onlasdan_studio_key_2026"
+                storePassword = pass
                 keyAlias = "onlasdan"
-                keyPassword = "onlasdan_studio_key_2026"
+                keyPassword = pass
                 enableV1Signing = true
                 enableV2Signing = true
             } else {
