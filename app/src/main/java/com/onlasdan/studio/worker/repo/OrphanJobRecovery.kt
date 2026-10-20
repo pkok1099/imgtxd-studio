@@ -9,6 +9,7 @@ import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.process.ProcessType
 import com.onlasdan.studio.worker.WorkerContracts
+import com.onlasdan.studio.worker.workerDataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -111,7 +112,7 @@ object OrphanJobRecovery {
             null
         }
 
-        val activeJobId = prefs?.get(KEY_ACTIVE_JOB_ID)
+        val activeJobId: String? = prefs?.get(KEY_ACTIVE_JOB_ID)
         val orphanFiles = findOrphanFiles(context)
 
         if (activeJobId.isNullOrBlank() && orphanFiles.isEmpty()) {
@@ -135,7 +136,7 @@ object OrphanJobRecovery {
         }
 
         // 3. Kembalikan representasi AppProcess gagal yang informatif untuk UI
-        val jobId = if (!activeJobId.isNullOrBlank()) activeJobId else "orphan_${UUID.randomUUID()}"
+        val jobId: String = if (!activeJobId.isNullOrBlank()) activeJobId else "orphan_${UUID.randomUUID()}"
         val failedProcess = AppProcess(
             id = jobId,
             type = ProcessType.REBUILD,
