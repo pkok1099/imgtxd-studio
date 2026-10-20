@@ -11,8 +11,8 @@ android {
         applicationId = "com.onlasdan.studio"
         minSdk = 31
         targetSdk = 36
-        versionCode = 35
-        versionName = "3.2.2-android16"
+        versionCode = 36
+        versionName = "3.2.3-android16"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

@@ -364,7 +364,7 @@ class ImgToolViewModel : ViewModel() {
         viewModelScope.launch {
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
-                targetFile = archive.archiveName,
+                targetFile = archive.imgFile.absolutePath,
                 title = "Mengekstrak ${selected.size} berkas"
             ) { onProgress ->
                 try {
@@ -403,6 +403,56 @@ class ImgToolViewModel : ViewModel() {
         }
     }
 
+    fun exportSelectedToImgArchive(targetImgFile: File, isShizuku: Boolean = false) {
+        val selected = _uiState.value.selectedEntries.toList()
+        if (selected.isEmpty()) return
+        val archive = _uiState.value.archive ?: return
+
+        _uiState.update { it.copy(selectedEntries = emptySet(), isSelecting = false, isLoading = true) }
+
+        viewModelScope.launch {
+            val res = ProcessRepositoryLocator.get().executeProcess(
+                type = ProcessType.ADD_ENTRY,
+                targetFile = targetImgFile.absolutePath,
+                title = "Mengekspor ${selected.size} berkas ke ${targetImgFile.name}"
+            ) { onProgress ->
+                try {
+                    withContext(Dispatchers.IO) {
+                        val targetArchive = ImgArchive.open(targetImgFile)
+                        val cacheDir = File(targetImgFile.parentFile ?: File("/tmp"), ".export_cache").apply { mkdirs() }
+                        try {
+                            for ((idx, entry) in selected.withIndex()) {
+                                onProgress(idx, selected.size, "Mengekstrak ${entry.cleanName} (${idx + 1}/${selected.size})")
+                                val tempEntryFile = File(cacheDir, entry.cleanName)
+                                archive.extract(entry, tempEntryFile)
+                                onProgress(idx, selected.size, "Menambahkan ${entry.cleanName} ke ${targetImgFile.name}")
+                                targetArchive.add(tempEntryFile, entry.cleanName)
+                                tempEntryFile.delete()
+                                onProgress(idx + 1, selected.size, "Selesai ${entry.cleanName}")
+                            }
+                        } finally {
+                            cacheDir.deleteRecursively()
+                        }
+                    }
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    progress = null,
+                    selectedEntries = emptySet(),
+                    isSelecting = false,
+                    statusMessage = if (res.isSuccess) "Berhasil mengekspor ${selected.size} berkas ke ${targetImgFile.name}" else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
+            }
+        }
+    }
+
     fun extractAll(destinationDir: File, isShizuku: Boolean = false, destRestrictedPath: String? = null) {
         val archive = _uiState.value.archive ?: return
         val allEntries = archive.entries
@@ -412,7 +462,7 @@ class ImgToolViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true) }
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
-                targetFile = archive.archiveName,
+                targetFile = archive.imgFile.absolutePath,
                 title = "Mengekstrak semua berkas"
             ) { onProgress ->
                 try {

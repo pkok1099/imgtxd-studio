@@ -45,7 +45,8 @@ enum class PickerMode {
     PICK_IMAGE,
     PICK_MULTIPLE_IMAGES,
     PICK_FOLDER,
-    SELECT_FOLDER
+    SELECT_FOLDER,
+    SELECT_FOLDER_OR_IMG
 }
 
 data class UnifiedFileItem(
@@ -235,6 +236,7 @@ fun FilePickerDialog(
                     }
                     PickerMode.PICK_FILE -> items
                     PickerMode.PICK_FOLDER, PickerMode.SELECT_FOLDER -> items.filter { it.isDirectory }
+                    PickerMode.SELECT_FOLDER_OR_IMG -> items.filter { it.isDirectory || it.name.endsWith(".img", ignoreCase = true) }
                 }
 
                 fileItems = filtered.sortedWith(compareBy<UnifiedFileItem> { !it.isDirectory }.thenBy { it.name.lowercase() })
@@ -588,7 +590,7 @@ fun FilePickerDialog(
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
-                                bottom = if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER || mode == PickerMode.PICK_MULTIPLE_IMAGES) 8.dp else 48.dp
+                                bottom = if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER || mode == PickerMode.SELECT_FOLDER_OR_IMG || mode == PickerMode.PICK_MULTIPLE_IMAGES) 8.dp else 48.dp
                             )
                         ) {
                             items(
@@ -731,7 +733,7 @@ fun FilePickerDialog(
                             }
                         }
                     }
-                } else if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER) {
+                } else if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER || mode == PickerMode.SELECT_FOLDER_OR_IMG) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Row(
                         modifier = Modifier

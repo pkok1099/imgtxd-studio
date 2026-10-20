@@ -466,61 +466,8 @@ class WorkerProcessRepositoryImpl private constructor(
         val jobId = UUID.randomUUID().toString()
         processMetadata[jobId] = ProcessMetadata(type, targetFile, title)
 
-        val connected = ensureConnected()
-        val svc = service
-
-        if (!connected || svc == null) {
-            Log.w(TAG, "WorkerService tidak tersedia, menjalankan fallback in-process")
-            return executeInProcessFallback(jobId, type, targetFile, title, block)
-        }
-
-        val initialProcess = AppProcess(
-            id = jobId,
-            type = type,
-            targetFile = targetFile,
-            title = title,
-            progress = 0f,
-            current = 0,
-            total = 0,
-            status = ProcessStatus.QUEUED,
-            message = "Menunggu antrean..."
-        )
-        _processes.update { it + initialProcess }
-
-        val deferred = CompletableDeferred<JobResult>()
-        pendingResults[jobId] = deferred
-
-        val request = JobRequest(
-            id = jobId,
-            type = type.name,
-            targetPath = targetFile,
-            isShizuku = false,
-            destinationPath = null,
-            entryNames = emptyList(),
-            sourceFilePaths = emptyList(),
-            parameters = mapOf("title" to title)
-        )
-
-        return try {
-            svc.submitJob(request)
-            val result = deferred.await()
-            if (result.success) {
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception(result.message ?: "Gagal memproses pekerjaan"))
-            }
-        } catch (e: CancellationException) {
-            cancelProcess(jobId)
-            Result.failure(e)
-        } catch (e: RemoteException) {
-            Log.e(TAG, "RemoteException saat submitJob ke WorkerService, fallback in-process", e)
-            executeInProcessFallback(jobId, type, targetFile, title, block)
-        } catch (e: Exception) {
-            Log.e(TAG, "Kesalahan saat eksekusi proses via WorkerService", e)
-            Result.failure(e)
-        } finally {
-            pendingResults.remove(jobId)
-        }
+        // Operasi dengan lambda block selalu dieksekusi in-process agar closure dan context UI berjalan
+        return executeInProcessFallback(jobId, type, targetFile, title, block)
     }
 
     /**

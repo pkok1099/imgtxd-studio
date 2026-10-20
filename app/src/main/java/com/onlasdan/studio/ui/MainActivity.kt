@@ -1107,16 +1107,24 @@ fun MainScreen(
     // Extract Selected Entries Picker
     if (showExtractSelectedPicker) {
         FilePickerDialog(
-            title = "Ekstrak ${uiState.selectedEntries.size} Berkas ke Folder...",
-            mode = PickerMode.SELECT_FOLDER,
+            title = "Ekstrak ${uiState.selectedEntries.size} Berkas ke Folder atau File IMG...",
+            mode = PickerMode.SELECT_FOLDER_OR_IMG,
             onDismissRequest = { showExtractSelectedPicker = false },
             onFileSelected = { path, isShizuku ->
                 showExtractSelectedPicker = false
-                viewModel.extractSelected(
-                    destinationDir = File(path),
-                    isShizuku = isShizuku,
-                    destRestrictedPath = if (isShizuku) path else null
-                )
+                val selectedFile = File(path)
+                if (selectedFile.isFile && path.endsWith(".img", ignoreCase = true)) {
+                    viewModel.exportSelectedToImgArchive(
+                        targetImgFile = selectedFile,
+                        isShizuku = isShizuku
+                    )
+                } else {
+                    viewModel.extractSelected(
+                        destinationDir = if (selectedFile.isDirectory) selectedFile else (selectedFile.parentFile ?: File(path)),
+                        isShizuku = isShizuku,
+                        destRestrictedPath = if (isShizuku) path else null
+                    )
+                }
             }
         )
     }

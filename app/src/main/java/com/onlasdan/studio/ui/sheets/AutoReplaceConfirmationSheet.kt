@@ -1,5 +1,7 @@
 package com.onlasdan.studio.ui.sheets
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -13,7 +15,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,6 +28,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.txd.TxdEntry
+import com.onlasdan.studio.util.ShizukuManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,7 +124,7 @@ fun AutoReplaceConfirmationSheet(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Scrollable List of matches
+                // Scrollable List of matches with side-by-side thumbnail comparison
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
@@ -141,14 +146,14 @@ fun AutoReplaceConfirmationSheet(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                // Original TXD Texture thumbnail
+                                // 1. Original TXD Texture thumbnail
                                 Box(
                                     modifier = Modifier
-                                        .size(42.dp)
+                                        .size(44.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                     contentAlignment = Alignment.Center
@@ -185,7 +190,9 @@ fun AutoReplaceConfirmationSheet(
                                         text = "${tex.dimensionsLabel} • ${tex.formatLabel}",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
@@ -197,9 +204,9 @@ fun AutoReplaceConfirmationSheet(
                                     modifier = Modifier.size(18.dp)
                                 )
 
-                                // Replacement File Info
+                                // 2. Replacement File Info + Thumbnail
                                 Column(
-                                    modifier = Modifier.weight(1.1f),
+                                    modifier = Modifier.weight(1f),
                                     horizontalAlignment = Alignment.End
                                 ) {
                                     Text(
@@ -220,6 +227,12 @@ fun AutoReplaceConfirmationSheet(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
+
+                                // Replacement Image Thumbnail (Bisa dibandingkan langsung!)
+                                ReplacementThumbnail(
+                                    path = path,
+                                    modifier = Modifier.size(44.dp)
+                                )
                             }
                         }
                     }
@@ -265,6 +278,77 @@ fun AutoReplaceConfirmationSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ReplacementThumbnail(
+    path: String,
+    modifier: Modifier = Modifier
+) {
+    var bitmap by remember(path) { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(path) {
+        withContext(Dispatchers.IO) {
+            try {
+                val file = File(path)
+                if (file.exists()) {
+                    val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(file.absolutePath, boundsOptions)
+                    var sampleSize = 1
+                    val reqSize = 96
+                    while (boundsOptions.outWidth / (sampleSize * 2) >= reqSize &&
+                        boundsOptions.outHeight / (sampleSize * 2) >= reqSize
+                    ) {
+                        sampleSize *= 2
+                    }
+                    val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                    bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
+                } else if (ShizukuManager.isRestrictedPath(path) && ShizukuManager.hasPermission()) {
+                    val temp = File.createTempFile("thumb_cmp_", ".tmp")
+                    if (ShizukuManager.copyToLocal(path, temp)) {
+                        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(temp.absolutePath, boundsOptions)
+                        var sampleSize = 1
+                        val reqSize = 96
+                        while (boundsOptions.outWidth / (sampleSize * 2) >= reqSize &&
+                            boundsOptions.outHeight / (sampleSize * 2) >= reqSize
+                        ) {
+                            sampleSize *= 2
+                        }
+                        val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                        bitmap = BitmapFactory.decodeFile(temp.absolutePath, decodeOptions)
+                        temp.delete()
+                    }
+                }
+            } catch (e: Exception) {
+                bitmap = null
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+        contentAlignment = Alignment.Center
+    ) {
+        val bmp = bitmap
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = File(path).name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Outlined.Image,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }

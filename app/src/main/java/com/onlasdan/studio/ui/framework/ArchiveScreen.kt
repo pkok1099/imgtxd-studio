@@ -47,6 +47,7 @@ fun <T> ArchiveScreen(
     onCloseSearch: () -> Unit = {},
     activeProcess: AppProcess? = null,
     onProcessPillClick: () -> Unit = {},
+    gridColumns: Int = 1,
     headerTrailingContent: (@Composable () -> Unit)? = null,
     dockContent: @Composable () -> Unit,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
@@ -298,12 +299,37 @@ fun <T> ArchiveScreen(
                         }
                     }
 
-                    items(
-                        items = items,
-                        key = keyExtractor,
-                        contentType = { "entry_card" }
-                    ) { item ->
-                        itemContent(item)
+                    if (gridColumns > 1) {
+                        val chunked = items.chunked(gridColumns)
+                        items(
+                            items = chunked,
+                            key = { row -> row.joinToString("#") { keyExtractor(it) } },
+                            contentType = { "gallery_row" }
+                        ) { rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                for (item in rowItems) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        itemContent(item)
+                                    }
+                                }
+                                if (rowItems.size < gridColumns) {
+                                    repeat(gridColumns - rowItems.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        items(
+                            items = items,
+                            key = keyExtractor,
+                            contentType = { "entry_card" }
+                        ) { item ->
+                            itemContent(item)
+                        }
                     }
                 }
             }

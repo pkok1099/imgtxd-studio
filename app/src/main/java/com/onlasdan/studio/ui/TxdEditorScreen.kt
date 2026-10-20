@@ -2,17 +2,23 @@ package com.onlasdan.studio.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +36,7 @@ import com.onlasdan.studio.ui.settings.RuntimeSettingsSheet
 import com.onlasdan.studio.ui.sheets.AutoReplaceConfirmationSheet
 import com.onlasdan.studio.ui.sheets.MoreActionsBottomSheet
 import com.onlasdan.studio.ui.sheets.ProcessDetailBottomSheet
+import com.onlasdan.studio.ui.sheets.ReplacementThumbnail
 import com.onlasdan.studio.ui.sheets.TextureDetailBottomSheet
 import com.onlasdan.studio.ui.theme.SemanticColors
 import com.onlasdan.studio.util.AppSettings
@@ -136,6 +143,7 @@ fun TxdEditorScreen(
 
     // Action Targets for Dialogs
     var entryToReplace by remember { mutableStateOf<TxdEntry?>(null) }
+    var singleReplaceCandidate by remember { mutableStateOf<Triple<TxdEntry, String, Boolean>?>(null) }
     var entryToExport by remember { mutableStateOf<TxdEntry?>(null) }
     var showExportAllPicker by remember { mutableStateOf(false) }
     var showExportSelectedPicker by remember { mutableStateOf(false) }
@@ -295,6 +303,7 @@ fun TxdEditorScreen(
         onProcessPillClick = {
             activeProcess?.let { selectedProcessForDetail = it }
         },
+        gridColumns = if (txdViewMode == TxdViewMode.LARGE) 2 else 1,
         headerTrailingContent = {
             IconButton(
                 onClick = { toggleViewMode() },
@@ -317,7 +326,10 @@ fun TxdEditorScreen(
         itemContent = { entry ->
             ArchiveEntryCard(
                 title = entry.name,
-                subtitle = "${entry.dimensionsLabel} • ${entry.formatLabel} • ${entry.depth}-bit",
+                subtitle = if (txdViewMode == TxdViewMode.LARGE)
+                    entry.dimensionsLabel
+                else
+                    "${entry.dimensionsLabel} • ${entry.formatLabel} • ${entry.depth}-bit",
                 bitmap = entry.bitmap,
                 isSelected = selectedTextures.contains(entry),
                 isSelectionMode = isSelectionMode,
@@ -467,7 +479,159 @@ fun TxdEditorScreen(
                 val targetEntry = entryToReplace
                 entryToReplace = null
                 if (targetEntry != null) {
-                    onReplaceTexture(targetEntry, imgPath, isShizuku)
+                    singleReplaceCandidate = Triple(targetEntry, imgPath, isShizuku)
+                }
+            }
+        )
+    }
+
+    // 6b. Single Replace Thumbnail Comparison Dialog
+    singleReplaceCandidate?.let { (target, imgPath, isShizuku) ->
+        val replacementFile = File(imgPath)
+        AlertDialog(
+            onDismissRequest = { singleReplaceCandidate = null },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            icon = {
+                Icon(
+                    imageVector = Icons.Outlined.CompareArrows,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = {
+                Text(
+                    text = "Konfirmasi Ganti Tekstur",
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = "Bandingkan tekstur asli dengan gambar baru sebelum menerapkan perubahan:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            // Tekstur Asli
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(60.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val bmp = target.bitmap
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = target.name,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Image,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = target.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = target.dimensionsLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            // Arrow
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+
+                            // Gambar Baru
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                ReplacementThumbnail(
+                                    path = imgPath,
+                                    modifier = Modifier.size(60.dp)
+                                )
+                                Text(
+                                    text = replacementFile.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Gambar Mod",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        singleReplaceCandidate = null
+                        onReplaceTexture(target, imgPath, isShizuku)
+                    },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("Ganti Tekstur", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { singleReplaceCandidate = null },
+                    shape = CircleShape
+                ) {
+                    Text("Batal")
                 }
             }
         )

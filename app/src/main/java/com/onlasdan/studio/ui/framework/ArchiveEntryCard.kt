@@ -45,7 +45,7 @@ fun ArchiveEntryCard(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(if (isLargeImage) 16.dp else 20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected)
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
@@ -61,12 +61,12 @@ fun ArchiveEntryCard(
         )
     ) {
         if (isLargeImage && bitmap != null) {
-            // Mode List Image Besar: Area pratinjau gambar besar + info & checkbox
+            // Mode Galeri Gambar Besar: Pratinjau gambar besar + 1 baris info di bawah (nama & size)
             Column(modifier = Modifier.fillMaxWidth()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(160.dp)
+                        .aspectRatio(1f)
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
@@ -75,22 +75,17 @@ fun ArchiveEntryCard(
                         contentDescription = title,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(8.dp),
+                            .padding(6.dp),
                         contentScale = ContentScale.Fit
                     )
-                }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
                     if (isSelectionMode) {
                         Checkbox(
                             checked = isSelected,
                             onCheckedChange = { onClick() },
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(2.dp),
                             colors = CheckboxDefaults.colors(
                                 checkedColor = MaterialTheme.colorScheme.primary,
                                 checkmarkColor = MaterialTheme.colorScheme.onPrimary,
@@ -99,34 +94,33 @@ fun ArchiveEntryCard(
                         )
                     }
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = title,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = subtitle,
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
                     if (isSelected && !isSelectionMode) {
                         Box(
                             modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
                                 .size(8.dp)
                                 .background(MaterialTheme.colorScheme.primary, CircleShape)
                         )
                     }
+                }
+
+                // Info 1 baris kecil di bawah gambar: nama dan size saja
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (subtitle.isNotBlank()) "$title • $subtitle" else title,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         } else {
