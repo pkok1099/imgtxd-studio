@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.compose)
+    id("kotlin-parcelize")
 }
 
 android {
@@ -64,6 +65,7 @@ android {
 
     buildFeatures {
         compose = true
+        aidl = true
     }
 }
 
