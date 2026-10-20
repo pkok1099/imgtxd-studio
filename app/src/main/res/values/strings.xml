@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">GTA Img Studio</string>
+    <string name="open_img">Open IMG</string>
+    <string name="rebuild">Rebuild Archive</string>
+    <string name="extract">Extract</string>
+    <string name="replace">Replace</string>
+    <string name="rename">Rename</string>
+    <string name="delete">Delete</string>
+    <string name="add">Add File</string>
+    <string name="search_hint">Search archive entries…</string>
+    <string name="storage_permission_title">All Files Access Needed</string>
+    <string name="storage_permission_desc">GTA Img Studio requires access to modify game archives located in storage.</string>
+    <string name="grant_permission">Grant Access</string>
+</resources>
