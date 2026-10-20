@@ -29,6 +29,8 @@ data class RuntimeSettingsUiState(
     val isRuntimeEnabled: Boolean = WorkerContracts.DEFAULT_RUNTIME_ENABLED,
     val memoryMode: String = WorkerContracts.DEFAULT_MEMORY_MODE,
     val manualBudgetMb: Int = WorkerContracts.DEFAULT_MANUAL_BUDGET_MB,
+    val backgroundCpuCores: Int = WorkerContracts.DEFAULT_BACKGROUND_CPU_CORES,
+    val totalCpuCores: Int = Runtime.getRuntime().availableProcessors(),
     val availableDeviceMemMb: Int = 0,
     val totalDeviceMemMb: Int = 0,
     val maxHeapMb: Int = 0
@@ -42,6 +44,7 @@ class RuntimeSettingsViewModel(application: Application) : AndroidViewModel(appl
         val KEY_RUNTIME_ENABLED = booleanPreferencesKey(WorkerContracts.PREF_KEY_RUNTIME_ENABLED)
         val KEY_MEMORY_MODE = stringPreferencesKey(WorkerContracts.PREF_KEY_MEMORY_MODE)
         val KEY_MANUAL_BUDGET_MB = intPreferencesKey(WorkerContracts.PREF_KEY_MANUAL_BUDGET_MB)
+        val KEY_BACKGROUND_CPU_CORES = intPreferencesKey(WorkerContracts.PREF_KEY_BACKGROUND_CPU_CORES)
     }
 
     private val _availableDeviceMemMb = MutableStateFlow(queryAvailableMemoryMb())
@@ -79,10 +82,14 @@ class RuntimeSettingsViewModel(application: Application) : AndroidViewModel(appl
         _availableDeviceMemMb,
         _maxHeapMb
     ) { prefs, availMem, maxHeap ->
+        val totalCores = Runtime.getRuntime().availableProcessors()
+        val bgCores = prefs[KEY_BACKGROUND_CPU_CORES] ?: WorkerContracts.DEFAULT_BACKGROUND_CPU_CORES
         RuntimeSettingsUiState(
             isRuntimeEnabled = prefs[KEY_RUNTIME_ENABLED] ?: WorkerContracts.DEFAULT_RUNTIME_ENABLED,
             memoryMode = prefs[KEY_MEMORY_MODE] ?: WorkerContracts.DEFAULT_MEMORY_MODE,
             manualBudgetMb = prefs[KEY_MANUAL_BUDGET_MB] ?: WorkerContracts.DEFAULT_MANUAL_BUDGET_MB,
+            backgroundCpuCores = bgCores.coerceIn(1, totalCores),
+            totalCpuCores = totalCores,
             availableDeviceMemMb = availMem,
             totalDeviceMemMb = queryTotalMemoryMb(),
             maxHeapMb = maxHeap
@@ -96,6 +103,16 @@ class RuntimeSettingsViewModel(application: Application) : AndroidViewModel(appl
             maxHeapMb = queryMaxHeapMb()
         )
     )
+
+    fun setBackgroundCpuCores(cores: Int) {
+        val totalCores = Runtime.getRuntime().availableProcessors()
+        val clamped = cores.coerceIn(1, totalCores)
+        viewModelScope.launch(Dispatchers.IO) {
+            context.runtimeDataStore.edit { preferences ->
+                preferences[KEY_BACKGROUND_CPU_CORES] = clamped
+            }
+        }
+    }
 
     fun setRuntimeEnabled(enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {

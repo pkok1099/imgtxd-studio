@@ -32,7 +32,8 @@ import java.util.concurrent.ConcurrentHashMap
  * checkpoint recovery via CheckpointManager, dan pembatalan responsif.
  */
 class JobEngineImpl(
-    private val shizukuBridge: ShizukuFileBridge? = null
+    private val shizukuBridge: ShizukuFileBridge? = null,
+    private val coreDispatcherProvider: (() -> kotlinx.coroutines.CoroutineDispatcher)? = null
 ) : JobEngine {
 
     private val cancelledJobIds = ConcurrentHashMap.newKeySet<String>()
@@ -50,14 +51,16 @@ class JobEngineImpl(
         request: JobRequest,
         budget: MemoryBudget,
         onProgress: (JobProgress) -> Unit
-    ): JobResult = withContext(Dispatchers.IO) {
-        if (isCancelled(request.id)) {
-            return@withContext JobResult(
-                id = request.id,
-                success = false,
-                message = "Dibatalkan oleh pengguna"
-            )
-        }
+    ): JobResult {
+        val dispatcher = coreDispatcherProvider?.invoke() ?: Dispatchers.IO
+        return withContext(dispatcher) {
+            if (isCancelled(request.id)) {
+                return@withContext JobResult(
+                    id = request.id,
+                    success = false,
+                    message = "Dibatalkan oleh pengguna"
+                )
+            }
 
         try {
             when (request.type.uppercase()) {
@@ -89,6 +92,7 @@ class JobEngineImpl(
             cancelledJobIds.remove(request.id)
         }
     }
+}
 
     /**
      * Merekonstruksi arsip IMG tanpa celah (gap), menyusun ulang sektor secara streaming
@@ -805,14 +809,21 @@ class JobEngineImpl(
         var isSuccess = false
 
         return try {
-            SafeFileWriter.cleanupFile(tmpFile)
+            val resumeState = CheckpointManager.getResumeState(request.targetPath)
+            val startIndex = resumeState?.processedItems ?: 0
+            val total = sourceFiles.size
+
+            if (startIndex == 0) {
+                SafeFileWriter.cleanupFile(tmpFile)
+                CheckpointManager.createCheckpoint(request.id, "AUTO_REPLACE", request.targetPath, total)
+            }
+
             val txd = TxdParser.parse(targetFile)
             val textures = txd.textures
-            val total = sourceFiles.size
-            CheckpointManager.createCheckpoint(request.id, "AUTO_REPLACE", request.targetPath, total)
-            var replacedCount = 0
+            var replacedCount = startIndex
 
-            for ((idx, srcFile) in sourceFiles.withIndex()) {
+            for (idx in startIndex until total) {
+                val srcFile = sourceFiles[idx]
                 if (isCancelled(request.id)) {
                     throw CancellationException("Dibatalkan oleh pengguna")
                 }
@@ -868,10 +879,12 @@ class JobEngineImpl(
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "CANCELLED")
             JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
         } catch (e: Exception) {
-            CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "FAILED")
+            val isInterrupted = e.message?.contains("timeout", ignoreCase = true) == true
+            val status = if (isInterrupted) "INTERRUPTED" else "FAILED"
+            CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = status)
             JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Auto Replace TXD gagal")
         } finally {
-            if (!isSuccess) {
+            if (!isSuccess && !CheckpointManager.hasIncompleteCheckpoint(request.targetPath)) {
                 SafeFileWriter.cleanupFile(tmpFile)
             }
             lockHandle.release()
@@ -891,33 +904,44 @@ class JobEngineImpl(
         var isSuccess = false
 
         return try {
-            SafeFileWriter.cleanupFile(tmpFile)
-            SafeFileWriter.streamCopy(
-                source = targetFile,
-                dest = tmpFile,
-                bufferSize = budget.ioBufferSize,
-                isCancelled = { isCancelled(request.id) }
-            )
+            val resumeState = CheckpointManager.getResumeState(request.targetPath)
+            val startIndex = resumeState?.processedItems ?: 0
+            val isResuming = startIndex > 0 && tmpFile.exists() && tmpFile.length() > 0L
 
-            val isV2 = ImgArchive.isVer2(tmpFile)
-            val dirFile = if (!isV2) File(targetFile.parentFile, targetFile.nameWithoutExtension + ".dir") else null
-            if (dirFile != null && dirFile.exists()) {
-                tmpDirFile = File(dirFile.path + WorkerContracts.EXT_TMP)
-                SafeFileWriter.cleanupFile(tmpDirFile)
+            if (!isResuming) {
+                SafeFileWriter.cleanupFile(tmpFile)
                 SafeFileWriter.streamCopy(
-                    source = dirFile,
-                    dest = tmpDirFile,
+                    source = targetFile,
+                    dest = tmpFile,
                     bufferSize = budget.ioBufferSize,
                     isCancelled = { isCancelled(request.id) }
                 )
             }
 
+            val isV2 = ImgArchive.isVer2(tmpFile)
+            val dirFile = if (!isV2) File(targetFile.parentFile, targetFile.nameWithoutExtension + ".dir") else null
+            if (dirFile != null && dirFile.exists()) {
+                tmpDirFile = File(dirFile.path + WorkerContracts.EXT_TMP)
+                if (!isResuming) {
+                    SafeFileWriter.cleanupFile(tmpDirFile)
+                    SafeFileWriter.streamCopy(
+                        source = dirFile,
+                        dest = tmpDirFile,
+                        bufferSize = budget.ioBufferSize,
+                        isCancelled = { isCancelled(request.id) }
+                    )
+                }
+            }
+
             val archive = ImgArchive.open(tmpFile, tmpDirFile)
             val total = sourceFiles.size
-            CheckpointManager.createCheckpoint(request.id, "AUTO_REPLACE", request.targetPath, total)
-            var replacedCount = 0
+            if (!isResuming) {
+                CheckpointManager.createCheckpoint(request.id, "AUTO_REPLACE", request.targetPath, total)
+            }
+            var replacedCount = startIndex
 
-            for ((idx, srcFile) in sourceFiles.withIndex()) {
+            for (idx in startIndex until total) {
+                val srcFile = sourceFiles[idx]
                 if (isCancelled(request.id)) {
                     throw CancellationException("Dibatalkan oleh pengguna")
                 }
@@ -977,10 +1001,12 @@ class JobEngineImpl(
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "CANCELLED")
             JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
         } catch (e: Exception) {
-            CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "FAILED")
+            val isInterrupted = e.message?.contains("timeout", ignoreCase = true) == true
+            val status = if (isInterrupted) "INTERRUPTED" else "FAILED"
+            CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = status)
             JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Auto Replace IMG gagal")
         } finally {
-            if (!isSuccess) {
+            if (!isSuccess && !CheckpointManager.hasIncompleteCheckpoint(request.targetPath)) {
                 SafeFileWriter.cleanupFile(tmpFile)
                 SafeFileWriter.cleanupFile(tmpDirFile)
             }

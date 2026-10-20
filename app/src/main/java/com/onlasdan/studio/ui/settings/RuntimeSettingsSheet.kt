@@ -19,9 +19,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BatteryAlert
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Nightlight
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.onlasdan.studio.ui.components.DeskModeDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,6 +68,16 @@ fun RuntimeSettingsSheet(
 
     val uiState by vm.uiState.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showDeskMode by remember { mutableStateOf(false) }
+
+    val currentProcess by com.onlasdan.studio.process.ProcessRepositoryLocator.getRepository(context).currentProcess.collectAsState()
+
+    if (showDeskMode) {
+        DeskModeDialog(
+            onDismissRequest = { showDeskMode = false },
+            activeProcess = currentProcess
+        )
+    }
 
     FloatingSheet(
         onDismissRequest = onDismissRequest,
@@ -354,7 +367,116 @@ fun RuntimeSettingsSheet(
                 }
             }
 
-            // 4. Tombol Aksi Opsional: Abaikan Optimasi Baterai
+            // 4. Card Grup: ALOKASI CPU CORE (Foreground vs Background)
+            if (uiState.isRuntimeEnabled) {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Text(
+                            text = "ALOKASI CPU CORE",
+                            style = SectionHeaderStyle
+                        )
+
+                        Text(
+                            text = "• Di dalam aplikasi & Mode Meja: 100% Core aktif (${uiState.totalCpuCores} Core)\n" +
+                                   "• Di latar belakang (layar mati): Dibatasi ke ${uiState.backgroundCpuCores} Core",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Batas Core Background: ${uiState.backgroundCpuCores} Core",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = PrimaryPink
+                                )
+                                Text(
+                                    text = "Total: ${uiState.totalCpuCores} Core",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            val maxCores = maxOf(1, uiState.totalCpuCores)
+                            val steps = maxOf(0, maxCores - 2)
+
+                            Slider(
+                                value = uiState.backgroundCpuCores.toFloat().coerceIn(1f, maxCores.toFloat()),
+                                onValueChange = { newVal ->
+                                    vm.setBackgroundCpuCores(newVal.roundToInt().coerceIn(1, maxCores))
+                                },
+                                valueRange = 1f..maxCores.toFloat(),
+                                steps = steps,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = PrimaryPink,
+                                    activeTrackColor = PrimaryPink,
+                                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    activeTickColor = Color.White.copy(alpha = 0.7f),
+                                    inactiveTickColor = MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("1 Core (Eco)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${maxCores / 2} Core (Balanced)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("$maxCores Core (Max)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+
+                        Text(
+                            text = "Membatasi core latar belakang menjaga suhu HP tetap dingin saat impor berjalan berhari-hari dan mencegah sistem mematikan proses.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            // 5. Tombol Fitur: Buka Mode Meja (Layar Redup AMOLED)
+            Button(
+                onClick = { showDeskMode = true },
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.primary
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Nightlight,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Buka Mode Meja (Layar Redup Anti-Sleep)",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            // 6. Tombol Aksi Opsional: Abaikan Optimasi Baterai
             val powerManager = remember(context) {
                 context.getSystemService(Context.POWER_SERVICE) as? PowerManager
             }

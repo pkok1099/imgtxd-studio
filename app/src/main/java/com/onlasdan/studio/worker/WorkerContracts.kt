@@ -17,12 +17,15 @@ object WorkerContracts {
     const val PREF_KEY_LAST_CRASH_INFO = "runtime_last_crash_info"
     const val PREF_KEY_ACTIVE_JOB_ID = "runtime_active_job_id"
     const val PREF_KEY_ACTIVE_TARGET_PATH = "runtime_active_target_path"
+    const val PREF_KEY_ACTIVE_JOB_JSON = "runtime_active_job_json"
+    const val PREF_KEY_BACKGROUND_CPU_CORES = "runtime_background_cpu_cores"
 
     // Default values
     const val DEFAULT_RUNTIME_ENABLED = true
     const val DEFAULT_MEMORY_MODE = "AUTO"
     const val DEFAULT_MANUAL_BUDGET_MB = 512
     const val MIN_BUDGET_MB = 256
+    const val DEFAULT_BACKGROUND_CPU_CORES = 2
 
     // File extensions
     const val EXT_LOCK = ".lock"
@@ -36,5 +39,8 @@ object WorkerContracts {
 
     // Actions & Extras
     const val ACTION_CANCEL_JOB = "com.onlasdan.studio.worker.action.CANCEL_JOB"
+    const val ACTION_RESUME_INTERRUPTED_JOBS = "com.onlasdan.studio.worker.action.RESUME_INTERRUPTED_JOBS"
+    const val ACTION_WATCHDOG_PING = "com.onlasdan.studio.worker.action.WATCHDOG_PING"
     const val EXTRA_JOB_ID = "extra_job_id"
+    const val EXTRA_IS_FOREGROUND = "extra_is_foreground"
 }

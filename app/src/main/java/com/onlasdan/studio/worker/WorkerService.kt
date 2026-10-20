@@ -93,6 +93,22 @@ class WorkerService : Service() {
     @Volatile
     private var isTimingOut = false
 
+    @Volatile
+    private var isAppInForeground = true
+
+    @Volatile
+    private var backgroundCoreLimit = WorkerContracts.DEFAULT_BACKGROUND_CPU_CORES
+
+    private fun getDynamicDispatcher(): kotlinx.coroutines.CoroutineDispatcher {
+        return if (isAppInForeground) {
+            Dispatchers.Default
+        } else {
+            val total = Runtime.getRuntime().availableProcessors()
+            val cores = backgroundCoreLimit.coerceIn(1, total)
+            Dispatchers.Default.limitedParallelism(cores)
+        }
+    }
+
     private val cancelReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == WorkerContracts.ACTION_CANCEL_JOB) {
@@ -132,6 +148,17 @@ class WorkerService : Service() {
                 callbacks.unregister(callback)
             }
         }
+
+        override fun setAppForegroundState(isForeground: Boolean) {
+            this@WorkerService.isAppInForeground = isForeground
+            Log.d(TAG, "Status foreground aplikasi: $isForeground")
+        }
+
+        override fun setBackgroundCoreLimit(maxCores: Int) {
+            val total = Runtime.getRuntime().availableProcessors()
+            this@WorkerService.backgroundCoreLimit = maxCores.coerceIn(1, total)
+            Log.d(TAG, "Batas core latar belakang: ${this@WorkerService.backgroundCoreLimit} dari $total core")
+        }
     }
 
     override fun onCreate() {
@@ -158,6 +185,11 @@ class WorkerService : Service() {
                     } else {
                         currentJob?.id?.let { cancelJobInternal(it) }
                     }
+                }
+                WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS -> {
+                    val targetPath = intent.getStringExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)
+                    Log.i(TAG, "Menerima aksi ACTION_RESUME_INTERRUPTED_JOBS untuk $targetPath")
+                    handleResumeInterruptedJobs(targetPath)
                 }
             }
         }
@@ -321,6 +353,7 @@ class WorkerService : Service() {
 
         processingJob = serviceScope.launch {
             acquireWakeLock()
+            JobGuardianReceiver.scheduleWatchdog(applicationContext)
             try {
                 while (isActive) {
                     val nextRequest = synchronized(queueLock) {
@@ -352,6 +385,7 @@ class WorkerService : Service() {
                         applicationContext.workerDataStore.edit { preferences ->
                             preferences[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID)] = nextRequest.id
                             preferences[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)] = nextRequest.targetPath
+                            preferences[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_JSON)] = nextRequest.toJson()
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Gagal mencatat status pekerjaan aktif ke DataStore", e)
@@ -399,14 +433,17 @@ class WorkerService : Service() {
                             message = e.localizedMessage ?: "Terjadi kesalahan pada engine"
                         )
                     } finally {
-                        // Hapus penanda aktif di DataStore setelah pekerjaan selesai dieksekusi
-                        try {
-                            applicationContext.workerDataStore.edit { preferences ->
-                                preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID))
-                                preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH))
+                        // Hapus penanda aktif di DataStore setelah pekerjaan selesai dieksekusi normal (bukan saat timing out)
+                        if (!isTimingOut) {
+                            try {
+                                applicationContext.workerDataStore.edit { preferences ->
+                                    preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID))
+                                    preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH))
+                                    preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_JSON))
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Gagal membersihkan penanda aktif dari DataStore", e)
                             }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Gagal membersihkan penanda aktif dari DataStore", e)
                         }
                     }
 
@@ -438,6 +475,7 @@ class WorkerService : Service() {
                     }
                 }
                 if (shouldStop) {
+                    JobGuardianReceiver.cancelWatchdog(applicationContext)
                     releaseWakeLock()
                     stopForegroundService()
                     stopSelf()
@@ -531,6 +569,17 @@ class WorkerService : Service() {
     }
 
     @Synchronized
+    private fun refreshWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.acquire(WAKELOCK_TIMEOUT_MS)
+            } else {
+                acquireWakeLock()
+            }
+        } catch (_: Exception) {}
+    }
+
+    @Synchronized
     private fun releaseWakeLock() {
         try {
             if (wakeLock?.isHeld == true) {
@@ -542,7 +591,7 @@ class WorkerService : Service() {
         }
     }
 
-    // --- System Timeout (Android 15+ API 35) ---
+    // --- System Timeout (Android 15+ API 35) & Session Slicing ---
 
     private fun handleSystemTimeout(startId: Int, fgsType: Int) {
         synchronized(queueLock) {
@@ -550,7 +599,7 @@ class WorkerService : Service() {
             isTimingOut = true
         }
 
-        Log.w(TAG, "System timeout triggered for startId: $startId, fgsType: $fgsType")
+        Log.w(TAG, "System timeout dipicu untuk startId: $startId, fgsType: $fgsType. Memulai session cycling untuk me-reset kuota sistem...")
         processingJob?.cancel()
 
         val active = currentJob
@@ -562,31 +611,19 @@ class WorkerService : Service() {
                 Log.e(TAG, "Error cancelling job on timeout", e)
             }
 
-            trySaveCheckpoint(active)
-
-            // Bersihkan penanda aktif dari DataStore saat timeout sistem
             try {
-                serviceScope.launch {
-                    applicationContext.workerDataStore.edit { preferences ->
-                        preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID))
-                        preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH))
-                    }
-                }
-            } catch (_: Exception) {}
+                com.onlasdan.studio.worker.engine.CheckpointManager.markInterrupted(active.targetPath)
+            } catch (_: Throwable) {}
 
-            val timeoutProgress = JobProgress(
+            // Jadwalkan auto-resume segera via AlarmManager untuk me-reset kuota latar belakang Android
+            JobGuardianReceiver.scheduleImmediateResume(applicationContext, 3000L, active.targetPath)
+
+            val cyclingProgress = JobProgress(
                 id = activeId,
-                status = "FAILED",
-                message = "Operasi dihentikan: Batas waktu background dataSync tercapai"
+                status = "INTERRUPTED",
+                message = "Memperbarui siklus latar belakang (me-reset kuota sistem Android)..."
             )
-            notifyProgress(timeoutProgress)
-            notifyFinished(
-                JobResult(
-                    id = activeId,
-                    success = false,
-                    message = "Waktu eksekusi latar belakang habis oleh sistem Android"
-                )
-            )
+            notifyProgress(cyclingProgress)
         }
 
         synchronized(queueLock) {
@@ -597,14 +634,38 @@ class WorkerService : Service() {
         }
         notifyQueueChanged()
 
-        WorkerNotificationHelper.sendFailedNotification(
-            this,
-            "Operasi dihentikan: Batas waktu latar belakang tercapai"
-        )
-
         releaseWakeLock()
         stopForegroundService()
         stopSelf()
+    }
+
+    private fun handleResumeInterruptedJobs(targetPath: String?) {
+        serviceScope.launch {
+            try {
+                val dataStore = applicationContext.workerDataStore
+                val jobJson = dataStore.data.map { prefs ->
+                    prefs[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_JSON)]
+                }.first()
+
+                if (!jobJson.isNullOrEmpty()) {
+                    val jobRequest = JobRequest.fromJson(jobJson)
+                    if (jobRequest != null) {
+                        Log.i(TAG, "Berhasil merekonstruksi pekerjaan terinterupsi: ${jobRequest.id}")
+                        enqueueJob(jobRequest)
+                        return@launch
+                    }
+                }
+
+                if (!targetPath.isNullOrEmpty()) {
+                    val checkpoint = com.onlasdan.studio.worker.engine.CheckpointManager.getCheckpoint(targetPath)
+                    if (checkpoint != null && !checkpoint.isFinished) {
+                        Log.i(TAG, "Checkpoint terinterupsi ditemukan untuk $targetPath")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal memproses resume pekerjaan terinterupsi", e)
+            }
+        }
     }
 
     private fun trySaveCheckpoint(job: JobRequest) {
@@ -623,6 +684,7 @@ class WorkerService : Service() {
     // --- Callbacks Dispatching ---
 
     private fun notifyProgress(progress: JobProgress) {
+        refreshWakeLock()
         synchronized(callbackLock) {
             val count = callbacks.beginBroadcast()
             try {
@@ -692,7 +754,10 @@ class WorkerService : Service() {
     private fun createDefaultJobEngine(): JobEngine {
         return try {
             val bridge = ShizukuFileBridgeImpl(applicationContext)
-            JobEngineImpl(bridge)
+            JobEngineImpl(
+                shizukuBridge = bridge,
+                coreDispatcherProvider = { getDynamicDispatcher() }
+            )
         } catch (e: Throwable) {
             Log.d(TAG, "Using fallback JobEngine: ${e.message}")
             object : JobEngine {

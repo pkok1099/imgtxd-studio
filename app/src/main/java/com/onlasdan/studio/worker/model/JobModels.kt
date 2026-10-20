@@ -51,6 +51,66 @@ data class JobRequest(
     companion object CREATOR : Parcelable.Creator<JobRequest> {
         override fun createFromParcel(parcel: Parcel): JobRequest = JobRequest(parcel)
         override fun newArray(size: Int): Array<JobRequest?> = arrayOfNulls(size)
+
+        fun fromJson(jsonStr: String): JobRequest? {
+            return try {
+                val json = org.json.JSONObject(jsonStr)
+                val entryNames = mutableListOf<String>()
+                val entriesArr = json.optJSONArray("entryNames")
+                if (entriesArr != null) {
+                    for (i in 0 until entriesArr.length()) {
+                        entryNames.add(entriesArr.getString(i))
+                    }
+                }
+                val sourceFiles = mutableListOf<String>()
+                val sourcesArr = json.optJSONArray("sourceFilePaths")
+                if (sourcesArr != null) {
+                    for (i in 0 until sourcesArr.length()) {
+                        sourceFiles.add(sourcesArr.getString(i))
+                    }
+                }
+                val parameters = mutableMapOf<String, String>()
+                val paramsObj = json.optJSONObject("parameters")
+                if (paramsObj != null) {
+                    val keys = paramsObj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        parameters[k] = paramsObj.optString(k, "")
+                    }
+                }
+                JobRequest(
+                    id = json.getString("id"),
+                    type = json.getString("type"),
+                    targetPath = json.getString("targetPath"),
+                    isShizuku = json.optBoolean("isShizuku", false),
+                    destinationPath = if (json.isNull("destinationPath")) null else json.optString("destinationPath"),
+                    entryNames = entryNames,
+                    sourceFilePaths = sourceFiles,
+                    parameters = parameters
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    fun toJson(): String {
+        val json = org.json.JSONObject()
+        json.put("id", id)
+        json.put("type", type)
+        json.put("targetPath", targetPath)
+        json.put("isShizuku", isShizuku)
+        json.put("destinationPath", destinationPath)
+        val entriesArr = org.json.JSONArray()
+        entryNames.forEach { entriesArr.put(it) }
+        json.put("entryNames", entriesArr)
+        val sourcesArr = org.json.JSONArray()
+        sourceFilePaths.forEach { sourcesArr.put(it) }
+        json.put("sourceFilePaths", sourcesArr)
+        val paramsObj = org.json.JSONObject()
+        parameters.forEach { (k, v) -> paramsObj.put(k, v) }
+        json.put("parameters", paramsObj)
+        return json.toString()
     }
 }
 

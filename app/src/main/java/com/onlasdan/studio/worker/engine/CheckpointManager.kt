@@ -145,7 +145,36 @@ object CheckpointManager {
      */
     fun hasIncompleteCheckpoint(targetPath: String): Boolean {
         val cp = getCheckpoint(targetPath) ?: return false
-        return !cp.isFinished
+        return !cp.isFinished || cp.status == "INTERRUPTED"
+    }
+
+    /**
+     * Mendapatkan state resume untuk operasi yang terinterupsi.
+     * Mengembalikan checkpoint jika berkas .tmp target valid dan terdapat progres tersimpan.
+     */
+    @Synchronized
+    fun getResumeState(targetPath: String): ProcessCheckpoint? {
+        val cp = getCheckpoint(targetPath) ?: return null
+        val tmpFile = SafeFileWriter.getTempFile(targetPath)
+        return if (tmpFile.exists() && tmpFile.length() > 0L && cp.processedItems > 0 && cp.processedItems < cp.totalItems) {
+            cp
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Menandai status checkpoint menjadi INTERRUPTED (misal saat batas dataSync onTimeout dipicu).
+     */
+    @Synchronized
+    fun markInterrupted(targetPath: String): ProcessCheckpoint? {
+        val existing = getCheckpoint(targetPath) ?: return null
+        val updated = existing.copy(
+            status = "INTERRUPTED",
+            timestamp = System.currentTimeMillis()
+        )
+        saveCheckpointToFile(updated)
+        return updated
     }
 
     private fun saveCheckpointToFile(checkpoint: ProcessCheckpoint) {

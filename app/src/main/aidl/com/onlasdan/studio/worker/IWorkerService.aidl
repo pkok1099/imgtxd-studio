@@ -11,4 +11,6 @@ interface IWorkerService {
     List<JobProgress> getActiveJobs();
     void registerCallback(IWorkerCallback callback);
     void unregisterCallback(IWorkerCallback callback);
+    void setAppForegroundState(boolean isForeground);
+    void setBackgroundCoreLimit(int maxCores);
 }

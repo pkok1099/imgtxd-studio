@@ -13,6 +13,9 @@ import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.process.ProcessType
 import com.onlasdan.studio.worker.IWorkerCallback
 import com.onlasdan.studio.worker.IWorkerService
+import com.onlasdan.studio.worker.WorkerContracts
+import com.onlasdan.studio.worker.workerDataStore
+import androidx.datastore.preferences.core.intPreferencesKey
 import com.onlasdan.studio.worker.model.JobProgress
 import com.onlasdan.studio.worker.model.JobRequest
 import com.onlasdan.studio.worker.model.JobResult
@@ -90,6 +93,33 @@ class WorkerProcessRepositoryImpl private constructor(
         val title: String
     )
 
+    @Volatile
+    private var isAppInForeground = true
+    @Volatile
+    private var currentBackgroundCoreLimit = WorkerContracts.DEFAULT_BACKGROUND_CPU_CORES
+
+    fun setAppForegroundState(isForeground: Boolean) {
+        this.isAppInForeground = isForeground
+        scope.launch {
+            try {
+                service?.setAppForegroundState(isForeground)
+            } catch (e: Exception) {
+                Log.w(TAG, "Gagal mengirim setAppForegroundState", e)
+            }
+        }
+    }
+
+    fun setBackgroundCoreLimit(maxCores: Int) {
+        this.currentBackgroundCoreLimit = maxCores
+        scope.launch {
+            try {
+                service?.setBackgroundCoreLimit(maxCores)
+            } catch (e: Exception) {
+                Log.w(TAG, "Gagal mengirim setBackgroundCoreLimit", e)
+            }
+        }
+    }
+
     private val deathRecipient = IBinder.DeathRecipient {
         Log.w(TAG, "Koneksi ke WorkerService terputus tak terduga (DeathRecipient dipicu)")
         handleServiceDied()
@@ -131,9 +161,11 @@ class WorkerProcessRepositoryImpl private constructor(
                 Log.e(TAG, "Gagal mendaftarkan IWorkerCallback ke WorkerService", e)
             }
 
-            // Sinkronkan antrean aktif dari service
+            // Sinkronkan antrean aktif dan status CPU core ke service
             scope.launch {
                 try {
+                    svc.setAppForegroundState(isAppInForeground)
+                    svc.setBackgroundCoreLimit(currentBackgroundCoreLimit)
                     val activeJobs = svc.activeJobs
                     if (!activeJobs.isNullOrEmpty()) {
                         handleQueueChanged(activeJobs)
@@ -175,6 +207,20 @@ class WorkerProcessRepositoryImpl private constructor(
 
             // 2. Lakukan inisiasi koneksi ke WorkerService di latar belakang
             ensureConnected()
+        }
+
+        // 3. Amati perubahan setting background CPU cores dari DataStore
+        scope.launch {
+            try {
+                context.workerDataStore.data.collect { prefs ->
+                    val cores = prefs[intPreferencesKey(WorkerContracts.PREF_KEY_BACKGROUND_CPU_CORES)]
+                        ?: WorkerContracts.DEFAULT_BACKGROUND_CPU_CORES
+                    currentBackgroundCoreLimit = cores
+                    try {
+                        service?.setBackgroundCoreLimit(cores)
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
         }
     }
 
