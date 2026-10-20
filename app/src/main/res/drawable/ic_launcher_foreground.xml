@@ -5,43 +5,42 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Isometric Archive Base Container -->
-    <!-- Top Face (Bright Sky Blue) -->
+    <!-- Isometric Studio Block / Archive Unit (PrimaryPink & SoftBlush) -->
+    <!-- Top Face -->
     <path
-        android:fillColor="#38BDF8"
-        android:pathData="M54,26 L78,39 L54,52 L30,39 Z" />
+        android:fillColor="#E8457C"
+        android:pathData="M54,28 L78,41 L54,54 L30,41 Z" />
 
-    <!-- Left Face (Deep Electric Blue) -->
+    <!-- Left Face -->
     <path
-        android:fillColor="#0284C7"
-        android:pathData="M30,39 L54,52 L54,80 L30,67 Z" />
+        android:fillColor="#BA2E5C"
+        android:pathData="M30,41 L54,54 L54,80 L30,67 Z" />
 
-    <!-- Right Face (Midnight Cyan Blue) -->
+    <!-- Right Face -->
     <path
-        android:fillColor="#0369A1"
-        android:pathData="M54,52 L78,39 L78,67 L54,80 Z" />
+        android:fillColor="#962047"
+        android:pathData="M54,54 L78,41 L78,67 L54,80 Z" />
 
-    <!-- Isometric Cutout / Drawer Groove 1 -->
+    <!-- Groove Cutouts for Texture / Archive Layering -->
     <path
-        android:strokeColor="#0EA5E9"
+        android:strokeColor="#F4B8C6"
         android:strokeWidth="1.5"
-        android:pathData="M30,52 L54,65 L78,52" />
+        android:pathData="M30,54 L54,67 L78,54" />
 
-    <!-- Isometric Cutout / Drawer Groove 2 -->
     <path
-        android:strokeColor="#0EA5E9"
+        android:strokeColor="#F4B8C6"
         android:strokeWidth="1.5"
-        android:pathData="M30,65 L54,78 L78,65" />
+        android:pathData="M30,67 L54,80 L78,67" />
 
-    <!-- Top Surface Inner Accent Border -->
+    <!-- Top Surface Inner Accent -->
     <path
-        android:strokeColor="#BAE6FD"
-        android:strokeWidth="1"
-        android:pathData="M54,30 L73,40 L54,50 L35,40 Z" />
+        android:strokeColor="#F4B8C6"
+        android:strokeWidth="1.2"
+        android:pathData="M54,32 L73,42 L54,51 L35,42 Z" />
 
-    <!-- Center Lightning / Turbo Badge (Shizuku + Native Power) -->
+    <!-- Center Studio Core Glyph -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,32 L60,32 L55,41 L61,41 L50,54 L53,44 L48,44 Z" />
+        android:pathData="M54,35 L58,41 L54,47 L50,41 Z" />
 
 </vector>

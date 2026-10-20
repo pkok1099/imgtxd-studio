@@ -4,16 +4,16 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -22,6 +22,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.util.AppIntegrity
 import com.onlasdan.studio.util.ParentArchiveInfo
@@ -51,7 +53,10 @@ class TxdEditorActivity : ComponentActivity() {
     private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { _, _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
         super.onCreate(savedInstanceState)
 
         if (!AppIntegrity.checkIntegrity(this)) {
@@ -116,32 +121,59 @@ class TxdEditorActivity : ComponentActivity() {
                                     showUnsavedChangesPrompt = false
                                     pendingIntentToLoad = null
                                 },
-                                title = { Text("Perubahan Belum Disimpan") },
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                title = {
+                                    Text(
+                                        text = "Perubahan Belum Disimpan",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
                                 text = {
-                                    Text("File TXD saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan perubahan sebelum membuka file baru?")
+                                    Text(
+                                        text = "File TXD saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan perubahan sebelum membuka file baru?",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
                                 },
                                 confirmButton = {
-                                    Button(onClick = {
-                                        showUnsavedChangesPrompt = false
-                                        val next = pendingIntentToLoad
-                                        pendingIntentToLoad = null
-                                        if (next != null) {
-                                            executeLoadIntent(next)
-                                        }
-                                    }) {
+                                    Button(
+                                        onClick = {
+                                            showUnsavedChangesPrompt = false
+                                            val next = pendingIntentToLoad
+                                            pendingIntentToLoad = null
+                                            if (next != null) {
+                                                executeLoadIntent(next)
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    ) {
                                         Text("Simpan & Buka")
                                     }
                                 },
                                 dismissButton = {
-                                    OutlinedButton(onClick = {
-                                        showUnsavedChangesPrompt = false
-                                        val next = pendingIntentToLoad
-                                        pendingIntentToLoad = null
-                                        if (next != null) {
-                                            executeLoadIntent(next)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = {
+                                            showUnsavedChangesPrompt = false
+                                            pendingIntentToLoad = null
+                                        }) {
+                                            Text("Batal")
                                         }
-                                    }) {
-                                        Text("Buang")
+                                        OutlinedButton(
+                                            onClick = {
+                                                showUnsavedChangesPrompt = false
+                                                val next = pendingIntentToLoad
+                                                pendingIntentToLoad = null
+                                                if (next != null) {
+                                                    executeLoadIntent(next)
+                                                }
+                                            },
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                        ) {
+                                            Text("Buang")
+                                        }
                                     }
                                 }
                             )

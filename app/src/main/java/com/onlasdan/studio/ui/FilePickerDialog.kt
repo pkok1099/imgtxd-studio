@@ -3,6 +3,7 @@ package com.onlasdan.studio.ui
 import android.os.Environment
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -16,17 +17,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.onlasdan.studio.ui.theme.SemanticColors
 import com.onlasdan.studio.util.ShizukuFileItem
 import com.onlasdan.studio.util.ShizukuManager
 import kotlinx.coroutines.Dispatchers
@@ -283,9 +286,9 @@ fun FilePickerDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    alpha = (animProgress * 0.55f).coerceIn(0f, 0.55f)
+                    alpha = (animProgress * 0.6f).coerceIn(0f, 0.6f)
                 }
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.scrim)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -303,7 +306,8 @@ fun FilePickerDialog(
                     val slideOffset = (1f - animProgress) * size.height
                     translationY = slideOffset + dragOffsetY
                 },
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp
         ) {
@@ -335,7 +339,7 @@ fun FilePickerDialog(
                             .width(38.dp)
                             .height(4.5.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                color = MaterialTheme.colorScheme.outlineVariant,
                                 shape = RoundedCornerShape(2.5.dp)
                             )
                     )
@@ -358,7 +362,7 @@ fun FilePickerDialog(
                         },
                         enabled = canGoUp
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Kembali ke folder sebelumnya")
                     }
 
                     Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
@@ -370,6 +374,7 @@ fun FilePickerDialog(
                         Text(
                             text = currentPath.replace(defaultRoot, "Storage"),
                             style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -377,7 +382,7 @@ fun FilePickerDialog(
                     }
 
                     IconButton(onClick = { dismissWithAnimation() }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                        Icon(Icons.Outlined.Close, contentDescription = "Tutup pemilih berkas")
                     }
                 }
 
@@ -404,11 +409,12 @@ fun FilePickerDialog(
                             label = { Text(label) },
                             leadingIcon = {
                                 if (label.startsWith("GTA")) {
-                                    Icon(Icons.Default.SportsEsports, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Outlined.SportsEsports, contentDescription = null, modifier = Modifier.size(16.dp))
                                 } else {
-                                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
                                 }
-                            }
+                            },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         )
                     }
                 }
@@ -421,9 +427,13 @@ fun FilePickerDialog(
                             .padding(horizontal = 16.dp, vertical = 4.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (shizukuGranted)
-                                MaterialTheme.colorScheme.primaryContainer
+                                SemanticColors.SuccessContainer
                             else
                                 MaterialTheme.colorScheme.errorContainer
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (shizukuGranted) SemanticColors.Success.copy(alpha = 0.4f) else MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
                         )
                     ) {
                         Row(
@@ -431,9 +441,9 @@ fun FilePickerDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (shizukuGranted) Icons.Default.Bolt else Icons.Default.Warning,
+                                imageVector = if (shizukuGranted) Icons.Outlined.Bolt else Icons.Outlined.Warning,
                                 contentDescription = null,
-                                tint = if (shizukuGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                tint = if (shizukuGranted) SemanticColors.Success else MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -445,7 +455,7 @@ fun FilePickerDialog(
                                         "Akses Android/data memerlukan Shizuku",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (shizukuGranted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                                    color = if (shizukuGranted) SemanticColors.OnSuccessContainer else MaterialTheme.colorScheme.onErrorContainer
                                 )
                                 if (!shizukuGranted) {
                                     Text(
@@ -461,6 +471,10 @@ fun FilePickerDialog(
                                         ShizukuManager.requestPermission()
                                         shizukuGranted = ShizukuManager.hasPermission()
                                     },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError
+                                    ),
                                     modifier = Modifier.padding(start = 8.dp)
                                 ) {
                                     Text("Izinkan")
@@ -475,14 +489,18 @@ fun FilePickerDialog(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     placeholder = { Text("Cari nama file...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
                             }
                         }
                     },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    ),
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -539,7 +557,7 @@ fun FilePickerDialog(
                                 .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(Icons.Default.FolderOff, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Outlined.FolderOff, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(errorMessage!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                         }
@@ -581,27 +599,33 @@ fun FilePickerDialog(
                                                 checked = selectedPaths.contains(item.path),
                                                 onCheckedChange = { checked ->
                                                     if (checked) selectedPaths.add(item.path) else selectedPaths.remove(item.path)
-                                                }
+                                                },
+                                                colors = CheckboxDefaults.colors(
+                                                    checkedColor = MaterialTheme.colorScheme.primary,
+                                                    checkmarkColor = MaterialTheme.colorScheme.onPrimary,
+                                                    uncheckedColor = MaterialTheme.colorScheme.outline
+                                                )
                                             )
                                         } else {
                                             val icon = when {
-                                                item.isDirectory -> Icons.Default.Folder
-                                                item.name.endsWith(".img", ignoreCase = true) -> Icons.Default.Archive
-                                                item.name.endsWith(".dff", ignoreCase = true) -> Icons.Default.ViewInAr
-                                                item.name.endsWith(".txd", ignoreCase = true) -> Icons.Default.Image
-                                                isImageFile(item.name) -> Icons.Default.Image
-                                                else -> Icons.Default.InsertDriveFile
+                                                item.isDirectory -> Icons.Outlined.Folder
+                                                item.name.endsWith(".img", ignoreCase = true) -> Icons.Outlined.Archive
+                                                item.name.endsWith(".dff", ignoreCase = true) -> Icons.Outlined.ViewInAr
+                                                item.name.endsWith(".txd", ignoreCase = true) -> Icons.Outlined.Image
+                                                isImageFile(item.name) -> Icons.Outlined.Image
+                                                else -> Icons.Outlined.Description
                                             }
                                             Icon(
                                                 imageVector = icon,
                                                 contentDescription = null,
-                                                tint = if (item.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     },
                                     headlineContent = {
                                         Text(
                                             text = item.name,
+                                            fontFamily = FontFamily.Monospace,
                                             fontWeight = if (item.isDirectory) FontWeight.SemiBold else FontWeight.Normal,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -612,7 +636,9 @@ fun FilePickerDialog(
                                             val sizeKb = item.size / 1024
                                             Text(
                                                 text = if (sizeKb > 1024) "${sizeKb / 1024} MB" else "$sizeKb KB",
-                                                style = MaterialTheme.typography.bodySmall
+                                                fontFamily = FontFamily.Monospace,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     },
@@ -620,8 +646,10 @@ fun FilePickerDialog(
                                         if (item.isShizuku) {
                                             AssistChip(
                                                 onClick = {},
-                                                label = { Text("Shizuku", style = MaterialTheme.typography.labelSmall) },
-                                                leadingIcon = { Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(12.dp)) }
+                                                label = { Text("Shizuku", style = MaterialTheme.typography.labelSmall, color = SemanticColors.OnSuccessContainer) },
+                                                leadingIcon = { Icon(Icons.Outlined.Bolt, contentDescription = null, modifier = Modifier.size(12.dp), tint = SemanticColors.Success) },
+                                                colors = AssistChipDefaults.assistChipColors(containerColor = SemanticColors.SuccessContainer),
+                                                border = BorderStroke(1.dp, SemanticColors.Success.copy(alpha = 0.4f))
                                             )
                                         }
                                     }
@@ -633,7 +661,7 @@ fun FilePickerDialog(
 
                 // Bottom actions bar
                 if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
-                    HorizontalDivider()
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -658,16 +686,20 @@ fun FilePickerDialog(
                                         selectMultipleWithAnimation(selectedPaths.toList(), isCurrentPathRestricted && shizukuGranted)
                                     }
                                 },
-                                enabled = selectedPaths.isNotEmpty()
+                                enabled = selectedPaths.isNotEmpty(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
                             ) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Lanjutkan (${selectedPaths.size})")
                             }
                         }
                     }
                 } else if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER) {
-                    HorizontalDivider()
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -680,9 +712,13 @@ fun FilePickerDialog(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
-                            onClick = { selectWithAnimation(currentPath, isCurrentPathRestricted && shizukuGranted) }
+                            onClick = { selectWithAnimation(currentPath, isCurrentPathRestricted && shizukuGranted) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
                         ) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Pilih Folder Ini")
                         }

@@ -1,5 +1,6 @@
 package com.onlasdan.studio.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,20 +12,21 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.txd.TxdEntry
+import com.onlasdan.studio.ui.theme.SemanticColors
 import com.onlasdan.studio.util.ShizukuManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -138,6 +140,12 @@ fun TxdEditorScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
                 title = {
                     Column {
                         Text(
@@ -150,36 +158,41 @@ fun TxdEditorScreen(
                         Text(
                             text = "${textures.size} Tekstur RenderWare",
                             style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Kembali")
                     }
                 },
                 actions = {
                     if (textures.isNotEmpty()) {
                         // Auto Replace Button
-                        FilledTonalButton(
+                        Button(
                             onClick = { showAutoReplaceModeChoice = true },
-                            modifier = Modifier.padding(end = 4.dp)
+                            modifier = Modifier.padding(end = 4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
                         ) {
-                            Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Auto Replace")
+                            Text("Auto Replace", style = MaterialTheme.typography.labelLarge)
                         }
 
                         // Export All Button
                         IconButton(onClick = { showExportAllPicker = true }) {
-                            Icon(Icons.Default.FileDownload, contentDescription = "Export Semua PNG")
+                            Icon(Icons.Outlined.FileDownload, contentDescription = "Ekspor semua PNG")
                         }
                     }
 
                     // Settings Button
                     IconButton(onClick = { showSettingsDialog = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Pengaturan")
+                        Icon(Icons.Outlined.Settings, contentDescription = "Pengaturan")
                     }
                 }
             )
@@ -208,7 +221,9 @@ fun TxdEditorScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Row(
@@ -220,6 +235,7 @@ fun TxdEditorScreen(
                                         Text(
                                             text = active.name,
                                             style = MaterialTheme.typography.titleMedium,
+                                            fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -227,29 +243,40 @@ fun TxdEditorScreen(
                                         Text(
                                             text = "${active.dimensionsLabel} • ${active.formatLabel} • ${active.depth}-bit",
                                             style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
 
-                                    Row {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                         IconButton(onClick = { entryToExport = active }) {
-                                            Icon(Icons.Default.FileDownload, contentDescription = "Export PNG")
+                                            Icon(
+                                                Icons.Outlined.FileDownload,
+                                                contentDescription = "Ekspor PNG",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
-                                        FilledTonalIconButton(onClick = { entryToReplace = active }) {
-                                            Icon(Icons.Default.SwapHoriz, contentDescription = "Ganti Tekstur")
+                                        FilledTonalIconButton(
+                                            onClick = { entryToReplace = active },
+                                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        ) {
+                                            Icon(Icons.Outlined.SwapHoriz, contentDescription = "Ganti tekstur")
                                         }
                                     }
                                 }
 
                                 Spacer(Modifier.height(12.dp))
 
-                                // Checkerboard / dark background for preview
+                                // Dark container for preview
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(200.dp)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF222222)),
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     val bmp = active.bitmap
@@ -264,7 +291,7 @@ fun TxdEditorScreen(
                                         Text(
                                             text = "Preview tidak tersedia untuk format ini",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color.LightGray
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
@@ -277,6 +304,7 @@ fun TxdEditorScreen(
                         text = "Daftar Tekstur (${textures.size})",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                     )
 
@@ -293,13 +321,20 @@ fun TxdEditorScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { activeTextureName = entry.name },
+                                shape = RoundedCornerShape(8.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (isSelected)
-                                        MaterialTheme.colorScheme.primaryContainer
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
                                     else
-                                        MaterialTheme.colorScheme.surface
+                                        MaterialTheme.colorScheme.surfaceContainer
                                 ),
-                                elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 4.dp else 1.dp)
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.outlineVariant
+                                )
                             ) {
                                 Column(
                                     modifier = Modifier.padding(8.dp),
@@ -309,7 +344,7 @@ fun TxdEditorScreen(
                                         modifier = Modifier
                                             .size(100.dp)
                                             .clip(RoundedCornerShape(6.dp))
-                                            .background(Color(0xFF222222)),
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         val bmp = entry.bitmap
@@ -322,9 +357,9 @@ fun TxdEditorScreen(
                                             )
                                         } else {
                                             Icon(
-                                                Icons.Default.Image,
+                                                Icons.Outlined.Image,
                                                 contentDescription = null,
-                                                tint = Color.LightGray
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
@@ -332,6 +367,7 @@ fun TxdEditorScreen(
                                     Text(
                                         text = entry.name,
                                         style = MaterialTheme.typography.labelMedium,
+                                        fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -339,6 +375,7 @@ fun TxdEditorScreen(
                                     Text(
                                         text = "${entry.dimensionsLabel} • ${entry.formatLabel}",
                                         style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = FontFamily.Monospace,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1
                                     )
@@ -353,21 +390,27 @@ fun TxdEditorScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f)),
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(
                             modifier = Modifier.padding(20.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
                             Text(
                                 text = if (isScanningFolder) "Memindai gambar..." else "Memproses tekstur...",
-                                style = MaterialTheme.typography.bodyMedium
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -426,7 +469,8 @@ fun TxdEditorScreen(
     if (showAutoReplaceModeChoice) {
         AlertDialog(
             onDismissRequest = { showAutoReplaceModeChoice = false },
-            icon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            icon = { Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
             title = { Text("Auto Replace Tekstur") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -435,14 +479,15 @@ fun TxdEditorScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.height(4.dp))
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             showAutoReplaceModeChoice = false
                             showAutoReplaceFolderPicker = true
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                     ) {
-                        Icon(Icons.Default.Folder, contentDescription = null)
+                        Icon(Icons.Outlined.FolderOpen, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text("Pilih Folder (Scan Otomatis)")
                     }
@@ -451,9 +496,10 @@ fun TxdEditorScreen(
                             showAutoReplaceModeChoice = false
                             showAutoReplaceMultiFilePicker = true
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                     ) {
-                        Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                        Icon(Icons.Outlined.PhotoLibrary, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text("Pilih Beberapa File Gambar")
                     }
@@ -498,7 +544,8 @@ fun TxdEditorScreen(
     autoReplaceMatches?.let { matches ->
         AlertDialog(
             onDismissRequest = { autoReplaceMatches = null },
-            icon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            icon = { Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
             title = { Text("Konfirmasi Auto-Replace") },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -512,7 +559,8 @@ fun TxdEditorScreen(
                             .fillMaxWidth()
                             .heightIn(max = 240.dp),
                         shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         LazyColumn(
                             contentPadding = PaddingValues(8.dp),
@@ -525,21 +573,23 @@ fun TxdEditorScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        Icons.Default.Image,
+                                        Icons.Outlined.Image,
                                         contentDescription = null,
                                         modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary
+                                        tint = MaterialTheme.colorScheme.secondary
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
                                         text = tex.name,
                                         style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Spacer(Modifier.width(4.dp))
                                     Text(
                                         text = "(${tex.dimensionsLabel})",
                                         style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = FontFamily.Monospace,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Spacer(Modifier.width(6.dp))
@@ -548,7 +598,8 @@ fun TxdEditorScreen(
                                     Text(
                                         text = fileName,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.secondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -564,7 +615,11 @@ fun TxdEditorScreen(
                         val targets = autoReplaceMatches ?: return@Button
                         autoReplaceMatches = null
                         onAutoReplace(targets, isAutoReplaceShizuku)
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
                 ) {
                     Text("Ganti Sekarang (${matches.size})")
                 }
@@ -581,7 +636,8 @@ fun TxdEditorScreen(
     if (showNoMatchesDialog) {
         AlertDialog(
             onDismissRequest = { showNoMatchesDialog = false },
-            icon = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            icon = { Icon(Icons.Outlined.Info, contentDescription = null, tint = SemanticColors.Warning) },
             title = { Text("Tidak Ada Tekstur Cocok") },
             text = {
                 Text(
@@ -592,7 +648,13 @@ fun TxdEditorScreen(
                 )
             },
             confirmButton = {
-                Button(onClick = { showNoMatchesDialog = false }) {
+                Button(
+                    onClick = { showNoMatchesDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
                     Text("Mengerti")
                 }
             }

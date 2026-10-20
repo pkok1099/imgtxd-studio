@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.onlasdan.studio.txd.TxdEntry
+import com.onlasdan.studio.ui.theme.ImgToolTheme
 import java.io.File
 
 @Composable
@@ -27,20 +28,22 @@ fun TxdViewerDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            TxdEditorScreen(
-                txdName = txdName,
-                textures = textures,
-                isLoading = isLoading,
-                statusMessage = statusMessage,
-                errorMessage = errorMessage,
-                onClose = onDismissRequest,
-                onExportSingle = onExportSingle,
-                onExportAll = onExportAll,
-                onReplaceTexture = onReplaceTexture,
-                onAutoReplace = onAutoReplace,
-                onClearMessages = onClearMessages
-            )
+        ImgToolTheme {
+            Box(modifier = Modifier.fillMaxSize()) {
+                TxdEditorScreen(
+                    txdName = txdName,
+                    textures = textures,
+                    isLoading = isLoading,
+                    statusMessage = statusMessage,
+                    errorMessage = errorMessage,
+                    onClose = onDismissRequest,
+                    onExportSingle = onExportSingle,
+                    onExportAll = onExportAll,
+                    onReplaceTexture = onReplaceTexture,
+                    onAutoReplace = onAutoReplace,
+                    onClearMessages = onClearMessages
+                )
+            }
         }
     }
 }
