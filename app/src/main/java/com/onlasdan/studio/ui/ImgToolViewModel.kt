@@ -740,9 +740,11 @@ class ImgToolViewModel : ViewModel() {
                     }
                 }
 
+                val updatedList = currentEntries.toList()
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
+                        txdEntries = updatedList,
                         selectedTxdEntry = targetEntry,
                         statusMessage = "Tekstur ${targetEntry.name} berhasil diganti!"
                     )
@@ -752,6 +754,80 @@ class ImgToolViewModel : ViewModel() {
                     it.copy(
                         isTxdLoading = false,
                         errorMessage = "Gagal mengganti tekstur: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun autoReplaceTextures(
+        context: Context,
+        matches: List<Pair<TxdEntry, String>>,
+        isShizuku: Boolean
+    ) {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val currentEntries = _uiState.value.txdEntries
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Memproses auto-replace ${matches.size} tekstur...") }
+            try {
+                var replacedCount = 0
+                withContext(Dispatchers.IO) {
+                    for ((entry, imagePath) in matches) {
+                        val imageFile = if (isShizuku || ShizukuManager.isRestrictedPath(imagePath)) {
+                            val tmp = File(context.cacheDir, "autoreplace_tmp_" + File(imagePath).name)
+                            ShizukuManager.copyToLocal(imagePath, tmp)
+                            tmp
+                        } else {
+                            File(imagePath)
+                        }
+
+                        val newBitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
+                        if (imageFile != File(imagePath)) {
+                            imageFile.delete()
+                        }
+
+                        if (newBitmap != null) {
+                            TxdBuilder.replaceTexture(entry, newBitmap)
+                            replacedCount++
+                        }
+                    }
+
+                    if (replacedCount > 0) {
+                        TxdBuilder.buildToFile(currentEntries, tempTxdFile)
+
+                        val archive = _uiState.value.archive
+                        if (sourceImgEntry != null && archive != null) {
+                            archive.replace(sourceImgEntry, tempTxdFile)
+
+                            val imgOriginalPath = _uiState.value.originalPath
+                            if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                                ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                            }
+                        }
+
+                        if (isShizukuTxd && originalPath != null) {
+                            ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
+                        }
+                    }
+                }
+
+                val updatedList = currentEntries.toList()
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        txdEntries = updatedList,
+                        statusMessage = "Berhasil mengganti $replacedCount tekstur secara otomatis!"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Gagal auto-replace tekstur: ${e.localizedMessage}"
                     )
                 }
             }

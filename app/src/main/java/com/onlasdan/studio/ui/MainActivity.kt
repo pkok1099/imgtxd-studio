@@ -666,6 +666,9 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             },
             onReplaceTexture = { entry, imagePath, isShizuku ->
                 viewModel.replaceTexture(context, entry, imagePath, isShizuku)
+            },
+            onAutoReplace = { matches, isShizuku ->
+                viewModel.autoReplaceTextures(context, matches, isShizuku)
             }
         )
     }

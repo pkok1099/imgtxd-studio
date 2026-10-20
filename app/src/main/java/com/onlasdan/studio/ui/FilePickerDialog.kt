@@ -38,6 +38,8 @@ enum class PickerMode {
     OPEN_IMG,
     OPEN_TXD,
     PICK_FILE,
+    PICK_IMAGE,
+    PICK_MULTIPLE_IMAGES,
     PICK_FOLDER,
     SELECT_FOLDER
 }
@@ -49,6 +51,12 @@ data class UnifiedFileItem(
     val size: Long = 0,
     val isShizuku: Boolean = false
 )
+
+private fun isImageFile(name: String): Boolean {
+    val lower = name.lowercase()
+    return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+           lower.endsWith(".bmp") || lower.endsWith(".webp")
+}
 
 private val EaseOutCubic = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1.0f)
 private val EaseInCubic = CubicBezierEasing(0.55f, 0.055f, 0.675f, 0.19f)
@@ -82,7 +90,8 @@ fun FilePickerDialog(
     mode: PickerMode,
     initialPath: String? = null,
     onDismissRequest: () -> Unit,
-    onFileSelected: (path: String, isShizuku: Boolean) -> Unit
+    onFileSelected: (path: String, isShizuku: Boolean) -> Unit = { _, _ -> },
+    onMultipleFilesSelected: (paths: List<String>, isShizuku: Boolean) -> Unit = { _, _ -> }
 ) {
     val coroutineScope = rememberCoroutineScope()
     val defaultRoot = Environment.getExternalStorageDirectory()?.absolutePath ?: "/storage/emulated/0"
@@ -93,6 +102,7 @@ fun FilePickerDialog(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var shizukuGranted by remember { mutableStateOf(ShizukuManager.hasPermission()) }
+    val selectedPaths = remember { mutableStateListOf<String>() }
 
     var animProgress by remember { mutableFloatStateOf(0f) }
     var isClosing by remember { mutableStateOf(false) }
@@ -127,6 +137,20 @@ fun FilePickerDialog(
                 easing = EaseInCubic
             ) { animProgress = it }
             onFileSelected(path, isShizuku)
+        }
+    }
+
+    fun selectMultipleWithAnimation(paths: List<String>, isShizuku: Boolean) {
+        if (isClosing) return
+        isClosing = true
+        coroutineScope.launch {
+            animateFloatTo(
+                from = animProgress,
+                to = 0f,
+                durationMs = 180,
+                easing = EaseInCubic
+            ) { animProgress = it }
+            onMultipleFilesSelected(paths, isShizuku)
         }
     }
 
@@ -201,6 +225,9 @@ fun FilePickerDialog(
                     }
                     PickerMode.OPEN_TXD -> items.filter {
                         it.isDirectory || it.name.endsWith(".txd", ignoreCase = true)
+                    }
+                    PickerMode.PICK_IMAGE, PickerMode.PICK_MULTIPLE_IMAGES -> items.filter {
+                        it.isDirectory || isImageFile(it.name)
                     }
                     PickerMode.PICK_FILE -> items
                     PickerMode.PICK_FOLDER, PickerMode.SELECT_FOLDER -> items.filter { it.isDirectory }
@@ -467,6 +494,40 @@ fun FilePickerDialog(
                     else fileItems.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
                 }
 
+                if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
+                    val selectableFiles = displayedItems.filter { !it.isDirectory }
+                    if (selectableFiles.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${selectedPaths.size} dari ${selectableFiles.size} gambar dipilih",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = {
+                                    val allSelected = selectableFiles.all { selectedPaths.contains(it.path) }
+                                    if (allSelected) {
+                                        selectableFiles.forEach { selectedPaths.remove(it.path) }
+                                    } else {
+                                        selectableFiles.forEach {
+                                            if (!selectedPaths.contains(it.path)) selectedPaths.add(it.path)
+                                        }
+                                    }
+                                }
+                            ) {
+                                val allSelected = selectableFiles.all { selectedPaths.contains(it.path) }
+                                Text(if (allSelected) "Batal Semua" else "Pilih Semua")
+                            }
+                        }
+                    }
+                }
+
                 // File list
                 Box(modifier = Modifier.weight(1f)) {
                     if (isLoading) {
@@ -492,7 +553,7 @@ fun FilePickerDialog(
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
-                                bottom = if (mode == PickerMode.SELECT_FOLDER) 8.dp else 48.dp
+                                bottom = if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER || mode == PickerMode.PICK_MULTIPLE_IMAGES) 8.dp else 48.dp
                             )
                         ) {
                             items(
@@ -504,23 +565,39 @@ fun FilePickerDialog(
                                     modifier = Modifier.clickable {
                                         if (item.isDirectory) {
                                             currentPath = item.path
+                                        } else if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
+                                            if (selectedPaths.contains(item.path)) {
+                                                selectedPaths.remove(item.path)
+                                            } else {
+                                                selectedPaths.add(item.path)
+                                            }
                                         } else {
                                             selectWithAnimation(item.path, item.isShizuku)
                                         }
                                     },
                                     leadingContent = {
-                                        val icon = when {
-                                            item.isDirectory -> Icons.Default.Folder
-                                            item.name.endsWith(".img", ignoreCase = true) -> Icons.Default.Archive
-                                            item.name.endsWith(".dff", ignoreCase = true) -> Icons.Default.ViewInAr
-                                            item.name.endsWith(".txd", ignoreCase = true) -> Icons.Default.Image
-                                            else -> Icons.Default.InsertDriveFile
+                                        if (mode == PickerMode.PICK_MULTIPLE_IMAGES && !item.isDirectory) {
+                                            Checkbox(
+                                                checked = selectedPaths.contains(item.path),
+                                                onCheckedChange = { checked ->
+                                                    if (checked) selectedPaths.add(item.path) else selectedPaths.remove(item.path)
+                                                }
+                                            )
+                                        } else {
+                                            val icon = when {
+                                                item.isDirectory -> Icons.Default.Folder
+                                                item.name.endsWith(".img", ignoreCase = true) -> Icons.Default.Archive
+                                                item.name.endsWith(".dff", ignoreCase = true) -> Icons.Default.ViewInAr
+                                                item.name.endsWith(".txd", ignoreCase = true) -> Icons.Default.Image
+                                                isImageFile(item.name) -> Icons.Default.Image
+                                                else -> Icons.Default.InsertDriveFile
+                                            }
+                                            Icon(
+                                                imageVector = icon,
+                                                contentDescription = null,
+                                                tint = if (item.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                                            )
                                         }
-                                        Icon(
-                                            imageVector = icon,
-                                            contentDescription = null,
-                                            tint = if (item.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-                                        )
                                     },
                                     headlineContent = {
                                         Text(
@@ -554,8 +631,42 @@ fun FilePickerDialog(
                     }
                 }
 
-                // If folder picker mode
-                if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER) {
+                // Bottom actions bar
+                if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${selectedPaths.size} file dipilih",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Row {
+                            TextButton(onClick = { dismissWithAnimation() }) {
+                                Text("Batal")
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    if (selectedPaths.isNotEmpty()) {
+                                        selectMultipleWithAnimation(selectedPaths.toList(), isCurrentPathRestricted && shizukuGranted)
+                                    }
+                                },
+                                enabled = selectedPaths.isNotEmpty()
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Lanjutkan (${selectedPaths.size})")
+                            }
+                        }
+                    }
+                } else if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER) {
                     HorizontalDivider()
                     Row(
                         modifier = Modifier
