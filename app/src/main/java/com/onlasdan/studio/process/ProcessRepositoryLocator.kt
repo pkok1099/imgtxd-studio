@@ -3,6 +3,10 @@ package com.onlasdan.studio.process
 import android.content.Context
 import com.onlasdan.studio.worker.repo.OrphanJobRecovery
 import com.onlasdan.studio.worker.repo.ProcessRepositoryStrategy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Service locator terpusat untuk ProcessRepository.
@@ -26,10 +30,12 @@ object ProcessRepositoryLocator {
     fun init(context: Context) {
         val strat = ProcessRepositoryStrategy.getInstance(context.applicationContext)
         repository = strat
-        try {
-            OrphanJobRecovery.recoverOrphanJobs(context.applicationContext)
-        } catch (e: Throwable) {
-            e.printStackTrace()
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            try {
+                OrphanJobRecovery.recoverOrphanJobs(context.applicationContext)
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            }
         }
     }
 }
