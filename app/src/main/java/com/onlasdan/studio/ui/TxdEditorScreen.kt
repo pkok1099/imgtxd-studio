@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,10 +48,19 @@ fun TxdEditorScreen(
     onExportAll: (destDir: File) -> Unit,
     onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean) -> Unit,
     onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean) -> Unit,
-    onClearMessages: (() -> Unit)? = null
+    onClearMessages: (() -> Unit)? = null,
+    showDock: Boolean = true
 ) {
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+
+    val displayedTextures = remember(textures, searchQuery) {
+        if (searchQuery.isBlank()) textures
+        else textures.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
+    }
 
     LaunchedEffect(statusMessage) {
         if (!statusMessage.isNullOrBlank()) {
@@ -171,65 +181,97 @@ fun TxdEditorScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                title = {
-                    Column {
-                        Text(
-                            text = txdName.ifEmpty { "TXD Editor" },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "${textures.size} Tekstur RenderWare",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Kembali")
-                    }
-                },
-                actions = {
-                    if (textures.isNotEmpty()) {
-                        // Auto Replace Pill Button
-                        Button(
-                            onClick = { showAutoReplaceModeChoice = true },
-                            modifier = Modifier.padding(end = 4.dp),
+            if (isSearchExpanded) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = {
+                            isSearchExpanded = false
+                            searchQuery = ""
+                        }) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Tutup pencarian")
+                        }
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Cari tekstur, misal cj_face...") },
+                            singleLine = true,
                             shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            )
-                        ) {
-                            Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Auto Replace", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                        }
-
-                        // Export All Button
-                        IconButton(onClick = { showExportAllPicker = true }) {
-                            Icon(Icons.Outlined.FileDownload, contentDescription = "Ekspor semua PNG")
-                        }
-                    }
-
-                    // Settings Button
-                    IconButton(onClick = { showSettingsDialog = true }) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Pengaturan")
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                            ),
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                        )
                     }
                 }
-            )
+            } else {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    title = {
+                        Column {
+                            Text(
+                                text = txdName.ifEmpty { "TXD Editor" },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (textures.isEmpty()) "0 Tekstur" else "${textures.size} Tekstur RenderWare",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onClose) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Kembali")
+                        }
+                    },
+                    actions = {
+                        if (textures.isNotEmpty()) {
+                            IconButton(onClick = { isSearchExpanded = true }) {
+                                Icon(Icons.Outlined.Search, contentDescription = "Cari tekstur")
+                            }
+                            IconButton(onClick = { showExportAllPicker = true }) {
+                                Icon(Icons.Outlined.FileDownload, contentDescription = "Ekspor semua PNG")
+                            }
+                        }
+
+                        // Settings Button
+                        IconButton(onClick = { showSettingsDialog = true }) {
+                            Icon(Icons.Outlined.Settings, contentDescription = "Pengaturan")
+                        }
+                    }
+                )
+            }
         }
     ) { padding ->
         Box(
@@ -336,7 +378,7 @@ fun TxdEditorScreen(
 
                     // Texture Grid List
                     Text(
-                        text = "Daftar Tekstur (${textures.size})",
+                        text = if (searchQuery.isNotBlank()) "Hasil Pencarian (${displayedTextures.size})" else "Daftar Tekstur (${textures.size})",
                         style = MaterialTheme.typography.titleMedium,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
@@ -351,7 +393,7 @@ fun TxdEditorScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        items(textures, key = { "${it.name}_${it.width}_${it.height}" }) { entry ->
+                        items(displayedTextures, key = { "${it.name}_${it.width}_${it.height}" }) { entry ->
                             val isSelected = (previewEntry?.name == entry.name)
                             Card(
                                 modifier = Modifier
@@ -422,11 +464,28 @@ fun TxdEditorScreen(
                 }
             }
 
+            // Extended FAB Auto Replace (Above Dock)
+            if (textures.isNotEmpty()) {
+                ExtendedFloatingActionButton(
+                    onClick = { showAutoReplaceModeChoice = true },
+                    icon = { Icon(Icons.Outlined.AutoFixHigh, contentDescription = null) },
+                    text = { Text("Auto Replace", fontWeight = FontWeight.SemiBold) },
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 20.dp, bottom = if (showDock) 96.dp else 24.dp)
+                )
+            }
+
             // Floating Pill Dock
-            FloatingPillDock(
-                items = txdDockItems,
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
+            if (showDock) {
+                FloatingPillDock(
+                    items = txdDockItems,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
+            }
 
             if (isLoading || isScanningFolder) {
                 Box(

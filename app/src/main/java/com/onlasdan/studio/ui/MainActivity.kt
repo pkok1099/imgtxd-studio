@@ -43,10 +43,12 @@ import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.core.ImgVersion
 import com.onlasdan.studio.ui.theme.ImgToolTheme
+import com.onlasdan.studio.ui.theme.SectionHeaderStyle
 import com.onlasdan.studio.ui.theme.SemanticColors
 import com.onlasdan.studio.util.AppIntegrity
 import com.onlasdan.studio.util.AppSettings
 import com.onlasdan.studio.util.LauncherFileType
+import com.onlasdan.studio.util.RecentFileItem
 import com.onlasdan.studio.util.ShizukuManager
 import com.onlasdan.studio.util.StorageHelper
 import com.onlasdan.studio.util.WindowLauncher
@@ -275,10 +277,11 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
+    val recentFiles by AppSettings.getRecentFilesFlow(context).collectAsState(initial = emptyList())
 
-    var showSearch by rememberSaveable { mutableStateOf(false) }
+    var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
     var showQuickMenuSheet by rememberSaveable { mutableStateOf(false) }
-    var activeDockTab by rememberSaveable { mutableStateOf("archive") }
+    var activeDockTab by rememberSaveable { mutableStateOf(if (uiState.archive != null) "archive" else "home") }
     var sheetEntryName by rememberSaveable { mutableStateOf<String?>(null) }
     var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
 
@@ -296,6 +299,37 @@ fun MainScreen(viewModel: ImgToolViewModel) {
 
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+
+    LaunchedEffect(uiState.archive) {
+        if (uiState.archive != null) {
+            activeDockTab = "archive"
+        }
+    }
+
+    LaunchedEffect(uiState.isTxdViewerOpen) {
+        if (uiState.isTxdViewerOpen) {
+            activeDockTab = "txd"
+        }
+    }
+
+    BackHandler(enabled = isSearchExpanded || uiState.isSelecting || (activeDockTab == "txd" && uiState.isTxdViewerOpen) || (activeDockTab != "home" && uiState.archive == null)) {
+        when {
+            isSearchExpanded -> {
+                isSearchExpanded = false
+                viewModel.setSearchQuery("")
+            }
+            uiState.isSelecting -> {
+                viewModel.clearSelection()
+            }
+            activeDockTab == "txd" && uiState.isTxdViewerOpen -> {
+                viewModel.closeTxdViewer()
+                activeDockTab = if (uiState.archive != null) "archive" else "home"
+            }
+            activeDockTab != "home" -> {
+                activeDockTab = "home"
+            }
+        }
+    }
 
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -340,56 +374,37 @@ fun MainScreen(viewModel: ImgToolViewModel) {
 
     val dockItems = listOf(
         DockTabItem(
+            id = "home",
+            icon = Icons.Outlined.Home,
+            contentDescription = "Beranda",
+            isSelected = (activeDockTab == "home"),
+            onClick = {
+                activeDockTab = "home"
+                isSearchExpanded = false
+            }
+        ),
+        DockTabItem(
             id = "archive",
             icon = Icons.Outlined.FolderOpen,
-            contentDescription = "Buka arsip IMG",
-            isSelected = (activeDockTab == "archive" && uiState.archive != null),
+            contentDescription = "Arsip IMG",
+            isSelected = (activeDockTab == "archive"),
             onClick = {
                 activeDockTab = "archive"
-                if (uiState.archive != null) {
-                    coroutineScope.launch { listState.animateScrollToItem(0) }
-                } else {
-                    showOpenArchivePicker = true
-                }
             }
         ),
         DockTabItem(
             id = "txd",
             icon = Icons.Outlined.Palette,
-            contentDescription = "Buka tekstur TXD",
+            contentDescription = "Tekstur TXD",
             isSelected = (activeDockTab == "txd"),
             onClick = {
                 activeDockTab = "txd"
-                showOpenTxdPicker = true
-            }
-        ),
-        DockTabItem(
-            id = "search",
-            icon = Icons.Outlined.Search,
-            contentDescription = "Cari entri arsip",
-            isSelected = showSearch,
-            onClick = {
-                showSearch = !showSearch
-                if (!showSearch) viewModel.setSearchQuery("")
-            }
-        ),
-        DockTabItem(
-            id = "add",
-            icon = Icons.Outlined.Add,
-            contentDescription = "Tambah berkas ke arsip",
-            isSelected = false,
-            onClick = {
-                if (uiState.archive != null) {
-                    showAddFilePicker = true
-                } else {
-                    showOpenArchivePicker = true
-                }
             }
         ),
         DockTabItem(
             id = "menu",
-            icon = Icons.Outlined.Dashboard,
-            contentDescription = "Menu cepat & opsi",
+            icon = Icons.Outlined.MoreHoriz,
+            contentDescription = "Menu aplikasi & opsi",
             isSelected = showQuickMenuSheet,
             onClick = {
                 showQuickMenuSheet = true
@@ -404,96 +419,161 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                     color = MaterialTheme.colorScheme.background,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = uiState.archive?.archiveName ?: "ImgTxd Studio",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                    if (activeDockTab == "archive" && uiState.archive != null && isSearchExpanded) {
+                        // Expanding pill search bar
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = {
+                                isSearchExpanded = false
+                                viewModel.setSearchQuery("")
+                            }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                    contentDescription = "Tutup pencarian",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedTextField(
+                                value = uiState.searchQuery,
+                                onValueChange = { viewModel.setSearchQuery(it) },
+                                placeholder = {
+                                    Text("Cari entri, misal cj.dff...")
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                },
+                                trailingIcon = {
+                                    if (uiState.searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                            Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
+                                        }
+                                    }
+                                },
+                                shape = CircleShape,
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp)
                             )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = if (uiState.archive != null)
+                        }
+                    } else if (activeDockTab != "txd" || (!uiState.isTxdViewerOpen && uiState.activeTxdName == null)) {
+                        // Normal header for Home, Archive (when not searching), and empty TXD
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                val titleText = when (activeDockTab) {
+                                    "home" -> "ImgTxd Studio"
+                                    "archive" -> uiState.archive?.archiveName ?: "Arsip IMG"
+                                    else -> "Tekstur TXD"
+                                }
+                                val subtitleText = when (activeDockTab) {
+                                    "home" -> "Editor arsip IMG & tekstur TXD"
+                                    "archive" -> if (uiState.archive != null)
                                         "${uiState.archive?.version} • ${uiState.entries.size} file"
                                     else
-                                        "Pengelola Arsip & Tekstur GTA",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = if (uiState.archive != null) FontFamily.Monospace else FontFamily.SansSerif,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        "Belum ada arsip terbuka"
+                                    else -> "Belum ada tekstur terbuka"
+                                }
+
+                                Text(
+                                    text = titleText,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontFamily = FontFamily.Serif,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                if (uiState.isShizukuBacked) {
-                                    AssistChip(
-                                        onClick = {},
-                                        shape = CircleShape,
-                                        label = {
-                                            Text(
-                                                "Shizuku",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = SemanticColors.OnSuccessContainer
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.Outlined.Bolt,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(12.dp),
-                                                tint = SemanticColors.Success
-                                            )
-                                        },
-                                        colors = AssistChipDefaults.assistChipColors(
-                                            containerColor = SemanticColors.SuccessContainer
-                                        ),
-                                        border = BorderStroke(1.dp, SemanticColors.Success.copy(alpha = 0.4f)),
-                                        modifier = Modifier.height(24.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = subtitleText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = if (activeDockTab == "archive" && uiState.archive != null) FontFamily.Monospace else FontFamily.SansSerif,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                }
-                            }
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            // Shizuku Status Icon Button
-                            IconButton(
-                                onClick = {
-                                    if (!ShizukuManager.isShizukuAvailable()) {
-                                        Toast.makeText(context, "Shizuku service tidak terdeteksi. Buka aplikasi Shizuku terlebih dahulu.", Toast.LENGTH_LONG).show()
-                                    } else if (!ShizukuManager.hasPermission()) {
-                                        ShizukuManager.requestPermission()
-                                    } else {
-                                        Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                                    if (activeDockTab == "archive" && uiState.isShizukuBacked) {
+                                        AssistChip(
+                                            onClick = {},
+                                            shape = CircleShape,
+                                            label = {
+                                                Text(
+                                                    "Shizuku",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = SemanticColors.OnSuccessContainer
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Outlined.Bolt,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(12.dp),
+                                                    tint = SemanticColors.Success
+                                                )
+                                            },
+                                            colors = AssistChipDefaults.assistChipColors(
+                                                containerColor = SemanticColors.SuccessContainer
+                                            ),
+                                            border = BorderStroke(1.dp, SemanticColors.Success.copy(alpha = 0.4f)),
+                                            modifier = Modifier.height(24.dp)
+                                        )
                                     }
                                 }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                val tint = if (ShizukuManager.hasPermission()) SemanticColors.Success else SemanticColors.Warning
-                                Icon(Icons.Outlined.Bolt, contentDescription = "Status koneksi Shizuku", tint = tint)
-                            }
-
-                            if (uiState.archive != null) {
-                                IconButton(onClick = { showRebuildDialog = true }) {
-                                    Icon(Icons.Outlined.Build, contentDescription = "Rebuild dan rapikan arsip", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                // Shizuku Status Icon Button
+                                IconButton(
+                                    onClick = {
+                                        if (!ShizukuManager.isShizukuAvailable()) {
+                                            Toast.makeText(context, "Shizuku service tidak terdeteksi. Buka aplikasi Shizuku terlebih dahulu.", Toast.LENGTH_LONG).show()
+                                        } else if (!ShizukuManager.hasPermission()) {
+                                            ShizukuManager.requestPermission()
+                                        } else {
+                                            Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                ) {
+                                    val tint = if (ShizukuManager.hasPermission()) SemanticColors.Success else SemanticColors.Warning
+                                    Icon(Icons.Outlined.Bolt, contentDescription = "Status koneksi Shizuku", tint = tint)
                                 }
-                            }
 
-                            IconButton(onClick = { showQuickMenuSheet = true }) {
-                                Icon(Icons.Outlined.MoreVert, contentDescription = "Menu cepat & opsi", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (activeDockTab == "archive" && uiState.archive != null) {
+                                    IconButton(onClick = { isSearchExpanded = true }) {
+                                        Icon(Icons.Outlined.Search, contentDescription = "Cari entri arsip", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    IconButton(onClick = { showRebuildDialog = true }) {
+                                        Icon(Icons.Outlined.Build, contentDescription = "Rebuild dan rapikan arsip", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+
+                                IconButton(onClick = { showQuickMenuSheet = true }) {
+                                    Icon(Icons.Outlined.MoreHoriz, contentDescription = "Menu cepat & opsi", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                     }
@@ -502,290 +582,116 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             snackbarHost = { SnackbarHost(snackbarHostState) },
             containerColor = MaterialTheme.colorScheme.background
         ) { padding ->
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                // Storage permission warning banner
-                if (!uiState.hasStoragePermission) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Akses Semua File Diperlukan",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                                Text(
-                                    text = "Android memerlukan izin penyimpanan untuk memodifikasi file game secara langsung.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
+                when (activeDockTab) {
+                    "home" -> {
+                        HomeScreen(
+                            hasStoragePermission = uiState.hasStoragePermission,
+                            onGrantStorage = {
+                                manageStorageLauncher.launch(StorageHelper.getManageStorageIntent(context))
+                            },
+                            recentFiles = recentFiles,
+                            onOpenImg = { showOpenArchivePicker = true },
+                            onOpenTxd = { showOpenTxdPicker = true },
+                            onOpenRecent = { item ->
+                                WindowLauncher.open(
+                                    context = context,
+                                    filePath = item.path,
+                                    fileType = item.type,
+                                    isShizuku = item.isShizuku,
+                                    onSingleWindowAction = {
+                                        if (item.type == LauncherFileType.IMG) {
+                                            viewModel.openArchiveFromPath(context, item.path, item.isShizuku)
+                                            activeDockTab = "archive"
+                                        } else {
+                                            viewModel.openStandaloneTxd(context, item.path, item.isShizuku)
+                                            activeDockTab = "txd"
+                                        }
+                                    }
                                 )
                             }
-                            Button(
-                                onClick = {
-                                    manageStorageLauncher.launch(StorageHelper.getManageStorageIntent(context))
-                                },
-                                shape = CircleShape,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError
-                                )
-                            ) {
-                                Text("Izinkan")
-                            }
-                        }
-                    }
-                }
-
-                // Search bar
-                AnimatedVisibility(visible = showSearch) {
-                    OutlinedTextField(
-                        value = uiState.searchQuery,
-                        onValueChange = { viewModel.setSearchQuery(it) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        placeholder = { Text("Cari berdasarkan nama (misal cj.dff, vehicle.txd)...") },
-                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        trailingIcon = {
-                            if (uiState.searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                                    Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
-                        ),
-                        singleLine = true
-                    )
-                }
-
-                // Loading / Progress bar
-                if (uiState.isLoading) {
-                    if (uiState.progress != null) {
-                        val (current, total) = uiState.progress!!
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            LinearProgressIndicator(
-                                progress = { if (total > 0) current.toFloat() / total else 0f },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp)
-                                    .clip(CircleShape),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = "${uiState.statusMessage ?: "Memproses..."} ($current / $total)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        LinearProgressIndicator(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(4.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
                         )
                     }
-                }
-
-                // Main Content
-                if (uiState.archive == null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(28.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(72.dp)
-                                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.FolderOpen,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(36.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+                    "archive" -> {
+                        if (uiState.archive == null) {
+                            EmptyArchiveScreen(onOpenArchive = { showOpenArchivePicker = true })
+                        } else {
+                            ArchiveEntriesScreen(
+                                uiState = uiState,
+                                listState = listState,
+                                onToggleSelect = { viewModel.toggleSelection(it) },
+                                onShowOptions = { sheetEntryName = it.cleanName },
+                                onOpenTxd = {
+                                    viewModel.openTxdFromEntry(context, it)
+                                    activeDockTab = "txd"
                                 }
-                                Text(
-                                    text = "ImgTxd Studio",
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontFamily = FontFamily.Serif,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Buka dan kelola arsip .img serta tekstur .txd untuk seri Grand Theft Auto (SA, VC, III) dan Bully. Akses langsung folder Android/data menggunakan Shizuku tanpa root!",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Button(
-                                        onClick = { showOpenArchivePicker = true },
-                                        shape = CircleShape,
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
-                                    ) {
-                                        Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Buka IMG", fontWeight = FontWeight.SemiBold)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { showOpenTxdPicker = true },
-                                        shape = CircleShape,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
-                                    ) {
-                                        Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Buka TXD", fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        item(key = "archive_header_info", contentType = "header_info") {
-                            val total = uiState.filteredEntries.size
-                            val shown = uiState.displayedEntries.size
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Daftar Berkas",
-                                    fontFamily = FontFamily.Serif,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (total == 0) "Tidak ada entri"
-                                    else if (shown < total) "Menampilkan $shown dari $total entri"
-                                    else "Total $total entri",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                            }
-                        }
-
-                        items(
-                            items = uiState.displayedEntries,
-                            key = { "${it.cleanName}_${it.offsetInSectors}" },
-                            contentType = { "img_entry" }
-                        ) { entry ->
-                            EntryRow(
-                                entry = entry,
-                                isSelectedProvider = { uiState.selectedEntries.contains(entry) },
-                                isSelectionMode = uiState.isSelecting,
-                                onToggleSelect = { viewModel.toggleSelection(entry) },
-                                onShowOptions = { sheetEntryName = entry.cleanName },
-                                onOpenTxd = { viewModel.openTxdFromEntry(context, entry) }
                             )
                         }
-
-                        if (uiState.hasMorePages) {
-                            item(key = "pagination_loader", contentType = "loader") {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 16.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(18.dp),
-                                            strokeWidth = 2.dp,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Text(
-                                            text = "Memuat entri (${uiState.displayedEntries.size} / ${uiState.filteredEntries.size})...",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
+                    }
+                    "txd" -> {
+                        if (uiState.isTxdViewerOpen || uiState.activeTxdName != null) {
+                            TxdEditorScreen(
+                                txdName = uiState.activeTxdName ?: "Tekstur TXD",
+                                textures = uiState.txdEntries,
+                                isLoading = uiState.isTxdLoading,
+                                statusMessage = uiState.statusMessage,
+                                errorMessage = uiState.errorMessage,
+                                onClose = {
+                                    viewModel.closeTxdViewer()
+                                    activeDockTab = if (uiState.archive != null) "archive" else "home"
+                                },
+                                onExportSingle = { entry, destDir ->
+                                    viewModel.exportSingleTexture(entry, destDir)
+                                },
+                                onExportAll = { destDir ->
+                                    viewModel.exportAllTextures(destDir)
+                                },
+                                onReplaceTexture = { entry, imagePath, isShizuku ->
+                                    viewModel.replaceTexture(context, entry, imagePath, isShizuku)
+                                },
+                                onAutoReplace = { matches, isShizuku ->
+                                    viewModel.autoReplaceTextures(context, matches, isShizuku)
+                                },
+                                onClearMessages = { viewModel.clearMessages() },
+                                showDock = false
+                            )
+                        } else {
+                            EmptyTxdScreen(onOpenTxd = { showOpenTxdPicker = true })
                         }
                     }
                 }
             }
         }
 
-        // Floating Pill Dock
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            FloatingPillDock(
-                items = dockItems,
-                isSelectionMode = uiState.isSelecting,
-                selectedCount = uiState.selectedEntries.size,
-                onExtractSelected = { showExtractSelectedPicker = true },
-                onDeleteSelected = { showDeleteSelectedDialog = true },
-                onCancelSelection = { viewModel.clearSelection() }
+        // Extended FAB Tambah Berkas (Only on archive tab when archive is loaded & not selecting)
+        if (activeDockTab == "archive" && uiState.archive != null && !uiState.isSelecting) {
+            ExtendedFloatingActionButton(
+                onClick = { showAddFilePicker = true },
+                icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
+                text = { Text("Tambah Berkas", fontWeight = FontWeight.SemiBold) },
+                shape = CircleShape,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 20.dp, bottom = 96.dp)
             )
         }
+
+        // Floating Pill Dock
+        FloatingPillDock(
+            items = dockItems,
+            isSelectionMode = (activeDockTab == "archive" && uiState.isSelecting),
+            selectedCount = uiState.selectedEntries.size,
+            onExtractSelected = { showExtractSelectedPicker = true },
+            onDeleteSelected = { showDeleteSelectedDialog = true },
+            onCancelSelection = { viewModel.clearSelection() },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 
     // --- Bottom Sheets & Dialogs ---
@@ -946,30 +852,9 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                     isShizuku = isShizuku,
                     onSingleWindowAction = {
                         viewModel.openStandaloneTxd(context, path, isShizuku)
+                        activeDockTab = "txd"
                     }
                 )
-            }
-        )
-    }
-
-    // 7. TXD Texture Viewer Dialog
-    if (uiState.isTxdViewerOpen) {
-        TxdViewerDialog(
-            txdName = uiState.activeTxdName ?: "Tekstur TXD",
-            textures = uiState.txdEntries,
-            isLoading = uiState.isTxdLoading,
-            onDismissRequest = { viewModel.closeTxdViewer() },
-            onExportSingle = { entry, destDir ->
-                viewModel.exportSingleTexture(entry, destDir)
-            },
-            onExportAll = { destDir ->
-                viewModel.exportAllTextures(destDir)
-            },
-            onReplaceTexture = { entry, imagePath, isShizuku ->
-                viewModel.replaceTexture(context, entry, imagePath, isShizuku)
-            },
-            onAutoReplace = { matches, isShizuku ->
-                viewModel.autoReplaceTextures(context, matches, isShizuku)
             }
         )
     }
@@ -1207,6 +1092,516 @@ fun EntryRow(
                     contentDescription = "Opsi berkas ${entry.cleanName}",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeScreen(
+    hasStoragePermission: Boolean,
+    onGrantStorage: () -> Unit,
+    recentFiles: List<RecentFileItem>,
+    onOpenImg: () -> Unit,
+    onOpenTxd: () -> Unit,
+    onOpenRecent: (RecentFileItem) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Storage permission warning banner
+        if (!hasStoragePermission) {
+            item(key = "storage_permission_banner") {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Akses Semua File Diperlukan",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "Android memerlukan izin penyimpanan untuk memodifikasi file game secara langsung.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                        Button(
+                            onClick = onGrantStorage,
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
+                        ) {
+                            Text("Izinkan")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Hero Card
+        item(key = "home_hero_card") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.FolderOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = "ImgTxd Studio",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Buka dan kelola arsip .img serta tekstur .txd. Kompatibel dengan format game seri Grand Theft Auto (SA, VC, III) dan Bully. Akses langsung folder Android/data menggunakan Shizuku tanpa root!",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "Tidak berafiliasi dengan Rockstar Games / Take-Two.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = onOpenImg,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Buka IMG", fontWeight = FontWeight.SemiBold)
+                        }
+                        OutlinedButton(
+                            onClick = onOpenTxd,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        ) {
+                            Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Buka TXD", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: FILE TERBARU
+        item(key = "home_recent_header") {
+            Text(
+                text = "FILE TERBARU",
+                style = SectionHeaderStyle,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+            )
+        }
+
+        if (recentFiles.isEmpty()) {
+            item(key = "home_recent_empty") {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.History,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = "Belum ada berkas yang baru dibuka.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            items(recentFiles, key = { it.path }) { item ->
+                RecentFileRow(item = item, onClick = { onOpenRecent(item) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentFileRow(item: RecentFileItem, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (item.type == LauncherFileType.IMG) Icons.Outlined.Folder else Icons.Outlined.Palette,
+                    contentDescription = null,
+                    tint = if (item.type == LauncherFileType.IMG) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.name,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = item.path,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (item.isShizuku) {
+                AssistChip(
+                    onClick = {},
+                    shape = CircleShape,
+                    label = { Text("Shizuku", style = MaterialTheme.typography.labelSmall) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = SemanticColors.SuccessContainer,
+                        labelColor = SemanticColors.OnSuccessContainer
+                    ),
+                    border = BorderStroke(1.dp, SemanticColors.Success.copy(alpha = 0.4f)),
+                    modifier = Modifier.height(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyArchiveScreen(onOpenArchive: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Text(
+                    text = "Belum Ada Arsip IMG Terbuka",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Pilih berkas arsip .img untuk melihat dan mengelola entri model 3D dan tekstur game.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onOpenArchive,
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                ) {
+                    Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Buka IMG", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyTxdScreen(onOpenTxd: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Palette,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                Text(
+                    text = "Belum Ada Tekstur TXD Terbuka",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Buka berkas .txd untuk melihat gambar tekstur, ekspor ke format PNG, atau mengganti gambar mod game.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onOpenTxd,
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                ) {
+                    Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Buka TXD", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArchiveEntriesScreen(
+    uiState: ImgToolUiState,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    onToggleSelect: (ImgEntry) -> Unit,
+    onShowOptions: (ImgEntry) -> Unit,
+    onOpenTxd: (ImgEntry) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Loading / Progress bar
+        if (uiState.isLoading) {
+            if (uiState.progress != null) {
+                val (current, total) = uiState.progress!!
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    LinearProgressIndicator(
+                        progress = { if (total > 0) current.toFloat() / total else 0f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "${uiState.statusMessage ?: "Memproses..."} ($current / $total)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                )
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item(key = "archive_header_info", contentType = "header_info") {
+                val total = uiState.filteredEntries.size
+                val shown = uiState.displayedEntries.size
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (uiState.searchQuery.isNotBlank()) "Hasil Pencarian" else "Daftar Berkas",
+                        fontFamily = FontFamily.Serif,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (total == 0) "Tidak ada entri"
+                        else if (shown < total) "Menampilkan $shown dari $total entri"
+                        else "Total $total entri",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+
+            items(
+                items = uiState.displayedEntries,
+                key = { "${it.cleanName}_${it.offsetInSectors}" },
+                contentType = { "img_entry" }
+            ) { entry ->
+                EntryRow(
+                    entry = entry,
+                    isSelectedProvider = { uiState.selectedEntries.contains(entry) },
+                    isSelectionMode = uiState.isSelecting,
+                    onToggleSelect = { onToggleSelect(entry) },
+                    onShowOptions = { onShowOptions(entry) },
+                    onOpenTxd = { onOpenTxd(entry) }
+                )
+            }
+
+            if (uiState.hasMorePages) {
+                item(key = "pagination_loader", contentType = "loader") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Memuat entri (${uiState.displayedEntries.size} / ${uiState.filteredEntries.size})...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     }

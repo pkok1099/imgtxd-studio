@@ -8,6 +8,9 @@ import android.net.Uri
 import android.os.Build
 import com.onlasdan.studio.ui.MainActivity
 import com.onlasdan.studio.ui.TxdEditorActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.Serializable
 
 enum class LauncherFileType {
@@ -57,6 +60,12 @@ object WindowLauncher {
         parentArchiveInfo: ParentArchiveInfo? = null,
         onSingleWindowAction: (() -> Unit)? = null
     ) {
+        if (filePath != null && parentArchiveInfo == null) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                AppSettings.addRecentFile(context, filePath, fileType, isShizuku)
+            }
+        }
+
         val windowMode = AppSettings.cachedWindowMode
 
         // 1. SINGLE_WINDOW mode: keep inside same window if in-app action provided

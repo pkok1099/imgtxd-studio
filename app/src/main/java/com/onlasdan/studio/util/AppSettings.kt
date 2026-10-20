@@ -11,6 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 enum class WindowMode(val title: String, val description: String) {
     PER_FEATURE(
@@ -27,11 +30,20 @@ enum class WindowMode(val title: String, val description: String) {
     )
 }
 
+data class RecentFileItem(
+    val path: String,
+    val name: String,
+    val type: LauncherFileType,
+    val isShizuku: Boolean = false,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 val Context.appDataStore: DataStore<Preferences> by preferencesDataStore(name = "imgtxd_settings")
 
 object AppSettings {
 
     private val KEY_WINDOW_MODE = stringPreferencesKey("window_mode")
+    private val KEY_RECENT_FILES = stringPreferencesKey("recent_files_json")
 
     @Volatile
     var cachedWindowMode: WindowMode = WindowMode.PER_FEATURE
@@ -65,5 +77,79 @@ object AppSettings {
         context.appDataStore.edit { preferences ->
             preferences[KEY_WINDOW_MODE] = mode.name
         }
+    }
+
+    fun getRecentFilesFlow(context: Context): Flow<List<RecentFileItem>> {
+        return context.appDataStore.data.map { preferences ->
+            val jsonStr = preferences[KEY_RECENT_FILES] ?: "[]"
+            parseRecentFiles(jsonStr)
+        }
+    }
+
+    suspend fun addRecentFile(
+        context: Context,
+        path: String,
+        type: LauncherFileType,
+        isShizuku: Boolean
+    ) {
+        val fileName = File(path).name
+        context.appDataStore.edit { preferences ->
+            val jsonStr = preferences[KEY_RECENT_FILES] ?: "[]"
+            val existingList = parseRecentFiles(jsonStr).toMutableList()
+            existingList.removeAll { it.path == path }
+            existingList.add(
+                0,
+                RecentFileItem(
+                    path = path,
+                    name = fileName,
+                    type = type,
+                    isShizuku = isShizuku,
+                    timestamp = System.currentTimeMillis()
+                )
+            )
+            val trimmed = existingList.take(10)
+            preferences[KEY_RECENT_FILES] = serializeRecentFiles(trimmed)
+        }
+    }
+
+    private fun parseRecentFiles(jsonStr: String): List<RecentFileItem> {
+        val list = mutableListOf<RecentFileItem>()
+        try {
+            val jsonArray = JSONArray(jsonStr)
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                val path = obj.optString("path")
+                val name = obj.optString("name", File(path).name)
+                val typeStr = obj.optString("type", "IMG")
+                val isShizuku = obj.optBoolean("isShizuku", false)
+                val timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                val type = try {
+                    LauncherFileType.valueOf(typeStr)
+                } catch (e: Exception) {
+                    if (path.endsWith(".txd", ignoreCase = true)) LauncherFileType.TXD else LauncherFileType.IMG
+                }
+                if (path.isNotBlank()) {
+                    list.add(RecentFileItem(path, name, type, isShizuku, timestamp))
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    private fun serializeRecentFiles(items: List<RecentFileItem>): String {
+        val jsonArray = JSONArray()
+        for (item in items) {
+            val obj = JSONObject().apply {
+                put("path", item.path)
+                put("name", item.name)
+                put("type", item.type.name)
+                put("isShizuku", item.isShizuku)
+                put("timestamp", item.timestamp)
+            }
+            jsonArray.put(obj)
+        }
+        return jsonArray.toString()
     }
 }

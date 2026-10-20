@@ -48,25 +48,15 @@ fun FileOptionsBottomSheet(
     val isTxd = entry.cleanName.endsWith(".txd", ignoreCase = true) && onOpenTxd != null
     val sizeKb = entry.sizeInBytes / 1024
 
-    ModalBottomSheet(
+    FloatingSheet(
         onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(
-                color = MaterialTheme.colorScheme.outlineVariant
-            )
-        }
+        sheetState = sheetState
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header: Avatar 48dp + Nama file + Subjudul
             Row(
@@ -140,9 +130,12 @@ fun FileOptionsBottomSheet(
                         .weight(1f)
                         .height(48.dp),
                     shape = CircleShape,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
                 ) {
-                    Icon(Icons.Outlined.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Ganti", fontWeight = FontWeight.SemiBold)
                 }
@@ -163,23 +156,23 @@ fun FileOptionsBottomSheet(
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         if (isTxd) {
-                            SheetMenuItem(
+                            FileOptionItem(
                                 icon = Icons.Outlined.Palette,
-                                title = "Buka Tekstur (TXD)",
-                                subtitle = "Lihat dan ganti tekstur dalam berkas ini",
+                                title = "Buka & Sunting Tekstur (TXD)",
+                                subtitle = "Lihat tekstur renderware, ganti gambar, atau ekspor PNG",
                                 iconTint = MaterialTheme.colorScheme.secondary,
                                 onClick = {
                                     onDismissRequest()
-                                    onOpenTxd()
+                                    onOpenTxd?.invoke()
                                 }
                             )
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         }
 
-                        SheetMenuItem(
+                        FileOptionItem(
                             icon = Icons.Outlined.DriveFileRenameOutline,
-                            title = "Ubah Nama",
-                            subtitle = "Ganti nama berkas di dalam arsip",
+                            title = "Ubah Nama (Rename)",
+                            subtitle = "Maksimal 24 karakter termasuk ekstensi",
                             onClick = {
                                 onDismissRequest()
                                 onRename()
@@ -188,10 +181,10 @@ fun FileOptionsBottomSheet(
 
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
-                        SheetMenuItem(
+                        FileOptionItem(
                             icon = Icons.Outlined.Delete,
-                            title = "Hapus Berkas",
-                            subtitle = "Hapus entri ini secara permanen dari arsip",
+                            title = "Hapus dari Arsip",
+                            subtitle = "Menghapus entri berkas ini dari arsip .img",
                             titleColor = MaterialTheme.colorScheme.error,
                             iconTint = MaterialTheme.colorScheme.error,
                             onClick = {
@@ -203,30 +196,28 @@ fun FileOptionsBottomSheet(
                 }
             }
 
-            // Group: DETAIL ENTRI
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "DETAIL TEKNIS",
-                    style = SectionHeaderStyle,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
+            // Technical details card
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        DetailRow(label = "Nama Internal", value = entry.name)
-                        DetailRow(label = "Ukuran Asli", value = "${entry.sizeInBytes} byte (~$sizeKb KB)")
-                        DetailRow(label = "Offset Sektor", value = "${entry.offsetInSectors} (byte: ${entry.offsetInSectors * 2048L})")
-                        DetailRow(label = "Panjang Sektor", value = "${entry.sizeInSectors} sektor")
-                    }
+                    Text(
+                        text = "DETAIL TEKNIS ARSIP",
+                        style = SectionHeaderStyle,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    DetailRow("Offset Sektor", "${entry.offsetInSectors} (byte ${entry.offsetInSectors.toLong() * 2048})")
+                    DetailRow("Ukuran Sektor", "${entry.sizeInSectors} sektor (${entry.sizeInBytes} bytes)")
+                    DetailRow("Format Berkas", entry.cleanName.substringAfterLast('.', "Unknown").uppercase())
                 }
             }
         }
@@ -234,7 +225,7 @@ fun FileOptionsBottomSheet(
 }
 
 @Composable
-private fun SheetMenuItem(
+private fun FileOptionItem(
     icon: ImageVector,
     title: String,
     subtitle: String? = null,

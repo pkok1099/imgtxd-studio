@@ -39,25 +39,15 @@ fun QuickMenuBottomSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(
+    FloatingSheet(
         onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.7f),
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(
-                color = MaterialTheme.colorScheme.outlineVariant
-            )
-        }
+        sheetState = sheetState
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             // Header: Avatar 48dp + Judul Serif + Subjudul
             Row(
@@ -111,7 +101,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.FolderOpen,
                             title = "Buka Arsip IMG",
-                            subtitle = "Jelajahi dan modifikasi arsip .img",
+                            subtitle = "Pilih berkas arsip .img dari penyimpanan",
                             onClick = {
                                 onDismissRequest()
                                 onOpenArchive()
@@ -121,8 +111,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.Palette,
                             title = "Buka Tekstur TXD",
-                            subtitle = "Lihat & edit tekstur renderware .txd",
-                            iconTint = MaterialTheme.colorScheme.secondary,
+                            subtitle = "Buka berkas .txd secara langsung",
                             onClick = {
                                 onDismissRequest()
                                 onOpenTxd()
@@ -132,7 +121,7 @@ fun QuickMenuBottomSheet(
                 }
             }
 
-            // Group: OPERASI ARSIP AKTIF (jika ada arsip terbuka)
+            // Group: OPERASI ARSIP (Hanya jika ada arsip aktif)
             if (hasActiveArchive) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -150,8 +139,7 @@ fun QuickMenuBottomSheet(
                             QuickMenuItem(
                                 icon = Icons.Outlined.Add,
                                 title = "Tambah Berkas Baru",
-                                subtitle = "Impor file .dff, .txd, atau .col ke arsip",
-                                iconTint = MaterialTheme.colorScheme.primary,
+                                subtitle = "Tambahkan entri .dff, .txd, dll ke arsip",
                                 onClick = {
                                     onDismissRequest()
                                     onAddFile()
@@ -159,22 +147,22 @@ fun QuickMenuBottomSheet(
                             )
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             QuickMenuItem(
-                                icon = Icons.Outlined.Build,
-                                title = "Rebuild & Rapikan Arsip",
-                                subtitle = "Susun ulang sektor dan bersihkan fragmen",
+                                icon = Icons.Outlined.Checklist,
+                                title = "Pilih Semua Berkas",
+                                subtitle = "Aktifkan seleksi ke semua entri arsip",
                                 onClick = {
                                     onDismissRequest()
-                                    onRebuildArchive()
+                                    onSelectAll()
                                 }
                             )
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             QuickMenuItem(
-                                icon = Icons.Outlined.SelectAll,
-                                title = "Pilih Semua Entri",
-                                subtitle = "Aktifkan seleksi massal untuk ekspor / hapus",
+                                icon = Icons.Outlined.Build,
+                                title = "Rebuild & Rapikan Arsip",
+                                subtitle = "Susun ulang sektor entri dan hemat ruang",
                                 onClick = {
                                     onDismissRequest()
-                                    onSelectAll()
+                                    onRebuildArchive()
                                 }
                             )
                         }
@@ -196,7 +184,7 @@ fun QuickMenuBottomSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Shizuku Item
+                        // Shizuku status row
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -217,14 +205,15 @@ fun QuickMenuBottomSheet(
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Akses Shizuku",
+                                    text = "Status Akses Shizuku",
                                     style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (isShizukuActive) "Aktif (Akses Android/data tersedia)" else "Minta izin / Belum tersambung",
+                                    text = if (isShizukuActive) "Akses penuh Android/data aktif" else "Akses Android/data belum diizinkan",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (isShizukuActive) SemanticColors.Success else SemanticColors.Warning
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             AssistChip(
@@ -253,24 +242,21 @@ fun QuickMenuBottomSheet(
                                 onOpenSettings()
                             }
                         )
+
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+                        // About Item
+                        QuickMenuItem(
+                            icon = Icons.Outlined.Info,
+                            title = "Tentang ImgTxd Studio",
+                            subtitle = "v2.4.1 • Independen & Open-Source",
+                            onClick = {
+                                onDismissRequest()
+                                onOpenSettings()
+                            }
+                        )
                     }
                 }
-            }
-
-            // Close button
-            Button(
-                onClick = onDismissRequest,
-                shape = CircleShape,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-            ) {
-                Text("Tutup Menu", fontWeight = FontWeight.SemiBold)
             }
         }
     }
