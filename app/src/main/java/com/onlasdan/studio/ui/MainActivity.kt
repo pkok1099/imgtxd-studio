@@ -705,7 +705,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                     },
                     onClearMessages = { viewModel.clearMessages() },
                     showDock = true,
-                    onOpenHome = { activeDockTab = "home" },
+                    onNavigateHome = { activeDockTab = "home" },
                     onOpenImg = { activeDockTab = "archive" },
                     onOpenWindowMode = { showSettingsSheet = true },
                     onOpenSettings = { showSettingsSheet = true },

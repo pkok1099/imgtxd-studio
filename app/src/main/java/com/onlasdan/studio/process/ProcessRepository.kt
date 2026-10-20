@@ -35,6 +35,7 @@ enum class ProcessStatus {
 
 interface ProcessRepository {
     val processes: StateFlow<List<AppProcess>>
+    val currentProcess: StateFlow<AppProcess?>
 
     fun isFileBusy(filePath: String): Boolean
 

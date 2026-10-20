@@ -50,8 +50,11 @@ fun TxdEditorScreen(
     onClearMessages: (() -> Unit)? = null,
     showDock: Boolean = true,
     hasUnsavedChanges: Boolean = false,
+    activeProcess: AppProcess? = null,
     onSaveTxd: (() -> Unit)? = null,
+    onProcessClick: (() -> Unit)? = null,
     onNavigateHome: (() -> Unit)? = null,
+    onOpenImg: (() -> Unit)? = null,
     onOpenWindowMode: (() -> Unit)? = null,
     onOpenSettings: (() -> Unit)? = null,
     onOpenAbout: (() -> Unit)? = null

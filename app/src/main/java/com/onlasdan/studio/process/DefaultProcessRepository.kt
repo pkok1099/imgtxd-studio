@@ -6,8 +6,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -20,6 +23,10 @@ object DefaultProcessRepository : ProcessRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _processes = MutableStateFlow<List<AppProcess>>(emptyList())
     override val processes: StateFlow<List<AppProcess>> = _processes.asStateFlow()
+
+    override val currentProcess: StateFlow<AppProcess?> = _processes.map { list ->
+        list.find { it.status == ProcessStatus.RUNNING || it.status == ProcessStatus.QUEUED }
+    }.stateIn(scope, SharingStarted.Eagerly, null)
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val fileLocks = Mutex()

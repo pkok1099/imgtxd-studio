@@ -114,7 +114,7 @@ class TxdEditorActivity : ComponentActivity() {
                                 viewModel.clearMessages()
                             },
                             showDock = true,
-                            onOpenHome = { finish() }
+                            onNavigateHome = { finish() }
                         )
 
                         // Unsaved Changes Prompt Dialog on New File Request

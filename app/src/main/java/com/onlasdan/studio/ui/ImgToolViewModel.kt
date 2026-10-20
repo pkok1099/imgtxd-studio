@@ -361,10 +361,9 @@ class ImgToolViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val res = DefaultProcessRepository.executeProcess(
-                type = ProcessType.EXTRACT,
-                title = "Mengekstrak ${selected.size} berkas",
+                type = ProcessType.EXPORT_ALL,
                 targetFile = archive.archiveName,
-                totalSteps = selected.size
+                title = "Mengekstrak ${selected.size} berkas"
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
@@ -410,10 +409,9 @@ class ImgToolViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val res = DefaultProcessRepository.executeProcess(
-                type = ProcessType.EXTRACT,
-                title = "Mengekstrak semua berkas",
+                type = ProcessType.EXPORT_ALL,
                 targetFile = archive.archiveName,
-                totalSteps = allEntries.size
+                title = "Mengekstrak semua berkas"
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
@@ -578,9 +576,8 @@ class ImgToolViewModel : ViewModel() {
             _uiState.update { it.copy(isLoading = true) }
             val res = DefaultProcessRepository.executeProcess(
                 type = ProcessType.REBUILD,
-                title = "Rebuild & rapikan arsip",
                 targetFile = archive.archiveName,
-                totalSteps = archive.entryCount
+                title = "Rebuild & rapikan arsip"
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
@@ -637,8 +634,6 @@ class ImgToolViewModel : ViewModel() {
                 selectedEntries = emptySet(),
                 isSelecting = false,
                 searchQuery = "",
-                currentPage = 0,
-                hasMorePages = false,
                 hasUnsavedChanges = false,
                 originalPath = null,
                 isShizukuBacked = false,
