@@ -1,8 +1,8 @@
 package com.onlasdan.studio.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
@@ -37,6 +37,7 @@ data class DockTabItem(
     val onClick: () -> Unit
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FloatingPillDock(
     items: List<DockTabItem>,
