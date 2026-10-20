@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -136,6 +137,37 @@ fun TxdEditorScreen(
         }
     }
 
+    val txdDockItems = listOf(
+        DockTabItem(
+            id = "textures",
+            icon = Icons.Outlined.PhotoLibrary,
+            contentDescription = "Daftar Tekstur",
+            isSelected = true,
+            onClick = {}
+        ),
+        DockTabItem(
+            id = "auto_replace",
+            icon = Icons.Outlined.AutoFixHigh,
+            contentDescription = "Auto Replace Tekstur",
+            isSelected = showAutoReplaceModeChoice,
+            onClick = { showAutoReplaceModeChoice = true }
+        ),
+        DockTabItem(
+            id = "export_all",
+            icon = Icons.Outlined.FileDownload,
+            contentDescription = "Ekspor Semua PNG",
+            isSelected = false,
+            onClick = { showExportAllPicker = true }
+        ),
+        DockTabItem(
+            id = "settings",
+            icon = Icons.Outlined.Settings,
+            contentDescription = "Pengaturan",
+            isSelected = showSettingsDialog,
+            onClick = { showSettingsDialog = true }
+        )
+    )
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -152,7 +184,8 @@ fun TxdEditorScreen(
                             text = txdName.ifEmpty { "TXD Editor" },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
@@ -170,10 +203,11 @@ fun TxdEditorScreen(
                 },
                 actions = {
                     if (textures.isNotEmpty()) {
-                        // Auto Replace Button
+                        // Auto Replace Pill Button
                         Button(
                             onClick = { showAutoReplaceModeChoice = true },
                             modifier = Modifier.padding(end = 4.dp),
+                            shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
@@ -181,7 +215,7 @@ fun TxdEditorScreen(
                         ) {
                             Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Auto Replace", style = MaterialTheme.typography.labelLarge)
+                            Text("Auto Replace", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         }
 
                         // Export All Button
@@ -221,7 +255,7 @@ fun TxdEditorScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(20.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         ) {
@@ -248,7 +282,7 @@ fun TxdEditorScreen(
                                         )
                                     }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         IconButton(onClick = { entryToExport = active }) {
                                             Icon(
                                                 Icons.Outlined.FileDownload,
@@ -258,6 +292,7 @@ fun TxdEditorScreen(
                                         }
                                         FilledTonalIconButton(
                                             onClick = { entryToReplace = active },
+                                            shape = CircleShape,
                                             colors = IconButtonDefaults.filledTonalIconButtonColors(
                                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -275,7 +310,7 @@ fun TxdEditorScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(200.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(16.dp))
                                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -302,7 +337,8 @@ fun TxdEditorScreen(
                     // Texture Grid List
                     Text(
                         text = "Daftar Tekstur (${textures.size})",
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
@@ -310,7 +346,7 @@ fun TxdEditorScreen(
 
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 130.dp),
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f)
@@ -321,7 +357,7 @@ fun TxdEditorScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { activeTextureName = entry.name },
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(20.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (isSelected)
                                         MaterialTheme.colorScheme.surfaceContainerHigh
@@ -343,7 +379,7 @@ fun TxdEditorScreen(
                                     Box(
                                         modifier = Modifier
                                             .size(100.dp)
-                                            .clip(RoundedCornerShape(6.dp))
+                                            .clip(RoundedCornerShape(12.dp))
                                             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -386,6 +422,12 @@ fun TxdEditorScreen(
                 }
             }
 
+            // Floating Pill Dock
+            FloatingPillDock(
+                items = txdDockItems,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+
             if (isLoading || isScanningFolder) {
                 Box(
                     modifier = Modifier
@@ -394,7 +436,7 @@ fun TxdEditorScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Card(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
@@ -465,51 +507,15 @@ fun TxdEditorScreen(
         )
     }
 
-    // 4. Auto Replace Mode Chooser
+    // 4. Auto Replace Mode Chooser (Bottom Sheet)
     if (showAutoReplaceModeChoice) {
-        AlertDialog(
+        AutoReplaceBottomSheet(
             onDismissRequest = { showAutoReplaceModeChoice = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            icon = { Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("Auto Replace Tekstur") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Pilih sumber gambar mod. File dengan nama yang sama dengan tekstur di TXD akan otomatis dicocokkan:",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedButton(
-                        onClick = {
-                            showAutoReplaceModeChoice = false
-                            showAutoReplaceFolderPicker = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                    ) {
-                        Icon(Icons.Outlined.FolderOpen, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Pilih Folder (Scan Otomatis)")
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            showAutoReplaceModeChoice = false
-                            showAutoReplaceMultiFilePicker = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                    ) {
-                        Icon(Icons.Outlined.PhotoLibrary, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Pilih Beberapa File Gambar")
-                    }
-                }
+            onSelectFolder = {
+                showAutoReplaceFolderPicker = true
             },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showAutoReplaceModeChoice = false }) {
-                    Text("Batal")
-                }
+            onSelectMultiFiles = {
+                showAutoReplaceMultiFilePicker = true
             }
         )
     }
@@ -540,13 +546,14 @@ fun TxdEditorScreen(
         )
     }
 
-    // 7. Auto Replace Confirmation Dialog
+    // 7. Auto Replace Confirmation Dialog (Small AlertDialog: 28dp)
     autoReplaceMatches?.let { matches ->
         AlertDialog(
             onDismissRequest = { autoReplaceMatches = null },
+            shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             icon = { Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("Konfirmasi Auto-Replace") },
+            title = { Text("Konfirmasi Auto-Replace", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -558,12 +565,12 @@ fun TxdEditorScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 240.dp),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         LazyColumn(
-                            contentPadding = PaddingValues(8.dp),
+                            contentPadding = PaddingValues(10.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             items(matches) { (tex, path) ->
@@ -616,29 +623,34 @@ fun TxdEditorScreen(
                         autoReplaceMatches = null
                         onAutoReplace(targets, isAutoReplaceShizuku)
                     },
+                    shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Ganti Sekarang (${matches.size})")
+                    Text("Ganti Sekarang (${matches.size})", fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { autoReplaceMatches = null }) {
+                TextButton(
+                    onClick = { autoReplaceMatches = null },
+                    shape = CircleShape
+                ) {
                     Text("Batal")
                 }
             }
         )
     }
 
-    // 8. No Matches Warning Dialog
+    // 8. No Matches Warning Dialog (Small AlertDialog: 28dp)
     if (showNoMatchesDialog) {
         AlertDialog(
             onDismissRequest = { showNoMatchesDialog = false },
+            shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             icon = { Icon(Icons.Outlined.Info, contentDescription = null, tint = SemanticColors.Warning) },
-            title = { Text("Tidak Ada Tekstur Cocok") },
+            title = { Text("Tidak Ada Tekstur Cocok", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     text = noMatchesSourceMessage.ifEmpty {
@@ -650,19 +662,20 @@ fun TxdEditorScreen(
             confirmButton = {
                 Button(
                     onClick = { showNoMatchesDialog = false },
+                    shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Mengerti")
+                    Text("Mengerti", fontWeight = FontWeight.SemiBold)
                 }
             }
         )
     }
 
-    // 9. Settings Dialog
+    // 9. Settings Bottom Sheet
     if (showSettingsDialog) {
-        SettingsDialog(onDismissRequest = { showSettingsDialog = false })
+        SettingsBottomSheet(onDismissRequest = { showSettingsDialog = false })
     }
 }

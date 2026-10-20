@@ -113,3 +113,11 @@ val NoirBlushTypography = Typography(
         letterSpacing = 0.5.sp
     )
 )
+
+val SectionHeaderStyle = TextStyle(
+    fontFamily = FontFamily.SansSerif,
+    fontWeight = FontWeight.Bold,
+    fontSize = 11.sp,
+    lineHeight = 16.sp,
+    letterSpacing = 1.5.sp
+)

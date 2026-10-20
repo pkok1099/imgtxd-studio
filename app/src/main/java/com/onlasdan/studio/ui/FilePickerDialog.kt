@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -306,7 +307,7 @@ fun FilePickerDialog(
                     val slideOffset = (1f - animProgress) * size.height
                     translationY = slideOffset + dragOffsetY
                 },
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp
@@ -340,7 +341,7 @@ fun FilePickerDialog(
                             .height(4.5.dp)
                             .background(
                                 color = MaterialTheme.colorScheme.outlineVariant,
-                                shape = RoundedCornerShape(2.5.dp)
+                                shape = CircleShape
                             )
                     )
                 }
@@ -406,6 +407,7 @@ fun FilePickerDialog(
                     shortcuts.forEach { (label, targetPath) ->
                         AssistChip(
                             onClick = { currentPath = targetPath },
+                            shape = CircleShape,
                             label = { Text(label) },
                             leadingIcon = {
                                 if (label.startsWith("GTA")) {
@@ -425,6 +427,7 @@ fun FilePickerDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (shizukuGranted)
                                 SemanticColors.SuccessContainer
@@ -471,6 +474,7 @@ fun FilePickerDialog(
                                         ShizukuManager.requestPermission()
                                         shizukuGranted = ShizukuManager.hasPermission()
                                     },
+                                    shape = CircleShape,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.error,
                                         contentColor = MaterialTheme.colorScheme.onError
@@ -497,6 +501,7 @@ fun FilePickerDialog(
                             }
                         }
                     },
+                    shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline
@@ -646,6 +651,7 @@ fun FilePickerDialog(
                                         if (item.isShizuku) {
                                             AssistChip(
                                                 onClick = {},
+                                                shape = CircleShape,
                                                 label = { Text("Shizuku", style = MaterialTheme.typography.labelSmall, color = SemanticColors.OnSuccessContainer) },
                                                 leadingIcon = { Icon(Icons.Outlined.Bolt, contentDescription = null, modifier = Modifier.size(12.dp), tint = SemanticColors.Success) },
                                                 colors = AssistChipDefaults.assistChipColors(containerColor = SemanticColors.SuccessContainer),
@@ -676,7 +682,10 @@ fun FilePickerDialog(
                             fontWeight = FontWeight.Medium
                         )
                         Row {
-                            TextButton(onClick = { dismissWithAnimation() }) {
+                            TextButton(
+                                onClick = { dismissWithAnimation() },
+                                shape = CircleShape
+                            ) {
                                 Text("Batal")
                             }
                             Spacer(modifier = Modifier.width(8.dp))
@@ -687,6 +696,7 @@ fun FilePickerDialog(
                                     }
                                 },
                                 enabled = selectedPaths.isNotEmpty(),
+                                shape = CircleShape,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
@@ -694,7 +704,7 @@ fun FilePickerDialog(
                             ) {
                                 Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Lanjutkan (${selectedPaths.size})")
+                                Text("Lanjutkan (${selectedPaths.size})", fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -707,12 +717,16 @@ fun FilePickerDialog(
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { dismissWithAnimation() }) {
+                        TextButton(
+                            onClick = { dismissWithAnimation() },
+                            shape = CircleShape
+                        ) {
                             Text("Batal")
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = { selectWithAnimation(currentPath, isCurrentPathRestricted && shizukuGranted) },
+                            shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
@@ -720,7 +734,7 @@ fun FilePickerDialog(
                         ) {
                             Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Pilih Folder Ini")
+                            Text("Pilih Folder Ini", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 } else {
