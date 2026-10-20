@@ -19,10 +19,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-          cache: 'gradle'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Restore Keystore from Secrets
         env:
@@ -31,20 +30,18 @@ jobs:
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > app/studio.keystore
             echo "Keystore restored successfully."
-          else
-            echo "No keystore secret found, falling back to debug config."
           fi
 
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
       - name: Run Unit Tests
-        run: ./gradlew test
+        run: ./gradlew test --no-daemon
 
       - name: Build Release APK
         env:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-        run: ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Prepare Artifact
         run: |
