@@ -19,12 +19,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.txd.TxdEntry
 import com.onlasdan.studio.ui.framework.ArchiveEntryCard
 import com.onlasdan.studio.ui.framework.ArchiveScreen
 import com.onlasdan.studio.ui.framework.ContextualDockItem
 import com.onlasdan.studio.ui.framework.ContextualPillDock
+import com.onlasdan.studio.ui.settings.RuntimeSettingsSheet
 import com.onlasdan.studio.ui.sheets.MoreActionsBottomSheet
 import com.onlasdan.studio.ui.sheets.ProcessDetailBottomSheet
 import com.onlasdan.studio.ui.sheets.TextureDetailBottomSheet
@@ -87,7 +89,7 @@ fun TxdEditorScreen(
     }
 
     // Process tracking
-    val processes by DefaultProcessRepository.processes.collectAsState()
+    val processes by ProcessRepositoryLocator.get(context).processes.collectAsState()
     val activeProcess = processes.find {
         (it.targetFile == txdName || it.targetFile.isEmpty()) &&
                 (it.status == ProcessStatus.RUNNING || it.status == ProcessStatus.QUEUED)
@@ -113,6 +115,7 @@ fun TxdEditorScreen(
     // Sheets & Dialogs State
     var selectedTextureForDetail by remember { mutableStateOf<TxdEntry?>(null) }
     var showMoreActionsSheet by rememberSaveable { mutableStateOf(false) }
+    var showRuntimeSettingsSheet by rememberSaveable { mutableStateOf(false) }
     var selectedProcessForDetail by remember { mutableStateOf<AppProcess?>(null) }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -327,12 +330,16 @@ fun TxdEditorScreen(
             onDismissRequest = { showMoreActionsSheet = false },
             fileName = txdName,
             isTxd = true,
-            isFileBusy = DefaultProcessRepository.hasRunningProcess(txdName),
+            isFileBusy = ProcessRepositoryLocator.get(context).hasRunningProcess(txdName),
             onExportAll = { showExportAllPicker = true },
             onOpenWindowMode = { onOpenWindowMode?.invoke() },
             onOpenSettings = {
                 if (onOpenSettings != null) onOpenSettings()
                 else showSettingsDialog = true
+            },
+            onOpenRuntimeSettings = {
+                showMoreActionsSheet = false
+                showRuntimeSettingsSheet = true
             },
             onOpenAbout = { onOpenAbout?.invoke() },
             onCloseFile = { onClose() },
@@ -344,12 +351,19 @@ fun TxdEditorScreen(
         )
     }
 
+    // 2b. Runtime Settings Bottom Sheet
+    if (showRuntimeSettingsSheet) {
+        RuntimeSettingsSheet(
+            onDismissRequest = { showRuntimeSettingsSheet = false }
+        )
+    }
+
     // 3. Process Detail Bottom Sheet
     selectedProcessForDetail?.let { proc ->
         ProcessDetailBottomSheet(
             process = proc,
             onDismissRequest = { selectedProcessForDetail = null },
-            onCancelProcess = { id -> DefaultProcessRepository.cancelProcess(id) }
+            onCancelProcess = { id -> ProcessRepositoryLocator.get(context).cancelProcess(id) }
         )
     }
 

@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.util.ActiveSessionManager
@@ -69,6 +70,7 @@ class TxdEditorActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         super.onCreate(savedInstanceState)
+        ProcessRepositoryLocator.init(this)
 
         if (!AppIntegrity.checkIntegrity(this)) {
             isTampered = true
@@ -90,7 +92,7 @@ class TxdEditorActivity : ComponentActivity() {
                     TamperedScreen()
                 } else {
                     val uiState by viewModel.uiState.collectAsState()
-                    val currentProcess by DefaultProcessRepository.currentProcess.collectAsState()
+                    val currentProcess by ProcessRepositoryLocator.get(this@TxdEditorActivity).currentProcess.collectAsState()
                     var showBusyProcessDialog by remember { mutableStateOf(false) }
                     val isFileBusy = currentProcess != null && currentProcess?.targetFile == uiState.txdName && currentProcess?.status == ProcessStatus.RUNNING
 

@@ -32,6 +32,7 @@ fun MoreActionsBottomSheet(
     onRebuildArchive: (() -> Unit)? = null,
     onOpenWindowMode: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenRuntimeSettings: () -> Unit = {},
     onOpenAbout: () -> Unit,
     onCloseFile: () -> Unit,
     onOpenShizuku: () -> Unit
@@ -165,13 +166,15 @@ fun MoreActionsBottomSheet(
                         )
 
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                        // Baris "Proses runtime" NONAKTIF dengan keterangan "Segera hadir" (Tahap 2)
                         MoreActionRow(
                             icon = Icons.Outlined.Memory,
-                            title = "Proses Runtime (:worker)",
-                            subtitle = "Segera hadir di Tahap 2",
-                            isEnabled = false,
-                            onClick = {}
+                            title = "Pengaturan Proses Runtime",
+                            subtitle = "Service latar belakang & anggaran RAM",
+                            isEnabled = true,
+                            onClick = {
+                                onDismissRequest()
+                                onOpenRuntimeSettings()
+                            }
                         )
 
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)

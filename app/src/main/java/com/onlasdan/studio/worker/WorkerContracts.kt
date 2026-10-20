@@ -1,5 +1,12 @@
 package com.onlasdan.studio.worker
 
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStore
+
+val Context.workerDataStore: DataStore<Preferences> by preferencesDataStore(name = WorkerContracts.DATASTORE_NAME)
+
 object WorkerContracts {
     const val DATASTORE_NAME = "runtime_process_settings"
 

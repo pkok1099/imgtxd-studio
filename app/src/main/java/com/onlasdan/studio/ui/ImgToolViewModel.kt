@@ -9,7 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.onlasdan.studio.core.ImgArchive
 import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.core.ImgVersion
-import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessType
 import com.onlasdan.studio.txd.TxdBuilder
 import com.onlasdan.studio.txd.TxdEntry
@@ -360,7 +360,7 @@ class ImgToolViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val res = DefaultProcessRepository.executeProcess(
+            val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
                 targetFile = archive.archiveName,
                 title = "Mengekstrak ${selected.size} berkas"
@@ -408,7 +408,7 @@ class ImgToolViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val res = DefaultProcessRepository.executeProcess(
+            val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
                 targetFile = archive.archiveName,
                 title = "Mengekstrak semua berkas"
@@ -574,7 +574,7 @@ class ImgToolViewModel : ViewModel() {
             val isShizukuBacked = _uiState.value.isShizukuBacked
 
             _uiState.update { it.copy(isLoading = true) }
-            val res = DefaultProcessRepository.executeProcess(
+            val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.REBUILD,
                 targetFile = archive.archiveName,
                 title = "Rebuild & rapikan arsip"
@@ -817,7 +817,7 @@ class ImgToolViewModel : ViewModel() {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isTxdLoading = true) }
-            val res = DefaultProcessRepository.executeProcess(
+            val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
                 targetFile = targetName,
                 title = "Ekspor Semua PNG ($targetName)"
@@ -931,7 +931,7 @@ class ImgToolViewModel : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Memproses auto-replace ${matches.size} tekstur...") }
             var replacedCount = 0
-            val res = DefaultProcessRepository.executeProcess(
+            val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.AUTO_REPLACE,
                 targetFile = targetName,
                 title = "Auto Replace ($targetName)"

@@ -42,7 +42,9 @@ import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessStatus
+import com.onlasdan.studio.ui.settings.RuntimeSettingsSheet
 import com.onlasdan.studio.ui.framework.ArchiveEntryCard
 import com.onlasdan.studio.ui.framework.ArchiveScreen
 import com.onlasdan.studio.ui.framework.ContextualDockItem
@@ -110,6 +112,7 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         super.onCreate(savedInstanceState)
+        ProcessRepositoryLocator.init(this)
 
         if (!AppIntegrity.checkIntegrity(this)) {
             isTampered = true
@@ -307,7 +310,7 @@ fun MainScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
-    val currentProcess by DefaultProcessRepository.currentProcess.collectAsState()
+    val currentProcess by ProcessRepositoryLocator.get(context).currentProcess.collectAsState()
     val recentFiles by AppSettings.getRecentFilesFlow(context).collectAsState(initial = emptyList())
     val isExternalTxdOpen by ActiveSessionManager.isTxdOpen.collectAsState()
     val isAnyTxdOpen = uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty() || isExternalTxdOpen
@@ -315,6 +318,7 @@ fun MainScreen(
     // Tabs: "home", "archive", "txd"
     var activeDockTab by rememberSaveable { mutableStateOf(if (uiState.archive != null) "archive" else "home") }
     var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
+    var showRuntimeSettingsSheet by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(requestedTab) {
         requestedTab?.let {
@@ -836,6 +840,10 @@ fun MainScreen(
                 showMoreActionsSheet = false
                 showSettingsSheet = true
             },
+            onOpenRuntimeSettings = {
+                showMoreActionsSheet = false
+                showRuntimeSettingsSheet = true
+            },
             onOpenAbout = {
                 showMoreActionsSheet = false
                 showAboutSheet = true
@@ -890,6 +898,11 @@ fun MainScreen(
         SettingsBottomSheet(onDismissRequest = { showSettingsSheet = false })
     }
 
+    // 4b. Runtime Settings Bottom Sheet (:worker process & memory budget)
+    if (showRuntimeSettingsSheet) {
+        RuntimeSettingsSheet(onDismissRequest = { showRuntimeSettingsSheet = false })
+    }
+
     // 5. About Bottom Sheet
     if (showAboutSheet) {
         AboutBottomSheet(onDismissRequest = { showAboutSheet = false })
@@ -900,7 +913,7 @@ fun MainScreen(
         ProcessDetailBottomSheet(
             process = proc,
             onDismissRequest = { selectedProcessForDetail = null },
-            onCancelProcess = { id -> DefaultProcessRepository.cancelProcess(id) }
+            onCancelProcess = { id -> ProcessRepositoryLocator.get(context).cancelProcess(id) }
         )
     }
 
