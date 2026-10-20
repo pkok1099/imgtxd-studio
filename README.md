@@ -4,27 +4,37 @@ Modern, high-performance, and open-source `.img` archive and `.txd` texture dict
 
 ---
 
-## 🎯 Supported Games & Engines
+## 🎯 Supported games
 
-ImgTxd Studio supports games and engines utilizing the RenderWare binary formats and `.img` sector-based archives:
+ImgTxd Studio supports games and engines utilizing RenderWare binary formats and `.img` sector-based archives:
 
-- **Grand Theft Auto: San Andreas** (`.img` VER2 with embedded directory table, PC & Mobile texture dictionaries).
-- **Grand Theft Auto: Vice City** (`.img` VER1 paired with `.dir` directory table, PC & Mobile `.txd`).
-- **Grand Theft Auto III** (`.img` VER1 paired with `.dir` directory table, PC & Mobile `.txd`).
-- **Bully: Anniversary Edition** (Sector-based `.img` archives and companion texture dictionaries).
+- Grand Theft Auto: San Andreas (`.img` VER2 with embedded directory table, PC & Mobile texture dictionaries).
+- Grand Theft Auto: Vice City (`.img` VER1 paired with `.dir` directory table, PC & Mobile `.txd`).
+- Grand Theft Auto III (`.img` VER1 paired with `.dir` directory table, PC & Mobile `.txd`).
+- Bully: Anniversary Edition (Sector-based `.img` archives and companion texture dictionaries).
 
 ---
 
 ## ✨ Features
 
+- **Multi-Window Mode ("Mode Jendela"):**
+  - **PER_FEATURE (Default):** Dedicated windows for IMG archives and TXD texture dictionaries (at most 1 IMG window and 1 TXD window in Recent Apps). Opening a new file reuses the window cleanly with unsaved-change protection.
+  - **PER_FILE:** Document-task mode where each opened file runs in its own window card in Recent Apps, with automatic duplicate task deduplication.
+  - **SINGLE_WINDOW:** Everything stays in a single window/task; TXDs inside IMG archives open as in-app dialogs.
+  - Configurable at any time via Settings (stored persistently in Jetpack DataStore Preferences).
+
+- **Cross-Window Mutex & Repository Synchronization:**
+  - TXD files extracted from inside an IMG archive and edited in a separate window are synchronized back to the parent archive with path-specific `Mutex` concurrency protection and reactive `SharedFlow` broadcast.
+
 - **Direct `Android/data` Access via Shizuku:**
   - Modify game files directly in restricted storage folders on Android 11, 12, 13, 14, 15, and 16 without needing root or a PC.
   - High-throughput I/O using batch privileged processes (`stat -c` O(1) metadata retrieval).
 
-- **Built-in RenderWare TXD Studio (Texture Dictionary):**
-  - **FOSS RenderWare Parser & Serializer:** Open, view, and modify `.txd` files directly inside `.img` archives or as standalone files from device storage or `Android/data` via Shizuku.
+- **RenderWare TXD Studio (Texture Dictionary):**
+  - **FOSS RenderWare Parser & Serializer:** Open, view, and modify `.txd` files directly inside `.img` archives or as standalone files.
   - **Wide Format Support:** Decodes and displays DXT1, DXT3, DXT5 (S3TC), RGBA32, RGB24, 16-bit (565, 1555, 4444), 8-bit paletted, and ETC1 textures with transparency checkerboard preview.
-  - **In-Place Texture Replacement:** Replace any texture with user images (`.png` / `.jpg`). If opened from an `.img` archive, automatically updates the archive in-place without manual extraction or repack.
+  - **Auto Replace:** Automatically match and batch-replace textures by scanning mod folders or selecting multiple image files simultaneously.
+  - **In-Place Replacement:** Replace any texture with user images (`.png` / `.jpg`). Updates parent `.img` archives in-place without manual repacks.
   - **Export & Batch Export:** Export individual textures or batch export all textures in a TXD dictionary to lossless `.png` images.
 
 - **Full Format Support (VER1 & VER2):**
@@ -61,8 +71,8 @@ ImgTxd Studio supports games and engines utilizing the RenderWare binary formats
 ### Build Commands
 ```bash
 # Clone the repository
-git clone https://github.com/pkok1099/gta-img-studio.git
-cd gta-img-studio
+git clone https://github.com/pkok1099/imgtxd-studio.git
+cd imgtxd-studio
 
 # Build debug APK
 ./gradlew assembleDebug

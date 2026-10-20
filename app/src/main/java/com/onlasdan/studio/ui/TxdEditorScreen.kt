@@ -1,0 +1,606 @@
+package com.onlasdan.studio.ui
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.onlasdan.studio.txd.TxdEntry
+import com.onlasdan.studio.util.ShizukuManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TxdEditorScreen(
+    txdName: String,
+    textures: List<TxdEntry>,
+    isLoading: Boolean,
+    statusMessage: String? = null,
+    errorMessage: String? = null,
+    onClose: () -> Unit,
+    onExportSingle: (entry: TxdEntry, destDir: File) -> Unit,
+    onExportAll: (destDir: File) -> Unit,
+    onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean) -> Unit,
+    onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean) -> Unit,
+    onClearMessages: (() -> Unit)? = null
+) {
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(statusMessage) {
+        if (!statusMessage.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(statusMessage)
+            onClearMessages?.invoke()
+        }
+    }
+
+    LaunchedEffect(errorMessage) {
+        if (!errorMessage.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(errorMessage)
+            onClearMessages?.invoke()
+        }
+    }
+
+    var activeTextureName by remember { mutableStateOf(textures.firstOrNull()?.name) }
+    LaunchedEffect(textures) {
+        if (activeTextureName == null || textures.none { it.name == activeTextureName }) {
+            activeTextureName = textures.firstOrNull()?.name
+        }
+    }
+    val previewEntry = textures.find { it.name == activeTextureName } ?: textures.firstOrNull()
+
+    // Dialog & Picker states
+    var entryToReplace by remember { mutableStateOf<TxdEntry?>(null) }
+    var entryToExport by remember { mutableStateOf<TxdEntry?>(null) }
+    var showExportAllPicker by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+
+    // Auto Replace states
+    var showAutoReplaceModeChoice by remember { mutableStateOf(false) }
+    var showAutoReplaceFolderPicker by remember { mutableStateOf(false) }
+    var showAutoReplaceMultiFilePicker by remember { mutableStateOf(false) }
+    var autoReplaceMatches by remember { mutableStateOf<List<Pair<TxdEntry, String>>?>(null) }
+    var isAutoReplaceShizuku by remember { mutableStateOf(false) }
+    var showNoMatchesDialog by remember { mutableStateOf(false) }
+    var noMatchesSourceMessage by remember { mutableStateOf("") }
+    var isScanningFolder by remember { mutableStateOf(false) }
+
+    fun processAutoReplaceFiles(filePaths: List<String>, isShizuku: Boolean) {
+        val textureMap = textures.associateBy { it.name.lowercase() }
+        val matches = mutableListOf<Pair<TxdEntry, String>>()
+
+        for (path in filePaths) {
+            val baseName = File(path).nameWithoutExtension.lowercase()
+            val matchedTex = textureMap[baseName]
+            if (matchedTex != null) {
+                matches.add(matchedTex to path)
+            }
+        }
+
+        isAutoReplaceShizuku = isShizuku
+        if (matches.isEmpty()) {
+            noMatchesSourceMessage = "Tidak ditemukan gambar yang namanya cocok dengan tekstur di TXD ini (${filePaths.size} file diperiksa)."
+            showNoMatchesDialog = true
+        } else {
+            autoReplaceMatches = matches
+        }
+    }
+
+    fun scanFolderForAutoReplace(folderPath: String, isShizuku: Boolean) {
+        coroutineScope.launch {
+            isScanningFolder = true
+            try {
+                val imageFiles = withContext(Dispatchers.IO) {
+                    val validExts = setOf("png", "jpg", "jpeg", "bmp", "webp")
+                    val files = if (isShizuku || ShizukuManager.isRestrictedPath(folderPath)) {
+                        ShizukuManager.listFiles(folderPath).map { it.path }
+                    } else {
+                        File(folderPath).listFiles()?.map { it.absolutePath } ?: emptyList()
+                    }
+                    files.filter { path ->
+                        val ext = File(path).extension.lowercase()
+                        ext in validExts
+                    }
+                }
+                processAutoReplaceFiles(imageFiles, isShizuku)
+            } catch (e: Exception) {
+                noMatchesSourceMessage = "Gagal memindai folder: ${e.localizedMessage}"
+                showNoMatchesDialog = true
+            } finally {
+                isScanningFolder = false
+            }
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = txdName.ifEmpty { "TXD Editor" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${textures.size} Tekstur RenderWare",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Kembali")
+                    }
+                },
+                actions = {
+                    if (textures.isNotEmpty()) {
+                        // Auto Replace Button
+                        FilledTonalButton(
+                            onClick = { showAutoReplaceModeChoice = true },
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Auto Replace")
+                        }
+
+                        // Export All Button
+                        IconButton(onClick = { showExportAllPicker = true }) {
+                            Icon(Icons.Default.FileDownload, contentDescription = "Export Semua PNG")
+                        }
+                    }
+
+                    // Settings Button
+                    IconButton(onClick = { showSettingsDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Pengaturan")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            if (textures.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isLoading) "Memuat tekstur..." else "Tidak ada tekstur di dalam file TXD ini",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Top Preview Card for Active Texture
+                    previewEntry?.let { active ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = active.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${active.dimensionsLabel} • ${active.formatLabel} • ${active.depth}-bit",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Row {
+                                        IconButton(onClick = { entryToExport = active }) {
+                                            Icon(Icons.Default.FileDownload, contentDescription = "Export PNG")
+                                        }
+                                        FilledTonalIconButton(onClick = { entryToReplace = active }) {
+                                            Icon(Icons.Default.SwapHoriz, contentDescription = "Ganti Tekstur")
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.height(12.dp))
+
+                                // Checkerboard / dark background for preview
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(200.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF222222)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val bmp = active.bitmap
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = active.name,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "Preview tidak tersedia untuk format ini",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.LightGray
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Texture Grid List
+                    Text(
+                        text = "Daftar Tekstur (${textures.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 130.dp),
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(textures, key = { "${it.name}_${it.width}_${it.height}" }) { entry ->
+                            val isSelected = (previewEntry?.name == entry.name)
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { activeTextureName = entry.name },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected)
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 4.dp else 1.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(100.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF222222)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        val bmp = entry.bitmap
+                                        if (bmp != null) {
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = entry.name,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Default.Image,
+                                                contentDescription = null,
+                                                tint = Color.LightGray
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = entry.name,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${entry.dimensionsLabel} • ${entry.formatLabel}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isLoading || isScanningFolder) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            Text(
+                                text = if (isScanningFolder) "Memindai gambar..." else "Memproses tekstur...",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Sub-Dialogs & Pickers ---
+
+    // 1. Pick folder for Export Single
+    entryToExport?.let { target ->
+        FilePickerDialog(
+            title = "Pilih Folder Ekspor untuk ${target.name}.png",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { entryToExport = null },
+            onFileSelected = { folderPath, _ ->
+                val targetDir = File(folderPath)
+                onExportSingle(target, targetDir)
+                entryToExport = null
+            }
+        )
+    }
+
+    // 2. Pick folder for Export All
+    if (showExportAllPicker) {
+        FilePickerDialog(
+            title = "Pilih Folder untuk Ekspor Semua Tekstur",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { showExportAllPicker = false },
+            onFileSelected = { folderPath, _ ->
+                showExportAllPicker = false
+                val targetDir = File(folderPath)
+                onExportAll(targetDir)
+            }
+        )
+    }
+
+    // 3. Pick image to Replace Texture (Single)
+    entryToReplace?.let { target ->
+        FilePickerDialog(
+            title = "Pilih Gambar untuk ${target.name}",
+            mode = PickerMode.PICK_IMAGE,
+            onDismissRequest = { entryToReplace = null },
+            onFileSelected = { imgPath, isShizuku ->
+                val targetEntry = entryToReplace
+                entryToReplace = null
+                if (targetEntry != null) {
+                    onReplaceTexture(targetEntry, imgPath, isShizuku)
+                }
+            }
+        )
+    }
+
+    // 4. Auto Replace Mode Chooser
+    if (showAutoReplaceModeChoice) {
+        AlertDialog(
+            onDismissRequest = { showAutoReplaceModeChoice = false },
+            icon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Auto Replace Tekstur") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Pilih sumber gambar mod. File dengan nama yang sama dengan tekstur di TXD akan otomatis dicocokkan:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            showAutoReplaceModeChoice = false
+                            showAutoReplaceFolderPicker = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Folder, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pilih Folder (Scan Otomatis)")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            showAutoReplaceModeChoice = false
+                            showAutoReplaceMultiFilePicker = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pilih Beberapa File Gambar")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAutoReplaceModeChoice = false }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
+    // 5. Auto Replace Folder Picker
+    if (showAutoReplaceFolderPicker) {
+        FilePickerDialog(
+            title = "Pilih Folder Sumber Gambar Mod",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { showAutoReplaceFolderPicker = false },
+            onFileSelected = { folderPath, isShizuku ->
+                showAutoReplaceFolderPicker = false
+                scanFolderForAutoReplace(folderPath, isShizuku)
+            }
+        )
+    }
+
+    // 6. Auto Replace Multi-File Picker
+    if (showAutoReplaceMultiFilePicker) {
+        FilePickerDialog(
+            title = "Pilih File Gambar Pengganti",
+            mode = PickerMode.PICK_MULTIPLE_IMAGES,
+            onDismissRequest = { showAutoReplaceMultiFilePicker = false },
+            onMultipleFilesSelected = { filePaths, isShizuku ->
+                showAutoReplaceMultiFilePicker = false
+                processAutoReplaceFiles(filePaths, isShizuku)
+            }
+        )
+    }
+
+    // 7. Auto Replace Confirmation Dialog
+    autoReplaceMatches?.let { matches ->
+        AlertDialog(
+            onDismissRequest = { autoReplaceMatches = null },
+            icon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Konfirmasi Auto-Replace") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Ditemukan ${matches.size} tekstur yang cocok. Tekstur berikut akan otomatis diganti:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ) {
+                        LazyColumn(
+                            contentPadding = PaddingValues(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(matches) { (tex, path) ->
+                                val fileName = File(path).name
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Image,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = tex.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = "(${tex.dimensionsLabel})",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("➔", style = MaterialTheme.typography.bodySmall)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = fileName,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val targets = autoReplaceMatches ?: return@Button
+                        autoReplaceMatches = null
+                        onAutoReplace(targets, isAutoReplaceShizuku)
+                    }
+                ) {
+                    Text("Ganti Sekarang (${matches.size})")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { autoReplaceMatches = null }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
+    // 8. No Matches Warning Dialog
+    if (showNoMatchesDialog) {
+        AlertDialog(
+            onDismissRequest = { showNoMatchesDialog = false },
+            icon = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
+            title = { Text("Tidak Ada Tekstur Cocok") },
+            text = {
+                Text(
+                    text = noMatchesSourceMessage.ifEmpty {
+                        "Tidak ada file gambar yang cocok dengan nama tekstur di TXD ini. Pastikan nama file gambar sama dengan nama tekstur (contoh: cj_face.png)."
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(onClick = { showNoMatchesDialog = false }) {
+                    Text("Mengerti")
+                }
+            }
+        )
+    }
+
+    // 9. Settings Dialog
+    if (showSettingsDialog) {
+        SettingsDialog(onDismissRequest = { showSettingsDialog = false })
+    }
+}

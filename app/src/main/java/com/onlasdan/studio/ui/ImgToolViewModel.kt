@@ -25,6 +25,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import com.onlasdan.studio.core.ArchiveRepository
+import com.onlasdan.studio.util.AppSettings
+import com.onlasdan.studio.util.LauncherFileType
+import com.onlasdan.studio.util.ParentArchiveInfo
+import com.onlasdan.studio.util.WindowLauncher
+import com.onlasdan.studio.util.WindowMode
 
 data class ImgToolUiState(
     val archive: ImgArchive? = null,
@@ -41,6 +47,7 @@ data class ImgToolUiState(
     val hasStoragePermission: Boolean = false,
     val originalPath: String? = null,
     val isShizukuBacked: Boolean = false,
+    val hasUnsavedChanges: Boolean = false,
 
     // TXD Studio States
     val isTxdViewerOpen: Boolean = false,
@@ -67,6 +74,43 @@ class ImgToolViewModel : ViewModel() {
     val uiState: StateFlow<ImgToolUiState> = _uiState.asStateFlow()
 
     private var searchJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            ArchiveRepository.archiveUpdates.collect { event ->
+                val curArchive = _uiState.value.archive
+                if (curArchive != null) {
+                    val curCanonical = try {
+                        curArchive.imgFile.canonicalPath
+                    } catch (e: Exception) {
+                        curArchive.imgFile.absolutePath
+                    }
+                    if (curCanonical == event.archiveCanonicalPath) {
+                        try {
+                            val refreshed = withContext(Dispatchers.IO) {
+                                ImgArchive.open(curArchive.imgFile, curArchive.dirFile)
+                            }
+                            val allEntries = refreshed.entries
+                            val query = _uiState.value.searchQuery
+                            val filtered = filterList(allEntries, query)
+                            val displayed = filtered.take(maxOf(PAGE_SIZE, _uiState.value.displayedEntries.size))
+                            _uiState.update {
+                                it.copy(
+                                    archive = refreshed,
+                                    entries = allEntries,
+                                    filteredEntries = filtered,
+                                    displayedEntries = displayed,
+                                    statusMessage = "Arsip diperbarui (${event.entryName} diupdate)"
+                                )
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fun updatePermissionStatus() {
         val hasPermission = StorageHelper.hasManageStoragePermission()
@@ -525,12 +569,30 @@ class ImgToolViewModel : ViewModel() {
 
     fun openTxdFromEntry(context: Context, imgEntry: ImgEntry) {
         val archive = _uiState.value.archive ?: return
+        val currentMode = AppSettings.cachedWindowMode
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, statusMessage = "Mengekstrak dan membaca ${imgEntry.cleanName}...") }
             try {
                 val tempTxdFile = File(context.cacheDir, "opened_txd_" + imgEntry.cleanName)
                 withContext(Dispatchers.IO) {
                     archive.extract(imgEntry, tempTxdFile)
+                }
+
+                if (currentMode != WindowMode.SINGLE_WINDOW) {
+                    _uiState.update { it.copy(isLoading = false, statusMessage = null) }
+                    val parentInfo = ParentArchiveInfo(
+                        archivePath = archive.imgFile.absolutePath,
+                        entryName = imgEntry.cleanName,
+                        originalRestrictedPath = _uiState.value.originalPath,
+                        isShizuku = _uiState.value.isShizukuBacked
+                    )
+                    WindowLauncher.open(
+                        context = context,
+                        filePath = tempTxdFile.absolutePath,
+                        fileType = LauncherFileType.TXD,
+                        parentArchiveInfo = parentInfo
+                    )
+                    return@launch
                 }
 
                 val parser = withContext(Dispatchers.IO) {
@@ -563,6 +625,17 @@ class ImgToolViewModel : ViewModel() {
     }
 
     fun openStandaloneTxd(context: Context, path: String, isShizuku: Boolean) {
+        val currentMode = AppSettings.cachedWindowMode
+        if (currentMode != WindowMode.SINGLE_WINDOW) {
+            WindowLauncher.open(
+                context = context,
+                filePath = path,
+                fileType = LauncherFileType.TXD,
+                isShizuku = isShizuku
+            )
+            return
+        }
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, statusMessage = "Membuka file TXD...") }
             try {

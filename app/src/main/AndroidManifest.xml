@@ -16,9 +16,13 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
+        <!-- IMG Archive Editor Activity -->
         <activity
             android:name="com.onlasdan.studio.ui.MainActivity"
             android:exported="true"
+            android:taskAffinity="${applicationId}.img"
+            android:launchMode="singleTask"
+            android:documentLaunchMode="intoExisting"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:label="@string/app_name">
 
@@ -27,7 +31,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Intent filter for opening .img and .txd files from file managers -->
+            <!-- Intent filter for opening .img files from file managers -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -38,6 +42,29 @@
                 <data android:host="*" />
                 <data android:pathPattern=".*\\.img" />
                 <data android:pathPattern=".*\\.IMG" />
+            </intent-filter>
+
+        </activity>
+
+        <!-- TXD Texture Editor Activity -->
+        <activity
+            android:name="com.onlasdan.studio.ui.TxdEditorActivity"
+            android:exported="true"
+            android:taskAffinity="${applicationId}.txd"
+            android:launchMode="singleTask"
+            android:documentLaunchMode="intoExisting"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:label="Txd Editor - ImgTxd Studio">
+
+            <!-- Intent filter for opening .txd files directly from file managers -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
+                <data android:host="*" />
                 <data android:pathPattern=".*\\.txd" />
                 <data android:pathPattern=".*\\.TXD" />
             </intent-filter>

@@ -33,8 +33,11 @@ import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.core.ImgVersion
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.util.AppIntegrity
+import com.onlasdan.studio.util.AppSettings
+import com.onlasdan.studio.util.LauncherFileType
 import com.onlasdan.studio.util.ShizukuManager
 import com.onlasdan.studio.util.StorageHelper
+import com.onlasdan.studio.util.WindowLauncher
 import kotlinx.coroutines.delay
 import rikka.shizuku.Shizuku
 import java.io.File
@@ -43,6 +46,10 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: ImgToolViewModel by viewModels()
     private var isTampered by mutableStateOf(false)
+
+    // Unsaved changes handling for onNewIntent
+    private var pendingIntentToLoad by mutableStateOf<Intent?>(null)
+    private var showUnsavedChangesPrompt by mutableStateOf(false)
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         if (!Shizuku.isPreV11()) {
@@ -80,7 +87,7 @@ class MainActivity : ComponentActivity() {
                 e.printStackTrace()
             }
 
-            handleIntent(intent)
+            handleIntent(intent, isNewIntent = false)
         }
 
         setContent {
@@ -88,7 +95,58 @@ class MainActivity : ComponentActivity() {
                 if (isTampered) {
                     TamperedScreen()
                 } else {
-                    MainScreen(viewModel = viewModel)
+                    val uiState by viewModel.uiState.collectAsState()
+
+                    LaunchedEffect(uiState.archive) {
+                        val name = uiState.archive?.archiveName
+                        if (!name.isNullOrBlank()) {
+                            WindowLauncher.updateTaskDescription(
+                                this@MainActivity,
+                                "$name - ImgTxd Studio"
+                            )
+                        }
+                    }
+
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        MainScreen(viewModel = viewModel)
+
+                        if (showUnsavedChangesPrompt) {
+                            AlertDialog(
+                                onDismissRequest = {
+                                    showUnsavedChangesPrompt = false
+                                    pendingIntentToLoad = null
+                                },
+                                title = { Text("Perubahan Belum Disimpan") },
+                                text = {
+                                    Text("Arsip IMG saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan sebelum membuka file baru?")
+                                },
+                                confirmButton = {
+                                    Button(onClick = {
+                                        showUnsavedChangesPrompt = false
+                                        val next = pendingIntentToLoad
+                                        pendingIntentToLoad = null
+                                        if (next != null) {
+                                            executeLoadIntent(next)
+                                        }
+                                    }) {
+                                        Text("Simpan & Buka")
+                                    }
+                                },
+                                dismissButton = {
+                                    OutlinedButton(onClick = {
+                                        showUnsavedChangesPrompt = false
+                                        val next = pendingIntentToLoad
+                                        pendingIntentToLoad = null
+                                        if (next != null) {
+                                            executeLoadIntent(next)
+                                        }
+                                    }) {
+                                        Text("Buang")
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -116,12 +174,63 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleIntent(intent)
+        setIntent(intent)
+        handleIntent(intent, isNewIntent = true)
     }
 
-    private fun handleIntent(intent: Intent?) {
-        val uri: Uri? = intent?.data
-        if (uri != null) {
+    private fun handleIntent(intent: Intent?, isNewIntent: Boolean) {
+        if (intent == null) return
+
+        val uri: Uri? = intent.data
+        val filePath: String? = intent.getStringExtra(WindowLauncher.EXTRA_FILE_PATH)
+        val isShizuku = intent.getBooleanExtra(WindowLauncher.EXTRA_IS_SHIZUKU, false)
+
+        val targetName = filePath ?: uri?.toString() ?: ""
+        if (targetName.endsWith(".txd", ignoreCase = true)) {
+            WindowLauncher.open(
+                context = this,
+                uri = uri,
+                filePath = filePath,
+                fileType = LauncherFileType.TXD,
+                isShizuku = isShizuku,
+                onSingleWindowAction = {
+                    if (filePath != null) {
+                        viewModel.openStandaloneTxd(this, filePath, isShizuku)
+                    } else if (uri != null) {
+                        viewModel.openFileFromUri(this, uri)
+                    }
+                }
+            )
+            return
+        }
+
+        val curState = viewModel.uiState.value
+        val curPath = curState.originalPath ?: curState.archive?.imgFile?.absolutePath
+        val isSamePath = filePath != null && curPath != null && filePath == curPath
+        val isSameUri = uri != null && curPath != null && uri.toString() == curPath
+
+        if (isNewIntent && (isSamePath || isSameUri)) {
+            // Already showing this exact archive, focus window
+            return
+        }
+
+        if (isNewIntent && curState.hasUnsavedChanges) {
+            pendingIntentToLoad = intent
+            showUnsavedChangesPrompt = true
+            return
+        }
+
+        executeLoadIntent(intent)
+    }
+
+    private fun executeLoadIntent(intent: Intent) {
+        val uri: Uri? = intent.data
+        val filePath: String? = intent.getStringExtra(WindowLauncher.EXTRA_FILE_PATH)
+        val isShizuku = intent.getBooleanExtra(WindowLauncher.EXTRA_IS_SHIZUKU, false)
+
+        if (filePath != null) {
+            viewModel.openArchiveFromPath(this, filePath, isShizuku)
+        } else if (uri != null) {
             viewModel.openFileFromUri(this, uri)
         }
     }
@@ -145,6 +254,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     var entryToReplace by remember { mutableStateOf<ImgEntry?>(null) }
     var showExtractSelectedPicker by remember { mutableStateOf(false) }
     var entryToExtract by remember { mutableStateOf<ImgEntry?>(null) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -274,6 +384,11 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                     // Open archive button (In-App File Explorer)
                     IconButton(onClick = { showOpenArchivePicker = true }) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "Open Archive")
+                    }
+
+                    // Settings button
+                    IconButton(onClick = { showSettingsDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Pengaturan")
                     }
                 }
             )
@@ -566,7 +681,15 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             onDismissRequest = { showOpenArchivePicker = false },
             onFileSelected = { path, isShizuku ->
                 showOpenArchivePicker = false
-                viewModel.openArchiveFromPath(context, path, isShizuku)
+                WindowLauncher.open(
+                    context = context,
+                    filePath = path,
+                    fileType = LauncherFileType.IMG,
+                    isShizuku = isShizuku,
+                    onSingleWindowAction = {
+                        viewModel.openArchiveFromPath(context, path, isShizuku)
+                    }
+                )
             }
         )
     }
@@ -646,7 +769,15 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             onDismissRequest = { showOpenTxdPicker = false },
             onFileSelected = { path, isShizuku ->
                 showOpenTxdPicker = false
-                viewModel.openStandaloneTxd(context, path, isShizuku)
+                WindowLauncher.open(
+                    context = context,
+                    filePath = path,
+                    fileType = LauncherFileType.TXD,
+                    isShizuku = isShizuku,
+                    onSingleWindowAction = {
+                        viewModel.openStandaloneTxd(context, path, isShizuku)
+                    }
+                )
             }
         )
     }
@@ -762,6 +893,11 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                 }
             }
         )
+    }
+
+    // 8. Settings Dialog
+    if (showSettingsDialog) {
+        SettingsDialog(onDismissRequest = { showSettingsDialog = false })
     }
     }
 }
