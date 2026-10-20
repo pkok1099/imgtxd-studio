@@ -3,6 +3,7 @@ package com.onlasdan.studio.ui
 import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -105,6 +106,9 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         super.onCreate(savedInstanceState)
 
         if (!AppIntegrity.checkIntegrity(this)) {
@@ -1251,12 +1255,21 @@ private fun HomeScreen(
     onOpenTxd: () -> Unit,
     onOpenRecent: (RecentFileItem) -> Unit
 ) {
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = statusBarPadding + 16.dp,
+                bottom = navBarPadding + 108.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         // Storage permission warning banner
         if (!hasStoragePermission) {
             item(key = "storage_permission_banner") {
@@ -1498,6 +1511,23 @@ private fun RecentFileRow(item: RecentFileItem, onClick: () -> Unit) {
             }
         }
     }
+
+    // Status bar protection gradient so system icons remain clear and legible when scrolled
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(statusBarPadding + 8.dp)
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
+                        Color.Transparent
+                    )
+                )
+            )
+    )
+}
 }
 
 @Composable

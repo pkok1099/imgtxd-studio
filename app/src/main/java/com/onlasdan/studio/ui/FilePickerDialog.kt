@@ -313,7 +313,9 @@ fun FilePickerDialog(
             tonalElevation = 6.dp
         ) {
             Column(
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding()
             ) {
                 // Drag Handle area with draggable gesture
                 Box(

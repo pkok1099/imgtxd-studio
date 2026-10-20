@@ -55,7 +55,8 @@ fun <T> ArchiveScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 88.dp),
+                    .navigationBarsPadding()
+                    .padding(bottom = 96.dp),
                 contentAlignment = Alignment.BottomCenter
             ) {
                 SnackbarHost(hostState = snackbarHostState) { data ->
@@ -185,17 +186,22 @@ fun <T> ArchiveScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
+        val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+            modifier = Modifier.fillMaxSize()
         ) {
             if (items.isEmpty()) {
                 // Empty state konsisten
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                        .padding(
+                            top = padding.calculateTopPadding() + 16.dp,
+                            bottom = navBarPadding + 108.dp,
+                            start = 24.dp,
+                            end = 24.dp
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Card(
@@ -248,8 +254,15 @@ fun <T> ArchiveScreen(
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .consumeWindowInsets(padding),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = padding.calculateTopPadding() + 8.dp,
+                        bottom = navBarPadding + 108.dp
+                    ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     item(key = "header_info", contentType = "header_info") {
@@ -295,7 +308,8 @@ fun <T> ArchiveScreen(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 90.dp)
+                        .navigationBarsPadding()
+                        .padding(bottom = 96.dp)
                         .clickable(onClick = onProcessPillClick)
                 ) {
                     Row(

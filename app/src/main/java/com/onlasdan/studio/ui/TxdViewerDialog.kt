@@ -26,7 +26,10 @@ fun TxdViewerDialog(
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         ImgToolTheme {
             Box(modifier = Modifier.fillMaxSize()) {
