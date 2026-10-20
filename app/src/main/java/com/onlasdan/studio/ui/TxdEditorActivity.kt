@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,9 +25,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.ui.theme.ImgToolTheme
+import com.onlasdan.studio.util.ActiveSessionManager
 import com.onlasdan.studio.util.AppIntegrity
 import com.onlasdan.studio.util.ParentArchiveInfo
 import com.onlasdan.studio.util.ShizukuManager
@@ -79,13 +86,42 @@ class TxdEditorActivity : ComponentActivity() {
                     TamperedScreen()
                 } else {
                     val uiState by viewModel.uiState.collectAsState()
+                    val currentProcess by DefaultProcessRepository.currentProcess.collectAsState()
+                    var showBusyProcessDialog by remember { mutableStateOf(false) }
+                    val isFileBusy = currentProcess != null && currentProcess?.targetFile == uiState.txdName && currentProcess?.status == ProcessStatus.RUNNING
 
                     LaunchedEffect(uiState.txdName) {
                         if (uiState.txdName.isNotBlank()) {
+                            ActiveSessionManager.setTxdActive(
+                                uiState.txdName,
+                                uiState.originalPath ?: uiState.activeTxdFile?.absolutePath
+                            )
                             WindowLauncher.updateTaskDescription(
                                 this@TxdEditorActivity,
                                 "${uiState.txdName} - ImgTxd Studio"
                             )
+                        }
+                    }
+
+                    BackHandler(enabled = true) {
+                        when {
+                            isFileBusy -> {
+                                showBusyProcessDialog = true
+                            }
+                            uiState.parentArchiveInfo != null -> {
+                                val intent = Intent(this@TxdEditorActivity, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                                    putExtra(MainActivity.EXTRA_NAVIGATE_TAB, "archive")
+                                }
+                                startActivity(intent)
+                            }
+                            else -> {
+                                val intent = Intent(this@TxdEditorActivity, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                                    putExtra(MainActivity.EXTRA_NAVIGATE_TAB, "home")
+                                }
+                                startActivity(intent)
+                            }
                         }
                     }
 
@@ -97,7 +133,11 @@ class TxdEditorActivity : ComponentActivity() {
                             statusMessage = uiState.statusMessage,
                             errorMessage = uiState.errorMessage,
                             hasUnsavedChanges = uiState.hasUnsavedChanges,
-                            onClose = { finish() },
+                            activeProcess = if (isFileBusy) currentProcess else null,
+                            onClose = {
+                                ActiveSessionManager.setTxdClosed()
+                                finish()
+                            },
                             onExportSingle = { entry, destDir ->
                                 viewModel.exportSingleTexture(entry, destDir)
                             },
@@ -114,8 +154,65 @@ class TxdEditorActivity : ComponentActivity() {
                                 viewModel.clearMessages()
                             },
                             showDock = true,
-                            onNavigateHome = { finish() }
+                            onNavigateHome = {
+                                val intent = Intent(this@TxdEditorActivity, MainActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                                    putExtra(MainActivity.EXTRA_NAVIGATE_TAB, "home")
+                                }
+                                startActivity(intent)
+                            }
                         )
+
+                        // Busy Process Dialog
+                        if (showBusyProcessDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showBusyProcessDialog = false },
+                                shape = RoundedCornerShape(28.dp),
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                title = {
+                                    Text(
+                                        text = "Proses Sedang Berjalan",
+                                        fontFamily = FontFamily.Serif,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        text = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showBusyProcessDialog = false
+                                            val intent = Intent(this@TxdEditorActivity, MainActivity::class.java).apply {
+                                                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                                                putExtra(MainActivity.EXTRA_NAVIGATE_TAB, "home")
+                                            }
+                                            startActivity(intent)
+                                        },
+                                        shape = CircleShape,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    ) {
+                                        Text("Lanjut di Latar Belakang", fontWeight = FontWeight.SemiBold)
+                                    }
+                                },
+                                dismissButton = {
+                                    OutlinedButton(
+                                        onClick = { showBusyProcessDialog = false },
+                                        shape = CircleShape,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                    ) {
+                                        Text("Tetap di Sini", fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            )
+                        }
 
                         // Unsaved Changes Prompt Dialog on New File Request
                         if (showUnsavedChangesPrompt) {
@@ -259,6 +356,7 @@ class TxdEditorActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        ActiveSessionManager.setTxdClosed()
         try {
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeBinderDeadListener(binderDeadListener)

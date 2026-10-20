@@ -53,6 +53,7 @@ import com.onlasdan.studio.ui.sheets.ProcessDetailBottomSheet
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.ui.theme.SectionHeaderStyle
 import com.onlasdan.studio.ui.theme.SemanticColors
+import com.onlasdan.studio.util.ActiveSessionManager
 import com.onlasdan.studio.util.AppIntegrity
 import com.onlasdan.studio.util.AppSettings
 import com.onlasdan.studio.util.LauncherFileType
@@ -67,8 +68,13 @@ import java.io.File
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_NAVIGATE_TAB = "com.onlasdan.studio.extra.NAVIGATE_TAB"
+    }
+
     private val viewModel: ImgToolViewModel by viewModels()
     private var isTampered by mutableStateOf(false)
+    private var requestedTab by mutableStateOf<String?>(null)
 
     // Unsaved changes handling for onNewIntent
     private var pendingIntentToLoad by mutableStateOf<Intent?>(null)
@@ -133,7 +139,11 @@ class MainActivity : ComponentActivity() {
                     }
 
                     Box(modifier = Modifier.fillMaxSize()) {
-                        MainScreen(viewModel = viewModel)
+                        MainScreen(
+                            viewModel = viewModel,
+                            requestedTab = requestedTab,
+                            onTabConsumed = { requestedTab = null }
+                        )
 
                         if (showUnsavedChangesPrompt) {
                             AlertDialog(
@@ -196,6 +206,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        ActiveSessionManager.setImgClosed()
         try {
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeBinderDeadListener(binderDeadListener)
@@ -222,6 +233,12 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?, isNewIntent: Boolean) {
         if (intent == null) return
+
+        val navTab = intent.getStringExtra(EXTRA_NAVIGATE_TAB)
+        if (navTab != null) {
+            requestedTab = navTab
+            return
+        }
 
         val uri: Uri? = intent.data
         val filePath: String? = intent.getStringExtra(WindowLauncher.EXTRA_FILE_PATH)
@@ -278,16 +295,29 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(viewModel: ImgToolViewModel) {
+fun MainScreen(
+    viewModel: ImgToolViewModel,
+    requestedTab: String? = null,
+    onTabConsumed: () -> Unit = {}
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val currentProcess by DefaultProcessRepository.currentProcess.collectAsState()
     val recentFiles by AppSettings.getRecentFilesFlow(context).collectAsState(initial = emptyList())
+    val isExternalTxdOpen by ActiveSessionManager.isTxdOpen.collectAsState()
+    val isAnyTxdOpen = uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty() || isExternalTxdOpen
 
     // Tabs: "home", "archive", "txd"
     var activeDockTab by rememberSaveable { mutableStateOf(if (uiState.archive != null) "archive" else "home") }
     var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(requestedTab) {
+        requestedTab?.let {
+            activeDockTab = it
+            onTabConsumed()
+        }
+    }
 
     // Lazy list states
     val archiveListState = rememberLazyListState()
@@ -321,12 +351,16 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     LaunchedEffect(uiState.archive) {
         if (uiState.archive != null) {
             activeDockTab = "archive"
+            ActiveSessionManager.setImgActive(uiState.archive!!.archiveName)
+        } else {
+            ActiveSessionManager.setImgClosed()
         }
     }
 
-    LaunchedEffect(uiState.isTxdViewerOpen) {
-        if (uiState.isTxdViewerOpen) {
+    LaunchedEffect(uiState.isTxdViewerOpen, uiState.activeTxdName) {
+        if (uiState.isTxdViewerOpen && uiState.activeTxdName != null) {
             activeDockTab = "txd"
+            ActiveSessionManager.setTxdActive(uiState.activeTxdName!!)
         }
     }
 
@@ -418,8 +452,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             // Rule 4: Navigasi hierarkis berkas
             activeDockTab == "txd" -> {
                 if (uiState.activeTxdSourceEntry != null) {
-                    // TXD dibuka dari dalam IMG -> kembali ke IMG
-                    viewModel.closeTxdViewer()
+                    // TXD dibuka dari dalam IMG -> kembali ke IMG (TIDAK menutup TXD dari memori)
                     activeDockTab = "archive"
                 } else {
                     // TXD mandiri -> kembali ke Beranda (berkas tetap di memori)
@@ -435,6 +468,8 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     }
 
     // DOCK ITEMS: HOME
+    val isImgOpen = uiState.archive != null
+
     val homeDockItems = listOf(
         ContextualDockItem(
             id = "home",
@@ -449,9 +484,9 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             id = "archive",
             icon = Icons.Outlined.FolderOpen,
             contentDescription = "Arsip IMG",
-            showDotBadge = uiState.archive != null,
+            showDotBadge = isImgOpen,
             onClick = {
-                if (uiState.archive != null) {
+                if (isImgOpen) {
                     activeDockTab = "archive"
                 } else {
                     showOpenArchivePicker = true
@@ -462,10 +497,15 @@ fun MainScreen(viewModel: ImgToolViewModel) {
             id = "txd",
             icon = Icons.Outlined.Palette,
             contentDescription = "Tekstur TXD",
-            showDotBadge = uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty(),
+            showDotBadge = isAnyTxdOpen,
             onClick = {
                 if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
                     activeDockTab = "txd"
+                } else if (isExternalTxdOpen) {
+                    val intent = Intent(context, TxdEditorActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
                 } else {
                     showOpenTxdPicker = true
                 }
@@ -565,8 +605,25 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                             manageStorageLauncher.launch(StorageHelper.getManageStorageIntent(context))
                         },
                         recentFiles = recentFiles,
-                        onOpenImg = { showOpenArchivePicker = true },
-                        onOpenTxd = { showOpenTxdPicker = true },
+                        onOpenImg = {
+                            if (uiState.archive != null) {
+                                activeDockTab = "archive"
+                            } else {
+                                showOpenArchivePicker = true
+                            }
+                        },
+                        onOpenTxd = {
+                            if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
+                                activeDockTab = "txd"
+                            } else if (isExternalTxdOpen) {
+                                val intent = Intent(context, TxdEditorActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                context.startActivity(intent)
+                            } else {
+                                showOpenTxdPicker = true
+                            }
+                        },
                         onOpenRecent = { item ->
                             WindowLauncher.open(
                                 context = context,
@@ -689,6 +746,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                     },
                     onClose = {
                         viewModel.closeTxdViewer()
+                        ActiveSessionManager.setTxdClosed()
                         activeDockTab = if (uiState.archive != null) "archive" else "home"
                     },
                     onExportSingle = { entry, destDir ->

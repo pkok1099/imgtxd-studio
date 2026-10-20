@@ -1,5 +1,6 @@
 package com.onlasdan.studio.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
@@ -65,6 +66,19 @@ fun TxdEditorScreen(
 
     var isSearching by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+
+    BackHandler(enabled = isSearching || isSelectionMode) {
+        when {
+            isSearching -> {
+                isSearching = false
+                searchQuery = ""
+            }
+            isSelectionMode -> {
+                isSelectionMode = false
+                selectedTextures = emptySet()
+            }
+        }
+    }
 
     val displayedTextures = remember(textures, searchQuery) {
         if (searchQuery.isBlank()) textures
