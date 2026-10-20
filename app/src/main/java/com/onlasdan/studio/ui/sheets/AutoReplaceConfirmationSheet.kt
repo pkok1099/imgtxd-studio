@@ -153,9 +153,10 @@ fun AutoReplaceConfirmationSheet(
                                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    if (tex.bitmap != null) {
+                                    val bmp = tex.bitmap
+                                    if (bmp != null) {
                                         Image(
-                                            bitmap = tex.bitmap.asImageBitmap(),
+                                            bitmap = bmp.asImageBitmap(),
                                             contentDescription = tex.name,
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Crop
