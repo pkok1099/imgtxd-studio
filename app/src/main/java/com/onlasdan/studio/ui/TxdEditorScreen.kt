@@ -49,7 +49,8 @@ fun TxdEditorScreen(
     onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean) -> Unit,
     onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean) -> Unit,
     onClearMessages: (() -> Unit)? = null,
-    showDock: Boolean = true
+    showDock: Boolean = true,
+    externalSearchQuery: String? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -57,9 +58,11 @@ fun TxdEditorScreen(
     var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
-    val displayedTextures = remember(textures, searchQuery) {
-        if (searchQuery.isBlank()) textures
-        else textures.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
+    val effectiveSearchQuery = externalSearchQuery ?: searchQuery
+
+    val displayedTextures = remember(textures, effectiveSearchQuery) {
+        if (effectiveSearchQuery.isBlank()) textures
+        else textures.filter { it.name.contains(effectiveSearchQuery.trim(), ignoreCase = true) }
     }
 
     LaunchedEffect(statusMessage) {
@@ -178,106 +181,11 @@ fun TxdEditorScreen(
         )
     )
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            if (isSearchExpanded) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = {
-                            isSearchExpanded = false
-                            searchQuery = ""
-                        }) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Tutup pencarian")
-                        }
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Cari tekstur, misal cj_face...") },
-                            singleLine = true,
-                            shape = CircleShape,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
-                            ),
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(50.dp)
-                        )
-                    }
-                }
-            } else {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                        navigationIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    title = {
-                        Column {
-                            Text(
-                                text = txdName.ifEmpty { "TXD Editor" },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (textures.isEmpty()) "0 Tekstur" else "${textures.size} Tekstur RenderWare",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onClose) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Kembali")
-                        }
-                    },
-                    actions = {
-                        if (textures.isNotEmpty()) {
-                            IconButton(onClick = { isSearchExpanded = true }) {
-                                Icon(Icons.Outlined.Search, contentDescription = "Cari tekstur")
-                            }
-                            IconButton(onClick = { showExportAllPicker = true }) {
-                                Icon(Icons.Outlined.FileDownload, contentDescription = "Ekspor semua PNG")
-                            }
-                        }
-
-                        // Settings Button
-                        IconButton(onClick = { showSettingsDialog = true }) {
-                            Icon(Icons.Outlined.Settings, contentDescription = "Pengaturan")
-                        }
-                    }
-                )
-            }
-        }
-    ) { padding ->
+    val mainContent = @Composable { contentPadding: PaddingValues ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(contentPadding)
         ) {
             if (textures.isEmpty()) {
                 Box(
@@ -290,29 +198,81 @@ fun TxdEditorScreen(
                     )
                 }
             } else {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Top Preview Card for Active Texture
-                    previewEntry?.let { active ->
-                        Card(
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // 1. Sub-header (konsisten dengan ArchiveEntriesScreen)
+                    item(key = "txd_header_info", contentType = "header_info") {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                .padding(horizontal = 4.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (effectiveSearchQuery.isNotBlank()) "Hasil Pencarian" else "Daftar Tekstur",
+                                fontFamily = FontFamily.Serif,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (displayedTextures.size < textures.size) "Menampilkan ${displayedTextures.size} dari ${textures.size} tekstur"
+                                else "Total ${textures.size} tekstur",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+
+                    // 2. Hero Preview Card for Active Texture (Gaya Pill Capsule dari Comic Reader)
+                    previewEntry?.let { active ->
+                        item(key = "txd_hero_preview", contentType = "hero_preview") {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(180.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        val bmp = active.bitmap
+                                        if (bmp != null) {
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = active.name,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Preview tidak tersedia untuk format ini",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.height(12.dp))
+
+                                    Column {
                                         Text(
                                             text = active.name,
                                             style = MaterialTheme.typography.titleMedium,
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -324,138 +284,147 @@ fun TxdEditorScreen(
                                         )
                                     }
 
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        IconButton(onClick = { entryToExport = active }) {
-                                            Icon(
-                                                Icons.Outlined.FileDownload,
-                                                contentDescription = "Ekspor PNG",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        FilledTonalIconButton(
+                                    Spacer(Modifier.height(14.dp))
+
+                                    // Action Pill Buttons side-by-side (Pill capsule)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Button(
                                             onClick = { entryToReplace = active },
                                             shape = CircleShape,
-                                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                            )
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(44.dp)
                                         ) {
-                                            Icon(Icons.Outlined.SwapHoriz, contentDescription = "Ganti tekstur")
+                                            Icon(
+                                                imageVector = Icons.Outlined.SwapHoriz,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = "Ganti Tekstur",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Bold
+                                            )
                                         }
-                                    }
-                                }
 
-                                Spacer(Modifier.height(12.dp))
-
-                                // Dark container for preview
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(200.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    val bmp = active.bitmap
-                                    if (bmp != null) {
-                                        Image(
-                                            bitmap = bmp.asImageBitmap(),
-                                            contentDescription = active.name,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                    } else {
-                                        Text(
-                                            text = "Preview tidak tersedia untuk format ini",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        OutlinedButton(
+                                            onClick = { entryToExport = active },
+                                            shape = CircleShape,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.primary
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(44.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.FileDownload,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = "Ekspor PNG",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Texture Grid List
-                    Text(
-                        text = if (searchQuery.isNotBlank()) "Hasil Pencarian (${displayedTextures.size})" else "Daftar Tekstur (${textures.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                    )
-
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 130.dp),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(displayedTextures, key = { "${it.name}_${it.width}_${it.height}" }) { entry ->
-                            val isSelected = (previewEntry?.name == entry.name)
-                            Card(
+                    // 3. Texture list rows (identik dengan EntryRow di ArchiveEntriesScreen)
+                    items(
+                        items = displayedTextures,
+                        key = { "${it.name}_${it.width}_${it.height}" },
+                        contentType = { "texture_entry" }
+                    ) { entry ->
+                        val isSelected = (previewEntry?.name == entry.name)
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { activeTextureName = entry.name },
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSelected)
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                else
+                                    MaterialTheme.colorScheme.surfaceContainer
+                            ),
+                            border = BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.outlineVariant
+                            )
+                        ) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { activeTextureName = entry.name },
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected)
-                                        MaterialTheme.colorScheme.surfaceContainerHigh
-                                    else
-                                        MaterialTheme.colorScheme.surfaceContainer
-                                ),
-                                border = BorderStroke(
-                                    width = if (isSelected) 1.5.dp else 1.dp,
-                                    color = if (isSelected)
-                                        MaterialTheme.colorScheme.primary
-                                    else
-                                        MaterialTheme.colorScheme.outlineVariant
-                                )
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(100.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        val bmp = entry.bitmap
-                                        if (bmp != null) {
-                                            Image(
-                                                bitmap = bmp.asImageBitmap(),
-                                                contentDescription = entry.name,
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        } else {
-                                            Icon(
-                                                Icons.Outlined.Image,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
+                                    val bmp = entry.bitmap
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = entry.name,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Image,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(22.dp)
+                                        )
                                     }
-                                    Spacer(Modifier.height(6.dp))
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = entry.name,
-                                        style = MaterialTheme.typography.labelMedium,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Medium,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "${entry.dimensionsLabel} • ${entry.formatLabel}",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        text = "${entry.dimensionsLabel} • ${entry.formatLabel} • ${entry.depth}-bit",
                                         fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                IconButton(onClick = { entryToReplace = entry }) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.SwapHoriz,
+                                        contentDescription = "Ganti tekstur ${entry.name}",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -475,11 +444,11 @@ fun TxdEditorScreen(
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 20.dp, bottom = if (showDock) 96.dp else 24.dp)
+                        .padding(end = 20.dp, bottom = 96.dp)
                 )
             }
 
-            // Floating Pill Dock
+            // Floating Pill Dock (khusus mode standalone Window)
             if (showDock) {
                 FloatingPillDock(
                     items = txdDockItems,
@@ -518,6 +487,109 @@ fun TxdEditorScreen(
                 }
             }
         }
+    }
+
+    if (showDock) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                Surface(
+                    color = MaterialTheme.colorScheme.background,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isSearchExpanded) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = {
+                                isSearchExpanded = false
+                                searchQuery = ""
+                            }) {
+                                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Tutup pencarian")
+                            }
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                placeholder = { Text("Cari tekstur, misal cj_face...") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = CircleShape,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp)
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            IconButton(onClick = onClose, modifier = Modifier.padding(end = 4.dp)) {
+                                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Kembali", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = txdName.ifEmpty { "TXD Editor" },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontFamily = FontFamily.Serif,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (textures.isEmpty()) "0 Tekstur" else "${textures.size} Tekstur RenderWare",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (textures.isNotEmpty()) {
+                                    IconButton(onClick = { isSearchExpanded = true }) {
+                                        Icon(Icons.Outlined.Search, contentDescription = "Cari tekstur", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    IconButton(onClick = { showExportAllPicker = true }) {
+                                        Icon(Icons.Outlined.FileDownload, contentDescription = "Ekspor semua PNG", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                IconButton(onClick = { showSettingsDialog = true }) {
+                                    Icon(Icons.Outlined.Settings, contentDescription = "Pengaturan", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.background
+        ) { padding ->
+            mainContent(padding)
+        }
+    } else {
+        mainContent(PaddingValues(0.dp))
     }
 
     // --- Sub-Dialogs & Pickers ---

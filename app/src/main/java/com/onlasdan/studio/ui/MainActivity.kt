@@ -282,6 +282,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
     val recentFiles by AppSettings.getRecentFilesFlow(context).collectAsState(initial = emptyList())
 
     var isSearchExpanded by rememberSaveable { mutableStateOf(false) }
+    var txdSearchQuery by rememberSaveable { mutableStateOf("") }
     var showQuickMenuSheet by rememberSaveable { mutableStateOf(false) }
     var activeDockTab by rememberSaveable { mutableStateOf(if (uiState.archive != null) "archive" else "home") }
     var sheetEntryName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -421,7 +422,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                     color = MaterialTheme.colorScheme.background,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (activeDockTab == "archive" && uiState.archive != null && isSearchExpanded) {
+                    if (isSearchExpanded && ((activeDockTab == "archive" && uiState.archive != null) || (activeDockTab == "txd" && (uiState.isTxdViewerOpen || uiState.activeTxdName != null)))) {
                         // Expanding pill search bar
                         Row(
                             modifier = Modifier
@@ -432,7 +433,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                         ) {
                             IconButton(onClick = {
                                 isSearchExpanded = false
-                                viewModel.setSearchQuery("")
+                                if (activeDockTab == "archive") viewModel.setSearchQuery("") else txdSearchQuery = ""
                             }) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
@@ -440,18 +441,23 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            val currentQuery = if (activeDockTab == "archive") uiState.searchQuery else txdSearchQuery
                             OutlinedTextField(
-                                value = uiState.searchQuery,
-                                onValueChange = { viewModel.setSearchQuery(it) },
+                                value = currentQuery,
+                                onValueChange = {
+                                    if (activeDockTab == "archive") viewModel.setSearchQuery(it) else txdSearchQuery = it
+                                },
                                 placeholder = {
-                                    Text("Cari entri, misal cj.dff...")
+                                    Text(if (activeDockTab == "archive") "Cari entri, misal cj.dff..." else "Cari tekstur, misal cj_face...")
                                 },
                                 leadingIcon = {
                                     Icon(Icons.Outlined.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                 },
                                 trailingIcon = {
-                                    if (uiState.searchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                    if (currentQuery.isNotEmpty()) {
+                                        IconButton(onClick = {
+                                            if (activeDockTab == "archive") viewModel.setSearchQuery("") else txdSearchQuery = ""
+                                        }) {
                                             Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
                                         }
                                     }
@@ -469,8 +475,8 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                                     .height(50.dp)
                             )
                         }
-                    } else if (activeDockTab != "txd" || (!uiState.isTxdViewerOpen && uiState.activeTxdName == null)) {
-                        // Normal header for Home, Archive (when not searching), and empty TXD
+                    } else {
+                        // Normal header for Home, Archive, and TXD
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -479,11 +485,27 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
+                            if (activeDockTab == "txd" && (uiState.isTxdViewerOpen || uiState.activeTxdName != null)) {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.closeTxdViewer()
+                                        activeDockTab = if (uiState.archive != null) "archive" else "home"
+                                    },
+                                    modifier = Modifier.padding(end = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                        contentDescription = "Tutup editor TXD",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
                             Column(modifier = Modifier.weight(1f)) {
                                 val titleText = when (activeDockTab) {
                                     "home" -> "ImgTxd Studio"
                                     "archive" -> uiState.archive?.archiveName ?: "Arsip IMG"
-                                    else -> "Tekstur TXD"
+                                    else -> uiState.activeTxdName ?: "Tekstur TXD"
                                 }
                                 val subtitleText = when (activeDockTab) {
                                     "home" -> "Editor arsip IMG & tekstur TXD"
@@ -491,7 +513,10 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                                         "${uiState.archive?.version} • ${uiState.entries.size} file"
                                     else
                                         "Belum ada arsip terbuka"
-                                    else -> "Belum ada tekstur terbuka"
+                                    else -> if (uiState.txdEntries.isNotEmpty())
+                                        "${uiState.txdEntries.size} tekstur RenderWare"
+                                    else
+                                        "Belum ada tekstur terbuka"
                                 }
 
                                 Text(
@@ -510,7 +535,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                                     Text(
                                         text = subtitleText,
                                         style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = if (activeDockTab == "archive" && uiState.archive != null) FontFamily.Monospace else FontFamily.SansSerif,
+                                        fontFamily = if ((activeDockTab == "archive" && uiState.archive != null) || (activeDockTab == "txd" && uiState.txdEntries.isNotEmpty())) FontFamily.Monospace else FontFamily.SansSerif,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -570,6 +595,10 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                                     }
                                     IconButton(onClick = { showRebuildDialog = true }) {
                                         Icon(Icons.Outlined.Build, contentDescription = "Rebuild dan rapikan arsip", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                } else if (activeDockTab == "txd" && uiState.txdEntries.isNotEmpty()) {
+                                    IconButton(onClick = { isSearchExpanded = true }) {
+                                        Icon(Icons.Outlined.Search, contentDescription = "Cari tekstur", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
 
@@ -659,7 +688,8 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                                     viewModel.autoReplaceTextures(context, matches, isShizuku)
                                 },
                                 onClearMessages = { viewModel.clearMessages() },
-                                showDock = false
+                                showDock = false,
+                                externalSearchQuery = txdSearchQuery
                             )
                         } else {
                             EmptyTxdScreen(onOpenTxd = { showOpenTxdPicker = true })
