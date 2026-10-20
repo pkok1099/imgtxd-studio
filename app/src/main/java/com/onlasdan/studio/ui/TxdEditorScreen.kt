@@ -67,19 +67,6 @@ fun TxdEditorScreen(
     var isSearching by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
-    BackHandler(enabled = isSearching || isSelectionMode) {
-        when {
-            isSearching -> {
-                isSearching = false
-                searchQuery = ""
-            }
-            isSelectionMode -> {
-                isSelectionMode = false
-                selectedTextures = emptySet()
-            }
-        }
-    }
-
     val displayedTextures = remember(textures, searchQuery) {
         if (searchQuery.isBlank()) textures
         else textures.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
@@ -109,6 +96,19 @@ fun TxdEditorScreen(
     // Multi-Selection State
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedTextures by remember { mutableStateOf(setOf<TxdEntry>()) }
+
+    BackHandler(enabled = isSearching || isSelectionMode) {
+        when {
+            isSearching -> {
+                isSearching = false
+                searchQuery = ""
+            }
+            isSelectionMode -> {
+                isSelectionMode = false
+                selectedTextures = emptySet()
+            }
+        }
+    }
 
     // Sheets & Dialogs State
     var selectedTextureForDetail by remember { mutableStateOf<TxdEntry?>(null) }
