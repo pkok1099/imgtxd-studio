@@ -297,7 +297,7 @@ fun FilePickerDialog(
                 )
         )
 
-        // Bottom Drawer Surface
+        // Bottom Drawer Surface (Unified Gray Background)
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -310,11 +310,12 @@ fun FilePickerDialog(
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp
+            tonalElevation = 0.dp
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .imePadding()
             ) {
                 // Drag Handle area with draggable gesture
@@ -410,14 +411,18 @@ fun FilePickerDialog(
                         AssistChip(
                             onClick = { currentPath = targetPath },
                             shape = CircleShape,
-                            label = { Text(label) },
+                            label = { Text(label, color = MaterialTheme.colorScheme.onSurface) },
                             leadingIcon = {
                                 if (label.startsWith("GTA")) {
-                                    Icon(Icons.Outlined.SportsEsports, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Outlined.SportsEsports, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                                 } else {
-                                    Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                labelColor = MaterialTheme.colorScheme.onSurface
+                            ),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         )
                     }
@@ -506,7 +511,12 @@ fun FilePickerDialog(
                     shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        cursorColor = MaterialTheme.colorScheme.primary
                     ),
                     singleLine = true,
                     modifier = Modifier
@@ -600,6 +610,16 @@ fun FilePickerDialog(
                                             selectWithAnimation(item.path, item.isShizuku)
                                         }
                                     },
+                                    colors = ListItemDefaults.colors(
+                                        containerColor = if (selectedPaths.contains(item.path))
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                        else
+                                            Color.Transparent,
+                                        headlineColor = MaterialTheme.colorScheme.onSurface,
+                                        supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        leadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
                                     leadingContent = {
                                         if (mode == PickerMode.PICK_MULTIPLE_IMAGES && !item.isDirectory) {
                                             Checkbox(
@@ -673,6 +693,7 @@ fun FilePickerDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             .navigationBarsPadding()
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -715,6 +736,7 @@ fun FilePickerDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             .navigationBarsPadding()
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.End
