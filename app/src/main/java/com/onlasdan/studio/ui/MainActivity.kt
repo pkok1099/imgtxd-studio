@@ -1443,6 +1443,23 @@ private fun HomeScreen(
             }
         }
     }
+
+    // Status bar protection gradient so system icons remain clear and legible when scrolled
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(statusBarPadding + 8.dp)
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
+                        Color.Transparent
+                    )
+                )
+            )
+    )
+}
 }
 
 @Composable
@@ -1511,23 +1528,6 @@ private fun RecentFileRow(item: RecentFileItem, onClick: () -> Unit) {
             }
         }
     }
-
-    // Status bar protection gradient so system icons remain clear and legible when scrolled
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(statusBarPadding + 8.dp)
-            .background(
-                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
-                        Color.Transparent
-                    )
-                )
-            )
-    )
-}
 }
 
 @Composable
