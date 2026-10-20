@@ -70,7 +70,7 @@ fun RuntimeSettingsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showDeskMode by remember { mutableStateOf(false) }
 
-    val currentProcess by com.onlasdan.studio.process.ProcessRepositoryLocator.getRepository(context).currentProcess.collectAsState()
+    val currentProcess by com.onlasdan.studio.process.ProcessRepositoryLocator.get(context).currentProcess.collectAsState()
 
     if (showDeskMode) {
         DeskModeDialog(

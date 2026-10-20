@@ -24,6 +24,8 @@ import com.onlasdan.studio.worker.shizuku.ShizukuFileBridgeImpl
 import com.onlasdan.studio.worker.shizuku.WorkerShizukuManager
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
