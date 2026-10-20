@@ -9,6 +9,8 @@ import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.process.ProcessType
 import com.onlasdan.studio.worker.WorkerContracts
+import com.onlasdan.studio.worker.engine.CheckpointManager
+import com.onlasdan.studio.worker.engine.SafeFileWriter
 import com.onlasdan.studio.worker.workerDataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -25,6 +27,7 @@ object OrphanJobRecovery {
     const val CRASH_MESSAGE = "Proses latar belakang terhenti tak terduga (dihentikan oleh sistem Android)"
 
     private val KEY_ACTIVE_JOB_ID = stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID)
+    private val KEY_ACTIVE_TARGET_PATH = stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)
     private val KEY_LAST_CRASH_INFO = stringPreferencesKey(WorkerContracts.PREF_KEY_LAST_CRASH_INFO)
 
     /**
@@ -113,15 +116,27 @@ object OrphanJobRecovery {
         }
 
         val activeJobId: String? = prefs?.get(KEY_ACTIVE_JOB_ID)
-        val orphanFiles = findOrphanFiles(context)
+        val activeTargetPath: String? = prefs?.get(KEY_ACTIVE_TARGET_PATH)
+        val orphanFiles = findOrphanFiles(context).toMutableList()
+
+        if (!activeTargetPath.isNullOrBlank()) {
+            try {
+                val targetTmp = SafeFileWriter.getTempFile(activeTargetPath)
+                if (targetTmp.exists()) orphanFiles.add(targetTmp)
+                val targetLock = SafeFileWriter.getLockFile(activeTargetPath)
+                if (targetLock.exists()) orphanFiles.add(targetLock)
+                val targetCp = CheckpointManager.getCheckpointFile(activeTargetPath)
+                if (targetCp.exists()) orphanFiles.add(targetCp)
+            } catch (_: Exception) {}
+        }
 
         if (activeJobId.isNullOrBlank() && orphanFiles.isEmpty()) {
             return@withContext emptyList()
         }
 
-        Log.w(TAG, "Ditemukan pekerjaan yatim! activeJobId=$activeJobId, orphanFiles=${orphanFiles.size}. Memulai pembersihan...")
+        Log.w(TAG, "Ditemukan pekerjaan yatim! activeJobId=$activeJobId, targetPath=$activeTargetPath, orphanFiles=${orphanFiles.size}. Memulai pembersihan...")
 
-        // 1. Bersihkan semua file .tmp dan .lock yatim yang tertinggal
+        // 1. Bersihkan semua file .tmp, .lock, dan .checkpoint yatim yang tertinggal
         val deletedCount = cleanupOrphanFiles(orphanFiles)
         Log.i(TAG, "Berhasil membersihkan $deletedCount berkas sementara yatim.")
 
@@ -129,6 +144,7 @@ object OrphanJobRecovery {
         try {
             context.workerDataStore.edit { preferences ->
                 preferences.remove(KEY_ACTIVE_JOB_ID)
+                preferences.remove(KEY_ACTIVE_TARGET_PATH)
                 preferences[KEY_LAST_CRASH_INFO] = "$CRASH_MESSAGE [Job: ${activeJobId ?: "unknown"}, Time: ${System.currentTimeMillis()}]"
             }
         } catch (e: Exception) {
@@ -140,7 +156,7 @@ object OrphanJobRecovery {
         val failedProcess = AppProcess(
             id = jobId,
             type = ProcessType.REBUILD,
-            targetFile = "Operasi Sebelumnya",
+            targetFile = activeTargetPath ?: "Operasi Sebelumnya",
             title = "Pemulihan Pekerjaan Terhenti",
             progress = 0f,
             current = 0,

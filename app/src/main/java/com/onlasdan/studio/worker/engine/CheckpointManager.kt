@@ -34,7 +34,8 @@ object CheckpointManager {
      * Mendapatkan path berkas checkpoint pendamping: targetPath + WorkerContracts.EXT_CHECKPOINT (.checkpoint).
      */
     fun getCheckpointFile(targetPath: String): File {
-        return File(targetPath + WorkerContracts.EXT_CHECKPOINT)
+        val canonical = try { File(targetPath).canonicalPath } catch (_: Throwable) { targetPath }
+        return File(canonical + WorkerContracts.EXT_CHECKPOINT)
     }
 
     /**

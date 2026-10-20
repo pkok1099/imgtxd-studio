@@ -273,10 +273,12 @@ class JobEngineImpl(
             // Sinkronisasi Shizuku jika path tujuan disediakan
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
-                shizukuBridge.copy(targetFile.absolutePath, dest)
+                val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
+                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
                 if (version == ImgVersion.VER1 && dirFile != null) {
                     val dirDest = dest.substringBeforeLast(".") + ".dir"
-                    shizukuBridge.copy(dirFile.absolutePath, dirDest)
+                    val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
+                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
                 }
             }
 
@@ -591,9 +593,12 @@ class JobEngineImpl(
 
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
-                shizukuBridge.copy(targetFile.absolutePath, dest)
+                val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
+                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
                 if (!isV2 && dirFile != null) {
-                    shizukuBridge.copy(dirFile.absolutePath, dest.substringBeforeLast(".") + ".dir")
+                    val dirDest = dest.substringBeforeLast(".") + ".dir"
+                    val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
+                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
                 }
             }
 
@@ -722,9 +727,12 @@ class JobEngineImpl(
 
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
-                shizukuBridge.copy(targetFile.absolutePath, dest)
+                val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
+                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
                 if (!isV2 && dirFile != null) {
-                    shizukuBridge.copy(dirFile.absolutePath, dest.substringBeforeLast(".") + ".dir")
+                    val dirDest = dest.substringBeforeLast(".") + ".dir"
+                    val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
+                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
                 }
             }
 
@@ -842,7 +850,9 @@ class JobEngineImpl(
                 if (!moved) throw IOException("Gagal mengganti berkas TXD secara atomik")
 
                 if (request.isShizuku && shizukuBridge != null) {
-                    shizukuBridge.copy(targetFile.absolutePath, request.destinationPath ?: request.targetPath)
+                    val dest = request.destinationPath ?: request.targetPath
+                    val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
+                    if (!copied) throw IOException("Gagal menyalin berkas TXD ke lokasi tujuan Shizuku: $dest")
                 }
             }
 
@@ -946,9 +956,12 @@ class JobEngineImpl(
 
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
-                shizukuBridge.copy(targetFile.absolutePath, dest)
+                val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
+                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
                 if (!isV2 && dirFile != null) {
-                    shizukuBridge.copy(dirFile.absolutePath, dest.substringBeforeLast(".") + ".dir")
+                    val dirDest = dest.substringBeforeLast(".") + ".dir"
+                    val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
+                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
                 }
             }
 

@@ -82,6 +82,7 @@ class WorkerProcessRepositoryImpl private constructor(
     private val pendingResults = ConcurrentHashMap<String, CompletableDeferred<JobResult>>()
     private val processMetadata = ConcurrentHashMap<String, ProcessMetadata>()
     private val fallbackJobs = ConcurrentHashMap<String, Job>()
+    private var deathRecoveryJob: Job? = null
 
     private data class ProcessMetadata(
         val type: ProcessType,
@@ -193,8 +194,8 @@ class WorkerProcessRepositoryImpl private constructor(
             isBound = bound
 
             if (bound) {
-                // Tunggu maksimal 1 detik sampai binder terpasang
-                for (i in 0 until 20) {
+                // Tunggu hingga 3 detik sampai binder terpasang (untuk perangkat dengan load tinggi)
+                for (i in 0 until 60) {
                     if (service != null && serviceBinder?.isBinderAlive == true) {
                         return@withLock true
                     }
@@ -209,54 +210,58 @@ class WorkerProcessRepositoryImpl private constructor(
     }
 
     private fun handleServiceDied() {
-        scope.launch {
-            connectionMutex.withLock {
+        synchronized(this) {
+            if (deathRecoveryJob?.isActive == true) return
+            deathRecoveryJob = scope.launch {
+                connectionMutex.withLock {
+                    try {
+                        serviceBinder?.unlinkToDeath(deathRecipient, 0)
+                    } catch (_: Exception) {}
+                    try {
+                        context.unbindService(serviceConnection)
+                    } catch (_: Exception) {}
+                    service = null
+                    serviceBinder = null
+                    isBound = false
+                }
+
+                // 1. Tandai semua proses yang sedang menunggu sebagai gagal
+                val crashMessage = OrphanJobRecovery.CRASH_MESSAGE
+                pendingResults.forEach { (jobId, deferred) ->
+                    if (deferred.isActive) {
+                        deferred.complete(JobResult(id = jobId, success = false, message = crashMessage))
+                    }
+                }
+                pendingResults.clear()
+
+                // 2. Perbarui status proses aktif di StateFlow menjadi FAILED
+                _processes.update { list ->
+                    list.map { p ->
+                        if (p.status == ProcessStatus.RUNNING || p.status == ProcessStatus.QUEUED) {
+                            p.copy(
+                                status = ProcessStatus.FAILED,
+                                message = crashMessage,
+                                errorMessage = crashMessage
+                            )
+                        } else p
+                    }
+                }
+
+                // 3. Jalankan pembersihan file sementara dan reset penanda aktif di DataStore
                 try {
-                    serviceBinder?.unlinkToDeath(deathRecipient, 0)
+                    OrphanJobRecovery.recoverOrphanJobs(context, force = true)
                 } catch (e: Exception) {
-                    // Abaikan jika binder sudah tidak aktif
+                    Log.e(TAG, "Gagal menjalankan OrphanJobRecovery setelah service crash", e)
                 }
-                service = null
-                serviceBinder = null
-                isBound = false
-            }
 
-            // 1. Tandai semua proses yang sedang menunggu sebagai gagal
-            val crashMessage = OrphanJobRecovery.CRASH_MESSAGE
-            pendingResults.forEach { (jobId, deferred) ->
-                if (deferred.isActive) {
-                    deferred.complete(JobResult(id = jobId, success = false, message = crashMessage))
+                // 4. Otomatis coba re-bind setelah jeda
+                delay(1000)
+                try {
+                    Log.i(TAG, "Mencoba melakukan re-bind ke WorkerService...")
+                    ensureConnected()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Re-bind gagal, akan dicoba kembali saat ada permintaan berikutnya", e)
                 }
-            }
-            pendingResults.clear()
-
-            // 2. Perbarui status proses aktif di StateFlow menjadi FAILED
-            _processes.update { list ->
-                list.map { p ->
-                    if (p.status == ProcessStatus.RUNNING || p.status == ProcessStatus.QUEUED) {
-                        p.copy(
-                            status = ProcessStatus.FAILED,
-                            message = crashMessage,
-                            errorMessage = crashMessage
-                        )
-                    } else p
-                }
-            }
-
-            // 3. Jalankan pembersihan file sementara dan reset penanda aktif di DataStore
-            try {
-                OrphanJobRecovery.recoverOrphanJobs(context, force = true)
-            } catch (e: Exception) {
-                Log.e(TAG, "Gagal menjalankan OrphanJobRecovery setelah service crash", e)
-            }
-
-            // 4. Otomatis coba re-bind setelah jeda
-            delay(1000)
-            try {
-                Log.i(TAG, "Mencoba melakukan re-bind ke WorkerService...")
-                ensureConnected()
-            } catch (e: Exception) {
-                Log.w(TAG, "Re-bind gagal, akan dicoba kembali saat ada permintaan berikutnya", e)
             }
         }
     }

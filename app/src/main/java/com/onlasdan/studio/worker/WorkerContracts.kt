@@ -16,6 +16,7 @@ object WorkerContracts {
     const val PREF_KEY_MANUAL_BUDGET_MB = "runtime_manual_budget_mb"
     const val PREF_KEY_LAST_CRASH_INFO = "runtime_last_crash_info"
     const val PREF_KEY_ACTIVE_JOB_ID = "runtime_active_job_id"
+    const val PREF_KEY_ACTIVE_TARGET_PATH = "runtime_active_target_path"
 
     // Default values
     const val DEFAULT_RUNTIME_ENABLED = true

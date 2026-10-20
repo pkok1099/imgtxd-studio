@@ -22,6 +22,8 @@ import com.onlasdan.studio.worker.model.JobRequest
 import com.onlasdan.studio.worker.model.JobResult
 import com.onlasdan.studio.worker.shizuku.ShizukuFileBridgeImpl
 import com.onlasdan.studio.worker.shizuku.WorkerShizukuManager
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +88,10 @@ class WorkerService : Service() {
     }
 
     private val callbacks = RemoteCallbackList<IWorkerCallback>()
+    private val callbackLock = Any()
+
+    @Volatile
+    private var isTimingOut = false
 
     private val cancelReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -318,14 +324,8 @@ class WorkerService : Service() {
             try {
                 while (isActive) {
                     val nextRequest = synchronized(queueLock) {
-                        if (jobQueue.isEmpty()) {
-                            isProcessing = false
-                            currentJob = null
-                            null
-                        } else {
-                            val req = jobQueue.removeFirst()
-                            currentJob = req
-                            req
+                        jobQueue.removeFirstOrNull()?.also {
+                            currentJob = it
                         }
                     } ?: break
 
@@ -346,6 +346,16 @@ class WorkerService : Service() {
 
                     notifyProgress(runningProgress)
                     notifyQueueChanged()
+
+                    // Simpan penanda pekerjaan aktif ke DataStore untuk pemulihan orphan jika terjadi LMK / crash
+                    try {
+                        applicationContext.workerDataStore.edit { preferences ->
+                            preferences[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID)] = nextRequest.id
+                            preferences[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)] = nextRequest.targetPath
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Gagal mencatat status pekerjaan aktif ke DataStore", e)
+                    }
 
                     val foregroundNotif = WorkerNotificationHelper.buildForegroundNotification(
                         this@WorkerService,
@@ -388,6 +398,16 @@ class WorkerService : Service() {
                             success = false,
                             message = e.localizedMessage ?: "Terjadi kesalahan pada engine"
                         )
+                    } finally {
+                        // Hapus penanda aktif di DataStore setelah pekerjaan selesai dieksekusi
+                        try {
+                            applicationContext.workerDataStore.edit { preferences ->
+                                preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID))
+                                preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH))
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Gagal membersihkan penanda aktif dari DataStore", e)
+                        }
                     }
 
                     synchronized(queueLock) {
@@ -408,13 +428,22 @@ class WorkerService : Service() {
                     }
                 }
             } finally {
-                synchronized(queueLock) {
-                    isProcessing = false
-                    currentJob = null
+                val shouldStop = synchronized(queueLock) {
+                    if (jobQueue.isEmpty()) {
+                        isProcessing = false
+                        currentJob = null
+                        true
+                    } else {
+                        false
+                    }
                 }
-                releaseWakeLock()
-                stopForegroundService()
-                stopSelf()
+                if (shouldStop) {
+                    releaseWakeLock()
+                    stopForegroundService()
+                    stopSelf()
+                } else {
+                    startProcessingIfNeeded()
+                }
             }
         }
     }
@@ -473,6 +502,9 @@ class WorkerService : Service() {
                 isForeground = false
             }
         }
+        try {
+            notificationManager.cancel(WorkerContracts.NOTIFICATION_ID)
+        } catch (_: Throwable) {}
     }
 
     // --- WakeLock Management ---
@@ -513,7 +545,13 @@ class WorkerService : Service() {
     // --- System Timeout (Android 15+ API 35) ---
 
     private fun handleSystemTimeout(startId: Int, fgsType: Int) {
+        synchronized(queueLock) {
+            if (isTimingOut) return
+            isTimingOut = true
+        }
+
         Log.w(TAG, "System timeout triggered for startId: $startId, fgsType: $fgsType")
+        processingJob?.cancel()
 
         val active = currentJob
         if (active != null) {
@@ -525,6 +563,16 @@ class WorkerService : Service() {
             }
 
             trySaveCheckpoint(active)
+
+            // Bersihkan penanda aktif dari DataStore saat timeout sistem
+            try {
+                serviceScope.launch {
+                    applicationContext.workerDataStore.edit { preferences ->
+                        preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_ID))
+                        preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH))
+                    }
+                }
+            } catch (_: Exception) {}
 
             val timeoutProgress = JobProgress(
                 id = activeId,
@@ -575,48 +623,54 @@ class WorkerService : Service() {
     // --- Callbacks Dispatching ---
 
     private fun notifyProgress(progress: JobProgress) {
-        val count = callbacks.beginBroadcast()
-        try {
-            for (i in 0 until count) {
-                try {
-                    callbacks.getBroadcastItem(i).onProgress(progress)
-                } catch (e: RemoteException) {
-                    Log.e(TAG, "Error in onProgress callback", e)
+        synchronized(callbackLock) {
+            val count = callbacks.beginBroadcast()
+            try {
+                for (i in 0 until count) {
+                    try {
+                        callbacks.getBroadcastItem(i).onProgress(progress)
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Error in onProgress callback", e)
+                    }
                 }
+            } finally {
+                callbacks.finishBroadcast()
             }
-        } finally {
-            callbacks.finishBroadcast()
         }
     }
 
     private fun notifyFinished(result: JobResult) {
-        val count = callbacks.beginBroadcast()
-        try {
-            for (i in 0 until count) {
-                try {
-                    callbacks.getBroadcastItem(i).onFinished(result)
-                } catch (e: RemoteException) {
-                    Log.e(TAG, "Error in onFinished callback", e)
+        synchronized(callbackLock) {
+            val count = callbacks.beginBroadcast()
+            try {
+                for (i in 0 until count) {
+                    try {
+                        callbacks.getBroadcastItem(i).onFinished(result)
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Error in onFinished callback", e)
+                    }
                 }
+            } finally {
+                callbacks.finishBroadcast()
             }
-        } finally {
-            callbacks.finishBroadcast()
         }
     }
 
     private fun notifyQueueChanged() {
         val currentQueue = getActiveJobsInternal()
-        val count = callbacks.beginBroadcast()
-        try {
-            for (i in 0 until count) {
-                try {
-                    callbacks.getBroadcastItem(i).onQueueChanged(currentQueue)
-                } catch (e: RemoteException) {
-                    Log.e(TAG, "Error in onQueueChanged callback", e)
+        synchronized(callbackLock) {
+            val count = callbacks.beginBroadcast()
+            try {
+                for (i in 0 until count) {
+                    try {
+                        callbacks.getBroadcastItem(i).onQueueChanged(currentQueue)
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Error in onQueueChanged callback", e)
+                    }
                 }
+            } finally {
+                callbacks.finishBroadcast()
             }
-        } finally {
-            callbacks.finishBroadcast()
         }
     }
 

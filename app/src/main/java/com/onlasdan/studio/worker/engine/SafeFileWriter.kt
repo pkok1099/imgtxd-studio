@@ -70,7 +70,12 @@ object SafeFileWriter {
      */
     @Throws(IllegalStateException::class)
     fun acquireLock(targetPath: String): LockHandle {
-        val lockFile = File(targetPath + WorkerContracts.EXT_LOCK)
+        val canonicalPath = try {
+            File(targetPath).canonicalPath
+        } catch (_: Throwable) {
+            File(targetPath).absolutePath
+        }
+        val lockFile = File(canonicalPath + WorkerContracts.EXT_LOCK)
         lockFile.parentFile?.mkdirs()
 
         val raf = try {
@@ -156,27 +161,58 @@ object SafeFileWriter {
     }
 
     /**
-     * Mengganti targetFile dengan tmpFile secara atomik menggunakan ATOMIC_MOVE atau renameTo fallback.
+     * Mengganti targetFile dengan tmpFile secara atomik dan aman tanpa pernah merusak berkas asli.
      */
     fun atomicReplace(tmpFile: File, targetFile: File): Boolean {
         if (!tmpFile.exists()) return false
         val tmpPath = tmpFile.toPath()
         val targetPath = targetFile.toPath()
 
-        return try {
+        // 1. Coba perpindahan atomik standar sistem operasi (POSIX atomic rename)
+        try {
             Files.move(tmpPath, targetPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            true
-        } catch (e: AtomicMoveNotSupportedException) {
-            try {
-                Files.move(tmpPath, targetPath, StandardCopyOption.REPLACE_EXISTING)
-                true
-            } catch (e2: Exception) {
-                if (targetFile.exists()) targetFile.delete()
-                tmpFile.renameTo(targetFile)
+            return true
+        } catch (_: AtomicMoveNotSupportedException) {
+            // Lanjut ke fallback di bawah
+        } catch (_: Exception) {
+            // Lanjut ke fallback di bawah
+        }
+
+        // 2. Coba perpindahan dengan REPLACE_EXISTING
+        try {
+            Files.move(tmpPath, targetPath, StandardCopyOption.REPLACE_EXISTING)
+            return true
+        } catch (_: Exception) {
+            // Lanjut ke fallback di bawah
+        }
+
+        // 3. Pada platform Linux/Android, syscall renameTo mengganti berkas yang ada secara atomik
+        if (tmpFile.renameTo(targetFile)) {
+            return true
+        }
+
+        // 4. Fallback protektif dengan berkas cadangan (.bak) agar targetFile tidak pernah hilang jika rename gagal
+        val backupFile = File(targetFile.path + ".bak")
+        try {
+            cleanupFile(backupFile)
+            if (targetFile.exists() && !targetFile.renameTo(backupFile)) {
+                return false
             }
-        } catch (e: Exception) {
-            if (targetFile.exists()) targetFile.delete()
-            tmpFile.renameTo(targetFile)
+            if (tmpFile.renameTo(targetFile)) {
+                cleanupFile(backupFile)
+                return true
+            } else {
+                // Pulihkan kembali berkas asli dari cadangan jika rename tmpFile gagal
+                if (backupFile.exists() && !targetFile.exists()) {
+                    backupFile.renameTo(targetFile)
+                }
+                return false
+            }
+        } catch (_: Exception) {
+            if (backupFile.exists() && !targetFile.exists()) {
+                backupFile.renameTo(targetFile)
+            }
+            return false
         }
     }
 
@@ -287,7 +323,13 @@ object SafeFileWriter {
         } catch (_: Throwable) {}
     }
 
-    fun getTempFile(targetPath: String): File = File(targetPath + WorkerContracts.EXT_TMP)
+    fun getTempFile(targetPath: String): File {
+        val canonical = try { File(targetPath).canonicalPath } catch (_: Throwable) { targetPath }
+        return File(canonical + WorkerContracts.EXT_TMP)
+    }
 
-    fun getLockFile(targetPath: String): File = File(targetPath + WorkerContracts.EXT_LOCK)
+    fun getLockFile(targetPath: String): File {
+        val canonical = try { File(targetPath).canonicalPath } catch (_: Throwable) { targetPath }
+        return File(canonical + WorkerContracts.EXT_LOCK)
+    }
 }
