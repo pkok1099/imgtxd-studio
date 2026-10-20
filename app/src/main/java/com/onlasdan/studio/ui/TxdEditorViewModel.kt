@@ -189,6 +189,41 @@ class TxdEditorViewModel(
         }
     }
 
+    fun exportSelectedTextures(entries: List<TxdEntry>, destinationDir: File) {
+        if (entries.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+            try {
+                var count = 0
+                withContext(Dispatchers.IO) {
+                    destinationDir.mkdirs()
+                    for (entry in entries) {
+                        val bmp = entry.bitmap ?: continue
+                        val targetFile = File(destinationDir, "${entry.name}.png")
+                        targetFile.outputStream().use { out ->
+                            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        }
+                        count++
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        statusMessage = "Berhasil mengekspor $count tekstur ke ${destinationDir.name}"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "Gagal ekspor tekstur: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
     fun replaceTexture(context: Context, targetEntry: TxdEntry, imagePath: String, isImageShizuku: Boolean) {
         val txdFile = _uiState.value.activeTxdFile ?: return
         val currentEntries = _uiState.value.txdEntries

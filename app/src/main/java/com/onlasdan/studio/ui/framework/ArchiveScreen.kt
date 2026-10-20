@@ -47,6 +47,7 @@ fun <T> ArchiveScreen(
     onCloseSearch: () -> Unit = {},
     activeProcess: AppProcess? = null,
     onProcessPillClick: () -> Unit = {},
+    headerTrailingContent: (@Composable () -> Unit)? = null,
     dockContent: @Composable () -> Unit,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
@@ -280,12 +281,20 @@ fun <T> ArchiveScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Text(
-                                text = "Total ${items.size} entri",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Total ${items.size} entri",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                if (headerTrailingContent != null) {
+                                    headerTrailingContent()
+                                }
+                            }
                         }
                     }
 

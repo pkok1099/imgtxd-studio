@@ -27,11 +27,14 @@ import com.onlasdan.studio.ui.framework.ArchiveScreen
 import com.onlasdan.studio.ui.framework.ContextualDockItem
 import com.onlasdan.studio.ui.framework.ContextualPillDock
 import com.onlasdan.studio.ui.settings.RuntimeSettingsSheet
+import com.onlasdan.studio.ui.sheets.AutoReplaceConfirmationSheet
 import com.onlasdan.studio.ui.sheets.MoreActionsBottomSheet
 import com.onlasdan.studio.ui.sheets.ProcessDetailBottomSheet
 import com.onlasdan.studio.ui.sheets.TextureDetailBottomSheet
 import com.onlasdan.studio.ui.theme.SemanticColors
+import com.onlasdan.studio.util.AppSettings
 import com.onlasdan.studio.util.ShizukuManager
+import com.onlasdan.studio.util.TxdViewMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,6 +51,7 @@ fun TxdEditorScreen(
     onClose: () -> Unit,
     onExportSingle: (entry: TxdEntry, destDir: File) -> Unit,
     onExportAll: (destDir: File) -> Unit,
+    onExportSelected: ((entries: List<TxdEntry>, destDir: File) -> Unit)? = null,
     onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean) -> Unit,
     onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean) -> Unit,
     onClearMessages: (() -> Unit)? = null,
@@ -99,6 +103,17 @@ fun TxdEditorScreen(
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedTextures by remember { mutableStateOf(setOf<TxdEntry>()) }
 
+    // TXD View Mode (Gambar Besar vs Gambar Kecil)
+    val initialViewMode = remember { AppSettings.cachedTxdViewMode }
+    var txdViewMode by rememberSaveable { mutableStateOf(initialViewMode) }
+    val toggleViewMode = {
+        val nextMode = if (txdViewMode == TxdViewMode.LARGE) TxdViewMode.SMALL else TxdViewMode.LARGE
+        txdViewMode = nextMode
+        coroutineScope.launch {
+            AppSettings.setTxdViewMode(context, nextMode)
+        }
+    }
+
     BackHandler(enabled = isSearching || isSelectionMode) {
         when {
             isSearching -> {
@@ -123,6 +138,7 @@ fun TxdEditorScreen(
     var entryToReplace by remember { mutableStateOf<TxdEntry?>(null) }
     var entryToExport by remember { mutableStateOf<TxdEntry?>(null) }
     var showExportAllPicker by remember { mutableStateOf(false) }
+    var showExportSelectedPicker by remember { mutableStateOf(false) }
 
     // Auto Replace State
     var showAutoReplaceModeChoice by rememberSaveable { mutableStateOf(false) }
@@ -187,7 +203,7 @@ fun TxdEditorScreen(
             id = "export_selected",
             icon = Icons.Outlined.FileDownload,
             contentDescription = "Ekspor tekstur terpilih",
-            onClick = { showExportAllPicker = true }
+            onClick = { showExportSelectedPicker = true }
         ),
         ContextualDockItem(
             id = "select_all",
@@ -279,6 +295,25 @@ fun TxdEditorScreen(
         onProcessPillClick = {
             activeProcess?.let { selectedProcessForDetail = it }
         },
+        headerTrailingContent = {
+            IconButton(
+                onClick = { toggleViewMode() },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = if (txdViewMode == TxdViewMode.LARGE)
+                        Icons.Outlined.ViewCompact
+                    else
+                        Icons.Outlined.PhotoSizeSelectActual,
+                    contentDescription = if (txdViewMode == TxdViewMode.LARGE)
+                        "Ubah ke Mode Gambar Kecil"
+                    else
+                        "Ubah ke Mode Gambar Besar",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        },
         itemContent = { entry ->
             ArchiveEntryCard(
                 title = entry.name,
@@ -286,6 +321,7 @@ fun TxdEditorScreen(
                 bitmap = entry.bitmap,
                 isSelected = selectedTextures.contains(entry),
                 isSelectionMode = isSelectionMode,
+                isLargeImage = (txdViewMode == TxdViewMode.LARGE),
                 onClick = {
                     if (isSelectionMode) {
                         selectedTextures = if (selectedTextures.contains(entry))
@@ -331,6 +367,8 @@ fun TxdEditorScreen(
             fileName = txdName,
             isTxd = true,
             isFileBusy = ProcessRepositoryLocator.get(context).hasRunningProcess(txdName),
+            isLargeImage = (txdViewMode == TxdViewMode.LARGE),
+            onToggleTxdViewMode = { toggleViewMode() },
             onExportAll = { showExportAllPicker = true },
             onOpenWindowMode = { onOpenWindowMode?.invoke() },
             onOpenSettings = {
@@ -395,6 +433,30 @@ fun TxdEditorScreen(
         )
     }
 
+    // 5b. File Picker for Export Selected
+    if (showExportSelectedPicker) {
+        val targets = selectedTextures.toList()
+        FilePickerDialog(
+            title = "Pilih Folder Ekspor (${targets.size} Tekstur Terpilih)",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { showExportSelectedPicker = false },
+            onFileSelected = { folderPath, _ ->
+                showExportSelectedPicker = false
+                val targetDir = File(folderPath)
+                if (onExportSelected != null) {
+                    onExportSelected(targets, targetDir)
+                } else {
+                    for (entry in targets) {
+                        onExportSingle(entry, targetDir)
+                    }
+                }
+                // Lepaskan seleksi setelah aksi dijalankan
+                selectedTextures = emptySet()
+                isSelectionMode = false
+            }
+        )
+    }
+
     // 6. File Picker for Replace Single Texture
     entryToReplace?.let { target ->
         FilePickerDialog(
@@ -446,99 +508,15 @@ fun TxdEditorScreen(
         )
     }
 
-    // 10. Auto Replace Confirmation Dialog
+    // 10. Auto Replace Confirmation Drawer (70% Screen)
     autoReplaceMatches?.let { matches ->
-        AlertDialog(
+        AutoReplaceConfirmationSheet(
+            matches = matches,
             onDismissRequest = { autoReplaceMatches = null },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            icon = { Icon(Icons.Outlined.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("Konfirmasi Auto-Replace", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Ditemukan ${matches.size} tekstur yang cocok. Tekstur berikut akan otomatis diganti:",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 240.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        androidx.compose.foundation.lazy.LazyColumn(
-                            contentPadding = PaddingValues(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            items(matches) { (tex, path) ->
-                                val fileName = File(path).name
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.Image,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = tex.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        text = "(${tex.dimensionsLabel})",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("➔", style = MaterialTheme.typography.bodySmall)
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = fileName,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.secondary,
-                                        maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val targets = autoReplaceMatches ?: return@Button
-                        autoReplaceMatches = null
-                        onAutoReplace(targets, isAutoReplaceShizuku)
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text("Ganti Sekarang (${matches.size})", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { autoReplaceMatches = null },
-                    shape = CircleShape
-                ) {
-                    Text("Batal")
-                }
+            onConfirm = {
+                val targets = autoReplaceMatches ?: return@AutoReplaceConfirmationSheet
+                autoReplaceMatches = null
+                onAutoReplace(targets, isAutoReplaceShizuku)
             }
         )
     }

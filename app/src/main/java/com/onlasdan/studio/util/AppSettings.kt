@@ -30,6 +30,11 @@ enum class WindowMode(val title: String, val description: String) {
     )
 }
 
+enum class TxdViewMode(val title: String) {
+    SMALL("Gambar Kecil"),
+    LARGE("Gambar Besar")
+}
+
 data class RecentFileItem(
     val path: String,
     val name: String,
@@ -43,10 +48,15 @@ val Context.appDataStore: DataStore<Preferences> by preferencesDataStore(name = 
 object AppSettings {
 
     private val KEY_WINDOW_MODE = stringPreferencesKey("window_mode")
+    private val KEY_TXD_VIEW_MODE = stringPreferencesKey("txd_view_mode")
     private val KEY_RECENT_FILES = stringPreferencesKey("recent_files_json")
 
     @Volatile
     var cachedWindowMode: WindowMode = WindowMode.PER_FEATURE
+        private set
+
+    @Volatile
+    var cachedTxdViewMode: TxdViewMode = TxdViewMode.SMALL
         private set
 
     private var isInitialized = false
@@ -57,6 +67,11 @@ object AppSettings {
         CoroutineScope(Dispatchers.IO).launch {
             getWindowModeFlow(context).collect { mode ->
                 cachedWindowMode = mode
+            }
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            getTxdViewModeFlow(context).collect { mode ->
+                cachedTxdViewMode = mode
             }
         }
     }
@@ -76,6 +91,24 @@ object AppSettings {
         cachedWindowMode = mode
         context.appDataStore.edit { preferences ->
             preferences[KEY_WINDOW_MODE] = mode.name
+        }
+    }
+
+    fun getTxdViewModeFlow(context: Context): Flow<TxdViewMode> {
+        return context.appDataStore.data.map { preferences ->
+            val modeStr = preferences[KEY_TXD_VIEW_MODE] ?: TxdViewMode.SMALL.name
+            try {
+                TxdViewMode.valueOf(modeStr)
+            } catch (e: Exception) {
+                TxdViewMode.SMALL
+            }
+        }
+    }
+
+    suspend fun setTxdViewMode(context: Context, mode: TxdViewMode) {
+        cachedTxdViewMode = mode
+        context.appDataStore.edit { preferences ->
+            preferences[KEY_TXD_VIEW_MODE] = mode.name
         }
     }
 

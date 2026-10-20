@@ -763,6 +763,9 @@ fun MainScreen(
                     onExportAll = { destDir ->
                         viewModel.exportAllTextures(destDir)
                     },
+                    onExportSelected = { entries, destDir ->
+                        viewModel.exportSelectedTextures(entries, destDir)
+                    },
                     onReplaceTexture = { entry, imagePath, isShizuku ->
                         viewModel.replaceTexture(context, entry, imagePath, isShizuku)
                     },

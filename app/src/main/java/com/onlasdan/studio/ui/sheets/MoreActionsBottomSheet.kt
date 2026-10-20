@@ -30,6 +30,8 @@ fun MoreActionsBottomSheet(
     onExportAll: () -> Unit,
     onRenameFile: (() -> Unit)? = null,
     onRebuildArchive: (() -> Unit)? = null,
+    isLargeImage: Boolean = false,
+    onToggleTxdViewMode: (() -> Unit)? = null,
     onOpenWindowMode: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRuntimeSettings: () -> Unit = {},
@@ -88,6 +90,19 @@ fun MoreActionsBottomSheet(
                                 onExportAll()
                             }
                         )
+
+                        if (isTxd && onToggleTxdViewMode != null) {
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            MoreActionRow(
+                                icon = if (isLargeImage) Icons.Outlined.ViewCompact else Icons.Outlined.PhotoSizeSelectActual,
+                                title = if (isLargeImage) "Tampilan: Gambar Besar" else "Tampilan: Gambar Kecil",
+                                subtitle = if (isLargeImage) "Ketuk untuk beralih ke daftar kompak (gambar kecil)" else "Ketuk untuk beralih ke kartu pratinjau besar",
+                                onClick = {
+                                    onDismissRequest()
+                                    onToggleTxdViewMode()
+                                }
+                            )
+                        }
 
                         if (onRebuildArchive != null && !isTxd) {
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)

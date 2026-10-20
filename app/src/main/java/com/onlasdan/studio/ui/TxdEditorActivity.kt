@@ -150,6 +150,9 @@ class TxdEditorActivity : ComponentActivity() {
                             onExportAll = { destDir ->
                                 viewModel.exportAllTextures(destDir)
                             },
+                            onExportSelected = { entries, destDir ->
+                                viewModel.exportSelectedTextures(entries, destDir)
+                            },
                             onReplaceTexture = { entry, imagePath, isShizuku ->
                                 viewModel.replaceTexture(this@TxdEditorActivity, entry, imagePath, isShizuku)
                             },

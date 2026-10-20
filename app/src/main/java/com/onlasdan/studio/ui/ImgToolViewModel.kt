@@ -358,8 +358,10 @@ class ImgToolViewModel : ViewModel() {
         if (selected.isEmpty()) return
         val archive = _uiState.value.archive ?: return
 
+        // Lepaskan seleksi segera setelah aksi dijalankan
+        _uiState.update { it.copy(selectedEntries = emptySet(), isSelecting = false, isLoading = true) }
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
                 targetFile = archive.archiveName,
@@ -534,9 +536,11 @@ class ImgToolViewModel : ViewModel() {
         val selected = _uiState.value.selectedEntries.toList()
         if (selected.isEmpty()) return
 
+        // Lepaskan seleksi segera setelah aksi dijalankan
+        _uiState.update { it.copy(selectedEntries = emptySet(), isSelecting = false, isLoading = true, statusMessage = "Deleting ${selected.size} items...") }
+
         viewModelScope.launch {
             val archive = _uiState.value.archive ?: return@launch
-            _uiState.update { it.copy(isLoading = true, statusMessage = "Deleting ${selected.size} items...") }
             try {
                 withContext(Dispatchers.IO) {
                     archive.delete(selected)
@@ -846,6 +850,47 @@ class ImgToolViewModel : ViewModel() {
                 it.copy(
                     isTxdLoading = false,
                     statusMessage = if (res.isSuccess) "Berhasil mengekspor ${list.size} tekstur ke ${destinationDir.name}" else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
+            }
+        }
+    }
+
+    fun exportSelectedTextures(entries: List<TxdEntry>, destinationDir: File) {
+        if (entries.isEmpty()) return
+        val targetName = _uiState.value.activeTxdName ?: "tekstur.txd"
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true) }
+            val res = ProcessRepositoryLocator.get().executeProcess(
+                type = ProcessType.EXPORT_ALL,
+                targetFile = targetName,
+                title = "Ekspor ${entries.size} PNG ($targetName)"
+            ) { onProgress ->
+                try {
+                    var exported = 0
+                    withContext(Dispatchers.IO) {
+                        destinationDir.mkdirs()
+                        for ((idx, entry) in entries.withIndex()) {
+                            val bmp = entry.bitmap ?: continue
+                            val targetFile = File(destinationDir, "${entry.name}.png")
+                            targetFile.outputStream().use { out ->
+                                bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                            }
+                            exported++
+                            onProgress(idx + 1, entries.size, "Mengekspor ${entry.name}.png ($exported/${entries.size})")
+                        }
+                    }
+                    Result.success(Unit)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    isTxdLoading = false,
+                    statusMessage = if (res.isSuccess) "Berhasil mengekspor ${entries.size} tekstur ke ${destinationDir.name}" else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
