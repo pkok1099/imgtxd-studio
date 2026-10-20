@@ -27,7 +27,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Intent filter for opening .img files from file managers -->
+            <!-- Intent filter for opening .img and .txd files from file managers -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -38,6 +38,8 @@
                 <data android:host="*" />
                 <data android:pathPattern=".*\\.img" />
                 <data android:pathPattern=".*\\.IMG" />
+                <data android:pathPattern=".*\\.txd" />
+                <data android:pathPattern=".*\\.TXD" />
             </intent-filter>
 
         </activity>

@@ -1,6 +1,17 @@
-# GTA Img Studio 🎮📦
+# ImgTxd Studio 🎮📦
 
-Modern, high-performance, and open-source GTA `.img` archive manager built specifically for modern Android (Android 12 – 16, API 31–36) with Jetpack Compose Material 3 and Shizuku privileged access.
+Modern, high-performance, and open-source `.img` archive and `.txd` texture dictionary manager built specifically for modern Android (Android 12 – 16, API 31–36) with Jetpack Compose Material 3 and Shizuku privileged access.
+
+---
+
+## 🎯 Supported Games & Engines
+
+ImgTxd Studio supports games and engines utilizing the RenderWare binary formats and `.img` sector-based archives:
+
+- **Grand Theft Auto: San Andreas** (`.img` VER2 with embedded directory table, PC & Mobile texture dictionaries).
+- **Grand Theft Auto: Vice City** (`.img` VER1 paired with `.dir` directory table, PC & Mobile `.txd`).
+- **Grand Theft Auto III** (`.img` VER1 paired with `.dir` directory table, PC & Mobile `.txd`).
+- **Bully: Anniversary Edition** (Sector-based `.img` archives and companion texture dictionaries).
 
 ---
 
@@ -17,8 +28,8 @@ Modern, high-performance, and open-source GTA `.img` archive manager built speci
   - **Export & Batch Export:** Export individual textures or batch export all textures in a TXD dictionary to lossless `.png` images.
 
 - **Full Format Support (VER1 & VER2):**
-  - GTA San Andreas (`.img` VER2 with embedded directory table).
-  - GTA III and GTA Vice City (`.img` VER1 with companion `.dir` directory files).
+  - San Andreas format (`.img` VER2 with embedded directory table).
+  - Classic format (`.img` VER1 with companion `.dir` directory files).
 
 - **Ultra High-Performance Engine:**
   - **Virtual Lazy Pagination:** Easily handles massive archives like `gta3.img` with **16,000+ entries** without UI stutter or memory bloat (renders in 100-item incremental chunks).
@@ -61,6 +72,12 @@ cd gta-img-studio
 ```
 
 > **Note for Fork Developers:** Official release builds distributed by the author are signed with a private release keystore and verified via on-device cryptographic SHA-256 checks. When building from source for your own use, Gradle automatically falls back to debug signing, or you can supply your own keystore in `app/build.gradle.kts`.
+
+---
+
+## ⚖️ Legal Disclaimer
+
+ImgTxd Studio is an independent, free, and open-source file modification tool. All trademarks, game titles, and brand names (including Grand Theft Auto, GTA, Bully, and Rockstar Games) are the property of their respective owners. ImgTxd Studio is not affiliated with, endorsed by, or sponsored by Rockstar Games or Take-Two Interactive.
 
 ---
 

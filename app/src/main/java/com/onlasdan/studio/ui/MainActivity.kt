@@ -122,7 +122,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         val uri: Uri? = intent?.data
         if (uri != null) {
-            viewModel.openArchiveFromUri(this, uri)
+            viewModel.openFileFromUri(this, uri)
         }
     }
 }
@@ -198,7 +198,7 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = uiState.archive?.archiveName ?: "GTA Img Studio",
+                                text = uiState.archive?.archiveName ?: "ImgTxd Studio",
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -438,13 +438,13 @@ fun MainScreen(viewModel: ImgToolViewModel) {
                             )
                             Spacer(Modifier.height(16.dp))
                             Text(
-                                text = "GTA Img & TXD Studio",
+                                text = "ImgTxd Studio",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "Buka arsip game GTA .img atau file tekstur .txd secara mandiri. Dengan Shizuku, Anda dapat memodifikasi file game di Android/data secara langsung tanpa root!",
+                                text = "Buka dan kelola arsip .img serta tekstur .txd untuk seri Grand Theft Auto (SA, VC, III) dan Bully. Akses langsung folder Android/data menggunakan Shizuku tanpa root!",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -934,7 +934,7 @@ fun TamperedScreen() {
                     )
                     Text(
                         text = "Aplikasi ini mendeteksi perubahan nama paket (repackaging) atau modifikasi kode yang tidak sah. " +
-                               "Demi integritas sistem dan keamanan file game Anda, GTA Img Studio tidak diizinkan berjalan dalam kondisi yang telah diubah.\n\n" +
+                               "Demi integritas sistem dan keamanan file game Anda, ImgTxd Studio tidak diizinkan berjalan dalam kondisi yang telah diubah.\n\n" +
                                "Aplikasi akan otomatis ditutup.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onErrorContainer

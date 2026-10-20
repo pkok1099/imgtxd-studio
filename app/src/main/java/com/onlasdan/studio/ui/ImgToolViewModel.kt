@@ -153,7 +153,7 @@ class ImgToolViewModel : ViewModel() {
         }
     }
 
-    fun openArchiveFromUri(context: Context, uri: Uri) {
+    fun openFileFromUri(context: Context, uri: Uri) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = "Importing file from storage...") }
             try {
@@ -162,7 +162,12 @@ class ImgToolViewModel : ViewModel() {
                         StorageHelper.copyUriToTempFile(context, uri)
                     }
 
-                openArchive(resolvedFile)
+                if (resolvedFile.name.endsWith(".txd", ignoreCase = true)) {
+                    _uiState.update { it.copy(isLoading = false) }
+                    openStandaloneTxd(context, resolvedFile.absolutePath, isShizuku = false)
+                } else {
+                    openArchive(resolvedFile)
+                }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -173,6 +178,8 @@ class ImgToolViewModel : ViewModel() {
             }
         }
     }
+
+    fun openArchiveFromUri(context: Context, uri: Uri) = openFileFromUri(context, uri)
 
     /**
      * Loads the next chunk of entries for incremental lazy list rendering.
