@@ -134,7 +134,8 @@ fun AutoReplaceConfirmationSheet(
                 ) {
                     items(
                         items = matches,
-                        key = { "${it.first.name}_${it.second}" }
+                        key = { "${it.first.name}_${it.second}" },
+                        contentType = { "match_comparison_card" }
                     ) { (tex, path) ->
                         val replacementFile = File(path)
                         Card(

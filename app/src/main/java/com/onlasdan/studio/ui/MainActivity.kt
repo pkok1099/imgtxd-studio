@@ -1462,7 +1462,11 @@ private fun HomeScreen(
                 }
             }
         } else {
-            items(recentFiles, key = { it.path }) { item ->
+            items(
+                items = recentFiles,
+                key = { it.path },
+                contentType = { "recent_file" }
+            ) { item ->
                 RecentFileRow(item = item, onClick = { onOpenRecent(item) })
             }
         }

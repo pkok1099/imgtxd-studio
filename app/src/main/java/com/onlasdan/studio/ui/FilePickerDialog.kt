@@ -107,7 +107,7 @@ fun FilePickerDialog(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var shizukuGranted by remember { mutableStateOf(ShizukuManager.hasPermission()) }
-    val selectedPaths = remember { mutableStateListOf<String>() }
+    var selectedPaths by remember { mutableStateOf(emptySet<String>()) }
 
     var animProgress by remember { mutableFloatStateOf(0f) }
     var isClosing by remember { mutableStateOf(false) }
@@ -532,7 +532,7 @@ fun FilePickerDialog(
                 }
 
                 if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
-                    val selectableFiles = displayedItems.filter { !it.isDirectory }
+                    val selectableFiles = remember(displayedItems) { displayedItems.filter { !it.isDirectory } }
                     if (selectableFiles.isNotEmpty()) {
                         Row(
                             modifier = Modifier
@@ -550,11 +550,11 @@ fun FilePickerDialog(
                                 onClick = {
                                     val allSelected = selectableFiles.all { selectedPaths.contains(it.path) }
                                     if (allSelected) {
-                                        selectableFiles.forEach { selectedPaths.remove(it.path) }
+                                        val toRemove = selectableFiles.map { it.path }.toSet()
+                                        selectedPaths = selectedPaths - toRemove
                                     } else {
-                                        selectableFiles.forEach {
-                                            if (!selectedPaths.contains(it.path)) selectedPaths.add(it.path)
-                                        }
+                                        val toAdd = selectableFiles.map { it.path }
+                                        selectedPaths = selectedPaths + toAdd
                                     }
                                 }
                             ) {
@@ -598,22 +598,23 @@ fun FilePickerDialog(
                                 key = { it.path },
                                 contentType = { if (it.isDirectory) "dir" else "file" }
                             ) { item ->
+                                val isItemSelected = selectedPaths.contains(item.path)
                                 ListItem(
                                     modifier = Modifier.clickable {
                                         if (item.isDirectory) {
                                             currentPath = item.path
                                         } else if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
-                                            if (selectedPaths.contains(item.path)) {
-                                                selectedPaths.remove(item.path)
+                                            selectedPaths = if (isItemSelected) {
+                                                selectedPaths - item.path
                                             } else {
-                                                selectedPaths.add(item.path)
+                                                selectedPaths + item.path
                                             }
                                         } else {
                                             selectWithAnimation(item.path, item.isShizuku)
                                         }
                                     },
                                     colors = ListItemDefaults.colors(
-                                        containerColor = if (selectedPaths.contains(item.path))
+                                        containerColor = if (isItemSelected)
                                             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
                                         else
                                             Color.Transparent,
@@ -625,9 +626,9 @@ fun FilePickerDialog(
                                     leadingContent = {
                                         if (mode == PickerMode.PICK_MULTIPLE_IMAGES && !item.isDirectory) {
                                             Checkbox(
-                                                checked = selectedPaths.contains(item.path),
+                                                checked = isItemSelected,
                                                 onCheckedChange = { checked ->
-                                                    if (checked) selectedPaths.add(item.path) else selectedPaths.remove(item.path)
+                                                    selectedPaths = if (checked) selectedPaths + item.path else selectedPaths - item.path
                                                 },
                                                 colors = CheckboxDefaults.colors(
                                                     checkedColor = MaterialTheme.colorScheme.primary,
