@@ -1,6 +1,27 @@
 # ImgTxd Studio 🎮📦
 
-Modern, high-performance, and open-source `.img` archive and `.txd` texture dictionary manager built specifically for modern Android (Android 12 – 16, API 31–36) with Jetpack Compose Material 3 and Shizuku privileged access.
+[![GitHub release](https://img.shields.io/github/v/release/pkok1099/imgtxd-studio?color=blue&logo=github&style=flat-square)](https://github.com/pkok1099/imgtxd-studio/releases/latest)
+[![Platform](https://img.shields.io/badge/Platform-Android%2012%20--%2016-green?logo=android&style=flat-square)](https://github.com/pkok1099/imgtxd-studio/releases)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-orange.svg?style=flat-square)](LICENSE)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-purple?logo=kotlin&style=flat-square)](https://kotlinlang.org)
+[![Compose](https://img.shields.io/badge/Jetpack-Compose%20M3-brightgreen?logo=jetpackcompose&style=flat-square)](https://developer.android.com/jetpack/compose)
+
+> **Modern, high-performance, and open-source `.img` archive & `.txd` texture dictionary editor for Android (Android 12 – 16, API 31–36).**  
+> Direct alternative to legacy PC IMG Tool and TXD Tool on mobile, powered by **Jetpack Compose Material 3** and **Shizuku privileged storage access**.
+
+[⬇️ **Download Latest APK (v3.2.3)**](https://github.com/pkok1099/imgtxd-studio/releases/latest) • [✨ Features](#-features) • [🎯 Supported Games](#-supported-games) • [🛠️ Build](#️-building-from-source)
+
+---
+
+## 🔍 Overview
+
+Modding RenderWare games like **GTA San Andreas** on newer Android versions (Android 12, 13, 14, 15, and 16) has become difficult due to Scoped Storage restrictions preventing apps from writing to `Android/data/`.
+
+**ImgTxd Studio** solves this completely:
+- 🚀 **Full `.img` Archive Tool:** Add, replace, extract, rename, delete, and rebuild `.img` archives (VER1 & VER2).
+- 🎨 **RenderWare `.txd` Texture Studio:** View, replace, and export textures directly inside `.img` files or standalone `.txd` files (DXT1/3/5, ETC1, 16/24/32-bit).
+- ⚡ **Seamless `Android/data` Access via Shizuku:** No PC or root required to edit game textures or files directly.
+- 🪟 **Multi-Window Support:** Open `.img` and `.txd` simultaneously side-by-side or in floating windows.
 
 ---
 
