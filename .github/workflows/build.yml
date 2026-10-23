@@ -3,11 +3,21 @@ name: Build Release APK
 on:
   push:
     branches: [ "main" ]
+  release:
+    types: [ published ]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to attach the built APK to (optional)"
+        required: false
+        type: string
 
 jobs:
   build:
     name: Build & Sign APK
+    # On release events, only build in the public repo (the private repo has
+    # no keystore secrets, so a signed release build cannot run there).
+    if: ${{ github.event_name != 'release' || github.repository == 'pkok1099/imgtxd-studio' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -54,3 +64,28 @@ jobs:
           name: GTA_Img_Studio
           path: output/GTA_Img_Studio.apk
           if-no-files-found: error
+
+  attach-release:
+    name: Attach APK to Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Public repo only, and only when there is a release to attach to:
+    # a published release event, or a manual dispatch naming a release tag.
+    if: ${{ github.repository == 'pkok1099/imgtxd-studio' && (github.event_name == 'release' || inputs.release_tag != '') }}
+
+    steps:
+      - name: Download Built APK Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: GTA_Img_Studio
+          path: release-apk
+
+      - name: Attach APK to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.release_tag }}"
+          echo "Attaching GTA_Img_Studio.apk to release $TAG in ${{ github.repository }}"
+          gh release upload "$TAG" release-apk/GTA_Img_Studio.apk --clobber --repo "${{ github.repository }}"
