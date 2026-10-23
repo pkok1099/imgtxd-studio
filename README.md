@@ -1,6 +1,7 @@
 # ImgTxd Studio 🎮📦
 
 [![GitHub release](https://img.shields.io/github/v/release/pkok1099/imgtxd-studio?color=blue&logo=github&style=flat-square)](https://github.com/pkok1099/imgtxd-studio/releases/latest)
+[![Pre-release](https://img.shields.io/github/v/release/pkok1099/imgtxd-studio?include_prereleases&label=pre-release&color=orange&logo=github&style=flat-square)](https://github.com/pkok1099/imgtxd-studio/releases)
 [![Platform](https://img.shields.io/badge/Platform-Android%2012%20--%2016-green?logo=android&style=flat-square)](https://github.com/pkok1099/imgtxd-studio/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-orange.svg?style=flat-square)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-purple?logo=kotlin&style=flat-square)](https://kotlinlang.org)
@@ -9,7 +10,7 @@
 > **Modern, high-performance, and open-source `.img` archive & `.txd` texture dictionary editor for Android (Android 12 – 16, API 31–36).**  
 > Direct alternative to legacy PC IMG Tool and TXD Tool on mobile, powered by **Jetpack Compose Material 3** and **Shizuku privileged storage access**.
 
-[⬇️ **Download Latest APK (v3.3.0-beta)**](https://github.com/pkok1099/imgtxd-studio/releases/latest) • [✨ Features](#-features) • [🎯 Supported Games](#-supported-games) • [🛠️ Build](#️-building-from-source)
+[⬇️ **Download Latest APK (v3.3.0-beta)**](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.3.0-beta) • [📦 All Releases](https://github.com/pkok1099/imgtxd-studio/releases) • [✨ Features](#-features) • [🎯 Supported Games](#-supported-games) • [🛠️ Build](#️-building-from-source)
 
 ---
 
