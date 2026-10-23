@@ -12,6 +12,13 @@
 
 [⬇️ **Download Latest APK (v3.3.0-beta)**](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.3.0-beta) • [📦 All Releases](https://github.com/pkok1099/imgtxd-studio/releases) • [✨ Features](#-features) • [🎯 Supported Games](#-supported-games) • [🛠️ Build](#️-building-from-source)
 
+## ⬇️ Download
+
+| Channel | Version | Direct APK download | Release notes |
+|---|---|---|---|
+| Stable | v3.2.3 | [ImgTxd_Studio.apk](https://github.com/pkok1099/imgtxd-studio/releases/download/v3.2.3/ImgTxd_Studio.apk) (3.0 MB) | [v3.2.3](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.2.3) |
+| Pre-release | v3.3.0-beta | [GTA_Img_Studio.apk](https://github.com/pkok1099/imgtxd-studio/releases/download/v3.3.0-beta/GTA_Img_Studio.apk) (4.4 MB) | [v3.3.0-beta](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.3.0-beta) |
+
 ---
 
 ## 🔍 Overview
