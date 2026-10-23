@@ -272,7 +272,9 @@ class TxdEditorViewModel(
                             shizukuDestPath = if (parentInfo.isShizuku) parentInfo.originalRestrictedPath else null
                         )
                     } else if (isShizuku && originalPath != null) {
-                        ShizukuManager.copyFromLocal(txdFile, originalPath)
+                        if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
+                            throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                        }
                     }
                 }
 
@@ -348,7 +350,9 @@ class TxdEditorViewModel(
                                 shizukuDestPath = if (parentInfo.isShizuku) parentInfo.originalRestrictedPath else null
                             )
                         } else if (isShizuku && originalPath != null) {
-                            ShizukuManager.copyFromLocal(txdFile, originalPath)
+                            if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
+                                throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                            }
                         }
                     }
                 }
@@ -430,7 +434,9 @@ class TxdEditorViewModel(
                                 shizukuDestPath = if (parentInfo.isShizuku) parentInfo.originalRestrictedPath else null
                             )
                         } else if (isShizuku && originalPath != null) {
-                            ShizukuManager.copyFromLocal(txdFile, originalPath)
+                            if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
+                                throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                            }
                         }
                     }
                     TxdStore.load(txdFile).entries

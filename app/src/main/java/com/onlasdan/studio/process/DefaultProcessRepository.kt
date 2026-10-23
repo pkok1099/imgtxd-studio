@@ -59,32 +59,39 @@ object DefaultProcessRepository : ProcessRepository {
         title: String,
         block: suspend (updateProgress: (current: Int, total: Int, message: String?) -> Unit) -> Result<Unit>
     ): Result<Unit> {
-        val busyProcess = fileLocks.withLock {
-            getActiveProcessForFile(targetFile)
-        }
-
-        if (busyProcess != null) {
-            return Result.failure(
-                IllegalStateException(
-                    "Berkas '${targetFile.substringAfterLast('/')}' sedang diproses (${busyProcess.title}). Harap tunggu proses selesai terlebih dahulu."
+        // Busy-check and registration must happen inside the SAME lock: with
+        // two windows (multi-window mode) racing on the same archive, a check
+        // outside the lock let both processes launch simultaneously and write
+        // the file concurrently.
+        var busyTitle: String? = null
+        var newProcess: AppProcess? = null
+        fileLocks.withLock {
+            val busyProcess = getActiveProcessForFile(targetFile)
+            if (busyProcess != null) {
+                busyTitle = busyProcess.title
+            } else {
+                val process = AppProcess(
+                    id = UUID.randomUUID().toString(),
+                    type = type,
+                    targetFile = targetFile,
+                    title = title,
+                    progress = 0f,
+                    current = 0,
+                    total = 0,
+                    status = ProcessStatus.RUNNING,
+                    message = "Memulai proses..."
                 )
-            )
+                _processes.update { it + process }
+                newProcess = process
+            }
         }
 
-        val processId = UUID.randomUUID().toString()
-        val newProcess = AppProcess(
-            id = processId,
-            type = type,
-            targetFile = targetFile,
-            title = title,
-            progress = 0f,
-            current = 0,
-            total = 0,
-            status = ProcessStatus.RUNNING,
-            message = "Memulai proses..."
+        val process = newProcess ?: return Result.failure(
+            IllegalStateException(
+                "Berkas '${targetFile.substringAfterLast('/')}' sedang diproses ($busyTitle). Harap tunggu proses selesai terlebih dahulu."
+            )
         )
-
-        _processes.update { it + newProcess }
+        val processId = process.id
 
         val currentJob = scope.launch {
             try {

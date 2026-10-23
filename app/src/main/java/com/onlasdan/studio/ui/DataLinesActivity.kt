@@ -1,9 +1,12 @@
 package com.onlasdan.studio.ui
 
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,6 +65,15 @@ import java.io.File
  */
 class DataLinesActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Android 16 (targetSdk 36) memaksa edge-to-edge tanpa opt-out;
+        // panggil eksplisit agar tampilan system bar konsisten di API 31+.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         super.onCreate(savedInstanceState)
         val path = intent.getStringExtra(EXTRA_FILE_PATH)
         val isShizuku = intent.getBooleanExtra(EXTRA_IS_SHIZUKU, false)

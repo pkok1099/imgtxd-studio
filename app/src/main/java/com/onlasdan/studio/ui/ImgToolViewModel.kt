@@ -362,7 +362,9 @@ class ImgToolViewModel : ViewModel() {
                         val tempFile = File.createTempFile("extract_", entry.cleanName)
                         archive.extract(entry, tempFile)
                         val remoteDest = "$destRestrictedPath/${entry.cleanName}"
-                        ShizukuManager.copyFromLocal(tempFile, remoteDest)
+                        if (!ShizukuManager.copyFromLocal(tempFile, remoteDest)) {
+                            throw IOException("Gagal menulis ${entry.cleanName} ke $destRestrictedPath")
+                        }
                         tempFile.delete()
                     } else {
                         val target = File(destinationDir, entry.cleanName)
@@ -408,7 +410,9 @@ class ImgToolViewModel : ViewModel() {
                                 val tempFile = File.createTempFile("extract_", entry.cleanName)
                                 archive.extract(entry, tempFile)
                                 val remoteDest = "$destRestrictedPath/${entry.cleanName}"
-                                ShizukuManager.copyFromLocal(tempFile, remoteDest)
+                                if (!ShizukuManager.copyFromLocal(tempFile, remoteDest)) {
+                                    throw IOException("Gagal menulis ${entry.cleanName} ke $destRestrictedPath")
+                                }
                                 tempFile.delete()
                             } else {
                                 val target = File(destinationDir, entry.cleanName)
@@ -508,7 +512,9 @@ class ImgToolViewModel : ViewModel() {
                                 val tempFile = File.createTempFile("extract_", entry.cleanName)
                                 archive.extract(entry, tempFile)
                                 val remoteDest = "$destRestrictedPath/${entry.cleanName}"
-                                ShizukuManager.copyFromLocal(tempFile, remoteDest)
+                                if (!ShizukuManager.copyFromLocal(tempFile, remoteDest)) {
+                                    throw IOException("Gagal menulis ${entry.cleanName} ke $destRestrictedPath")
+                                }
                                 tempFile.delete()
                             } else {
                                 val target = File(destinationDir, entry.cleanName)
@@ -543,7 +549,9 @@ class ImgToolViewModel : ViewModel() {
                 withContext(Dispatchers.IO) {
                     val fileToUse = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
                         val temp = File(context.cacheDir, "temp_add_" + File(path).name)
-                        ShizukuManager.copyToLocal(path, temp)
+                        if (!ShizukuManager.copyToLocal(path, temp)) {
+                            throw IOException("Gagal menyalin file dari Shizuku: $path")
+                        }
                         temp
                     } else {
                         File(path)
@@ -575,7 +583,9 @@ class ImgToolViewModel : ViewModel() {
                 withContext(Dispatchers.IO) {
                     val fileToUse = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
                         val temp = File(context.cacheDir, "temp_replace_" + File(path).name)
-                        ShizukuManager.copyToLocal(path, temp)
+                        if (!ShizukuManager.copyToLocal(path, temp)) {
+                            throw IOException("Gagal menyalin file dari Shizuku: $path")
+                        }
                         temp
                     } else {
                         File(path)
@@ -681,10 +691,14 @@ class ImgToolViewModel : ViewModel() {
 
                         if (isShizukuBacked && originalPath != null) {
                             onProgress(archive.entryCount, archive.entryCount, "Menyimpan ke folder game via Shizuku...")
-                            ShizukuManager.copyFromLocal(archive.imgFile, originalPath)
+                            if (!ShizukuManager.copyFromLocal(archive.imgFile, originalPath)) {
+                                throw IOException("Gagal menulis arsip kembali ke folder game: $originalPath")
+                            }
                             if (archive.version == ImgVersion.VER1 && archive.dirFile != null) {
                                 val dirOriginal = originalPath.substringBeforeLast(".") + ".dir"
-                                ShizukuManager.copyFromLocal(archive.dirFile, dirOriginal)
+                                if (!ShizukuManager.copyFromLocal(archive.dirFile, dirOriginal)) {
+                                    throw IOException("Gagal menulis .dir kembali ke folder game: $dirOriginal")
+                                }
                             }
                         }
                     }
@@ -1033,12 +1047,16 @@ class ImgToolViewModel : ViewModel() {
 
                         val imgOriginalPath = _uiState.value.originalPath
                         if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
-                            ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                            if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                throw IOException("Gagal menulis arsip IMG kembali ke folder game: $imgOriginalPath")
+                            }
                         }
                     }
 
                     if (isShizukuTxd && originalPath != null) {
-                        ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
+                        if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                            throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                        }
                     }
                 }
 
@@ -1120,12 +1138,16 @@ class ImgToolViewModel : ViewModel() {
 
                                 val imgOriginalPath = _uiState.value.originalPath
                                 if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
-                                    ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                                    if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                        throw IOException("Gagal menulis arsip IMG kembali ke folder game: $imgOriginalPath")
+                                    }
                                 }
                             }
 
                             if (isShizukuTxd && originalPath != null) {
-                                ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
+                                if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                                    throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                                }
                             }
                         }
                     }
@@ -1205,12 +1227,16 @@ class ImgToolViewModel : ViewModel() {
 
                             val imgOriginalPath = _uiState.value.originalPath
                             if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
-                                ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                                if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                    throw IOException("Gagal menulis arsip IMG kembali ke folder game: $imgOriginalPath")
+                                }
                             }
                         }
 
                         if (isShizukuTxd && originalPath != null) {
-                            ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
+                            if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                                throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                            }
                         }
                     }
                     TxdStore.load(tempTxdFile).entries

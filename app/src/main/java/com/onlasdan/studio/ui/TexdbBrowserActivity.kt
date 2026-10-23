@@ -1,10 +1,14 @@
 package com.onlasdan.studio.ui
 
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.Bundle
+import android.util.LruCache
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -70,6 +74,15 @@ import java.io.File
  */
 class TexdbBrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Android 16 (targetSdk 36) memaksa edge-to-edge tanpa opt-out;
+        // panggil eksplisit agar tampilan system bar konsisten di API 31+.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         super.onCreate(savedInstanceState)
         AppSettings.init(this)
         val dirPath = intent.getStringExtra(EXTRA_CACHE_DIR)
@@ -140,7 +153,15 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
     var fullscreenPreview by remember { mutableStateOf(false) }
     // Same two preview modes as the TXD editor, sharing its saved preference.
     var viewMode by remember { mutableStateOf(AppSettings.cachedTxdViewMode) }
-    val thumbCache = remember { mutableStateMapOf<Int, Bitmap>() }
+    // Bounded thumbnail cache: 1/8 of the app heap, sized by Bitmap bytes.
+    // Unbounded maps grow to hundreds of MB when a 12k-entry cache is fully
+    // scrolled; LruCache evicts least-recently-used thumbs instead, and a
+    // re-appearing card simply re-decodes (launched per card below).
+    val thumbCache = remember {
+        object : LruCache<Int, Bitmap>(((Runtime.getRuntime().maxMemory() / 1024) / 8).toInt()) {
+            override fun sizeOf(key: Int, value: Bitmap): Int = value.byteCount / 1024
+        }
+    }
 
     fun toggleViewMode() {
         val next = if (viewMode == TxdViewMode.LARGE) TxdViewMode.SMALL else TxdViewMode.LARGE
@@ -149,7 +170,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
     }
 
     suspend fun loadThumb(index: Int): Bitmap? {
-        thumbCache[index]?.let { return it }
+        thumbCache.get(index)?.let { return it }
         if (cacheDirPath == null) return null
         val bmp = withContext(Dispatchers.IO) {
             val arr = NativeCore.texdbTexturePixels(cacheDirPath, index) ?: return@withContext null
@@ -157,9 +178,13 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             val w = arr[0]
             val h = arr[1]
             if (w <= 0 || h <= 0 || arr.size < 2 + w * h) return@withContext null
-            Bitmap.createBitmap(arr.copyOfRange(2, 2 + w * h), w, h, Bitmap.Config.ARGB_8888)
+            // setPixels reads the header-prefixed array in place — one fewer
+            // full-image copy than copyOfRange + createBitmap(int[], ...).
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+                it.setPixels(arr, 2, w, 0, 0, w, h)
+            }
         }
-        if (bmp != null) thumbCache[index] = bmp
+        if (bmp != null) thumbCache.put(index, bmp)
         return bmp
     }
 
@@ -194,7 +219,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             error = "Folder cache tidak diberikan"
             return@LaunchedEffect
         }
-        thumbCache.clear()
+        thumbCache.evictAll()
         try {
             cache = withContext(Dispatchers.IO) {
                 val dir = File(cacheDirPath)
@@ -221,7 +246,9 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             val w = arr[0]
             val h = arr[1]
             if (w <= 0 || h <= 0 || arr.size < 2 + w * h) return@withContext null
-            Bitmap.createBitmap(arr.copyOfRange(2, 2 + w * h), w, h, Bitmap.Config.ARGB_8888)
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+                it.setPixels(arr, 2, w, 0, 0, w, h)
+            }
         }
     }
 

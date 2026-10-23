@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
 data class ArchiveUpdateEvent(
@@ -63,7 +64,9 @@ object ArchiveRepository {
                 archive.replace(targetEntry, newFile)
 
                 if (shizukuDestPath != null && ShizukuManager.hasPermission()) {
-                    ShizukuManager.copyFromLocal(archive.imgFile, shizukuDestPath)
+                    if (!ShizukuManager.copyFromLocal(archive.imgFile, shizukuDestPath)) {
+                        throw IOException("Gagal menulis arsip kembali ke folder game: $shizukuDestPath")
+                    }
                 }
 
                 _archiveUpdates.emit(

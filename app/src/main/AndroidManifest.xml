@@ -6,8 +6,8 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29" />
+    <!-- WRITE_EXTERNAL_STORAGE dihapus: maxSdkVersion=29 di bawah minSdk=31,
+         permission ini sudah mati sejak minSdk dinaikkan ke Android 12. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -24,6 +24,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:largeHeap="true"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.ImgTxdStudio">
 
         <!-- IMG Archive Editor Activity -->
@@ -118,7 +119,11 @@
                 android:value="Long-running local file processing (archive rebuild, texture conversion) that the user starts explicitly and monitors in-app; not covered by any other FGS type." />
         </service>
 
-        <!-- Watchdog Guardian Receiver for Resilience & Auto-Resume -->
+        <!-- Watchdog Guardian Receiver for Resilience & Auto-Resume.
+             Hanya broadcast protected sistem yang di-declare di sini
+             (RESUME_INTERRUPTED_JOBS / WATCHDOG_PING dikirim eksplisit oleh
+             aplikasi sendiri dan di-guard package pengirim di onReceive;
+             receiver tetap exported agar BOOT_COMPLETED selalu terkirim). -->
         <receiver
             android:name="com.onlasdan.studio.worker.JobGuardianReceiver"
             android:enabled="true"
@@ -126,8 +131,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="com.onlasdan.studio.worker.action.RESUME_INTERRUPTED_JOBS" />
-                <action android:name="com.onlasdan.studio.worker.action.WATCHDOG_PING" />
             </intent-filter>
         </receiver>
 

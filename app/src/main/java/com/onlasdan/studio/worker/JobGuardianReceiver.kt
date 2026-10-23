@@ -37,6 +37,10 @@ class JobGuardianReceiver : BroadcastReceiver() {
                 val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 val intent = Intent(context, JobGuardianReceiver::class.java).apply {
                     action = WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS
+                    // Eksplisit + package sendiri: onReceive menolak custom
+                    // action dari pengirim asing (receiver memang exported
+                    // agar BOOT_COMPLETED selalu terkirim oleh sistem).
+                    setPackage(context.packageName)
                     if (targetPath != null) {
                         putExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH, targetPath)
                     }
@@ -97,6 +101,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
                 val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 val intent = Intent(context, JobGuardianReceiver::class.java).apply {
                     action = WorkerContracts.ACTION_WATCHDOG_PING
+                    setPackage(context.packageName)
                 }
 
                 val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -139,6 +144,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
                 val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 val intent = Intent(context, JobGuardianReceiver::class.java).apply {
                     action = WorkerContracts.ACTION_WATCHDOG_PING
+                    setPackage(context.packageName)
                 }
                 val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
@@ -158,15 +164,40 @@ class JobGuardianReceiver : BroadcastReceiver() {
         val action = intent?.action ?: return
         Log.d(TAG, "Menerima aksi guardian: $action")
 
-        when (action) {
+        val targetHint = when (action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
-            WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS -> {
-                val targetPath = intent.getStringExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)
-                checkAndTriggerResume(context.applicationContext, targetPath)
+            WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS ->
+                intent.getStringExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)
+            WorkerContracts.ACTION_WATCHDOG_PING -> null
+            else -> return
+        }
+
+        // Custom action hanya sah dari aplikasi ini sendiri (semua pengirim
+        // internal memakai setPackage). Receiver memang exported agar
+        // BOOT_COMPLETED selalu terkirim, jadi jalur spoofing oleh app lain
+        // ditutup di sini.
+        if (action == WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS ||
+            action == WorkerContracts.ACTION_WATCHDOG_PING
+        ) {
+            if (intent.`package` != context.packageName) {
+                Log.w(TAG, "Aksi '$action' dari pengirim asing (package=${intent.`package`}) diabaikan")
+                return
             }
-            WorkerContracts.ACTION_WATCHDOG_PING -> {
-                checkAndTriggerResume(context.applicationContext, null)
+        }
+
+        // goAsync(): pekerjaan async (DataStore IO + cek checkpoint) harus
+        // selesai sebelum proses boleh dibunuh sistem. Tanpa goAsync,
+        // coroutine di bawah bisa mati bersama proses setelah onReceive
+        // selesai sehingga auto-resume kadang tidak pernah jalan.
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                checkAndTriggerResume(context.applicationContext, targetHint)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saat memeriksa pekerjaan untuk resume", e)
+            } finally {
+                pendingResult.finish()
             }
         }
     }
@@ -188,6 +219,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
                         Log.i(TAG, "Pekerjaan aktif terdeteksi untuk: $targetPath. Membangunkan WorkerService...")
                         val serviceIntent = Intent(context, WorkerService::class.java).apply {
                             this.action = WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS
+                            setPackage(context.packageName)
                             putExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH, targetPath)
                         }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

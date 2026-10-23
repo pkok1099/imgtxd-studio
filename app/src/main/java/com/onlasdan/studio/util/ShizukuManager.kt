@@ -171,26 +171,49 @@ object ShizukuManager {
 
     /**
      * Copies a file from a Shizuku-restricted path to a local destination file using high-throughput 256KB buffer.
+     *
+     * The transfer is staged into a sibling temp file and renamed into place only
+     * after `cat` exits cleanly, so a failed/interrupted copy can never leave a
+     * truncated file at the destination that callers then consume as valid.
      */
     suspend fun copyToLocal(sourceRestrictedPath: String, destLocalFile: File): Boolean = withContext(Dispatchers.IO) {
         AppIntegrity.verifyOrThrow()
         if (!hasPermission()) return@withContext false
+        val staging = File(destLocalFile.parentFile, destLocalFile.name + ".staging" + System.nanoTime())
         try {
             destLocalFile.parentFile?.mkdirs()
             val process = newProcess(arrayOf("sh", "-c", "cat \"$sourceRestrictedPath\""))
-            destLocalFile.outputStream().use { out ->
+            staging.outputStream().use { out ->
                 process.inputStream.copyTo(out, bufferSize = 256 * 1024)
             }
             val exitCode = process.waitFor()
-            exitCode == 0 && destLocalFile.exists() && destLocalFile.length() > 0
+            val ok = exitCode == 0 && staging.exists() && staging.length() > 0
+            if (!ok) {
+                staging.delete()
+                return@withContext false
+            }
+            if (destLocalFile.exists() && !destLocalFile.delete()) {
+                staging.delete()
+                return@withContext false
+            }
+            val moved = staging.renameTo(destLocalFile)
+            if (!moved) staging.delete()
+            moved
         } catch (e: Throwable) {
             e.printStackTrace()
+            staging.delete()
             false
         }
     }
 
     /**
      * Copies a local file into a Shizuku-restricted path using high-throughput 256KB buffer.
+     *
+     * The remote side stages into `dest.staging<N>` and renames over the target
+     * inside the same shell command: the original game file is only ever replaced
+     * atomically by `mv`, never truncated in place by a `cat` that may die halfway
+     * (Shizuku disconnect, process kill, full disk). A non-zero exit also cleans
+     * the staging file and leaves the original untouched.
      */
     suspend fun copyFromLocal(sourceLocalFile: File, destRestrictedPath: String): Boolean = withContext(Dispatchers.IO) {
         AppIntegrity.verifyOrThrow()
@@ -200,7 +223,9 @@ object ShizukuManager {
             if (parentDir.isNotEmpty()) {
                 exec("mkdir -p \"$parentDir\"")
             }
-            val process = newProcess(arrayOf("sh", "-c", "cat > \"$destRestrictedPath\""))
+            val stagingPath = destRestrictedPath + ".staging" + System.nanoTime()
+            val command = "cat > \"$stagingPath\" && mv -f \"$stagingPath\" \"$destRestrictedPath\" || { rm -f \"$stagingPath\"; exit 1; }"
+            val process = newProcess(arrayOf("sh", "-c", command))
             sourceLocalFile.inputStream().use { input ->
                 process.outputStream.use { out ->
                     input.copyTo(out, bufferSize = 256 * 1024)

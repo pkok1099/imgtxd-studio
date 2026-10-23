@@ -16,6 +16,12 @@ export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK/bin/aarch64-linux-android
 export CC_aarch64_linux_android="$NDK/bin/aarch64-linux-android${API}-clang"
 export AR_aarch64_linux_android="$NDK/bin/llvm-ar"
 
+# Android 15+/16 memakai 16KB memory page pada sebagian device dan Google Play
+# mewajibkan dukungan 16KB utk targetSdk 35+. Wrapper linker NDK tidak
+# menyetel max-page-size secara default -> .so hanya ter-align 4KB dan GAGAL
+# dlopen ("program alignment") di device 16KB. Paksa align 16KB.
+export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-z,max-page-size=16384"
+
 CRATE_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_JNILIBS="$(dirname "$CRATE_DIR")/app/src/main/jniLibs/arm64-v8a"
 

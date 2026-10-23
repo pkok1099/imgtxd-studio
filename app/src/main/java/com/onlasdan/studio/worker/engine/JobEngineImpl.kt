@@ -447,7 +447,9 @@ class JobEngineImpl(
             val replaced = SafeFileWriter.atomicReplace(tmpFile, targetFile)
             if (!replaced) throw IOException("Gagal mengganti berkas arsip secara atomik")
             if (tmpDirFile != null && dirFile != null) {
-                SafeFileWriter.atomicReplace(tmpDirFile, dirFile)
+                if (!SafeFileWriter.atomicReplace(tmpDirFile, dirFile)) {
+                    throw IOException("Gagal mengganti berkas .dir secara atomik")
+                }
             }
 
             if (request.isShizuku && shizukuBridge != null) {
@@ -581,7 +583,9 @@ class JobEngineImpl(
             val replaced = SafeFileWriter.atomicReplace(tmpFile, targetFile)
             if (!replaced) throw IOException("Gagal mengganti berkas arsip secara atomik")
             if (tmpDirFile != null && dirFile != null) {
-                SafeFileWriter.atomicReplace(tmpDirFile, dirFile)
+                if (!SafeFileWriter.atomicReplace(tmpDirFile, dirFile)) {
+                    throw IOException("Gagal mengganti berkas .dir secara atomik")
+                }
             }
 
             if (request.isShizuku && shizukuBridge != null) {
@@ -664,14 +668,16 @@ class JobEngineImpl(
         var isSuccess = false
 
         return try {
-            val resumeState = CheckpointManager.getResumeState(request.targetPath)
-            val startIndex = resumeState?.processedItems ?: 0
+            // The TXD batch is applied in ONE engine call after the whole scan
+            // finishes, so an interrupted run never modified the target file —
+            // there is nothing to resume from a previous attempt. Always scan
+            // from scratch; this also overwrites any stale checkpoint left by
+            // an older crashed job on the same path (getResumeState matches by
+            // path only, not by job id/type).
             val total = sourceFiles.size
-
-            if (startIndex == 0) {
-                SafeFileWriter.cleanupFile(tmpFile)
-                CheckpointManager.createCheckpoint(request.id, "AUTO_REPLACE", request.targetPath, total)
-            }
+            SafeFileWriter.cleanupFile(tmpFile)
+            CheckpointManager.createCheckpoint(request.id, "AUTO_REPLACE", request.targetPath, total)
+            val startIndex = 0
 
             val txd = TxdStore.load(targetFile)
             val textures = txd.entries
@@ -842,7 +848,9 @@ class JobEngineImpl(
             val replaced = SafeFileWriter.atomicReplace(tmpFile, targetFile)
             if (!replaced) throw IOException("Gagal mengganti berkas arsip secara atomik")
             if (tmpDirFile != null && dirFile != null) {
-                SafeFileWriter.atomicReplace(tmpDirFile, dirFile)
+                if (!SafeFileWriter.atomicReplace(tmpDirFile, dirFile)) {
+                    throw IOException("Gagal mengganti berkas .dir secara atomik")
+                }
             }
 
             if (request.isShizuku && shizukuBridge != null) {

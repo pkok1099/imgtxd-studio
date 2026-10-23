@@ -107,7 +107,14 @@ class ShizukuFileBridgeImpl(
                 }
             }
 
-            val process = WorkerShizukuManager.newProcess(arrayOf("sh", "-c", "cat > \"$path\""))
+            // Stage into a sibling temp file and rename inside the same shell:
+            // the target is only ever replaced atomically by mv, never left
+            // truncated by a cat that dies halfway (disconnect, kill, disk full).
+            // A non-zero shell exit removes the staging file and is surfaced by
+            // ShizukuOutputStream.close() so callers roll back cleanly.
+            val stagingPath = "$path.staging" + System.nanoTime()
+            val command = "cat > \"$stagingPath\" && mv -f \"$stagingPath\" \"$path\" || { rm -f \"$stagingPath\"; exit 1; }"
+            val process = WorkerShizukuManager.newProcess(arrayOf("sh", "-c", command))
             return ShizukuOutputStream(process, process.outputStream, path)
         } catch (e: Throwable) {
             val unwrapped = WorkerShizukuManager.unwrapException(e)

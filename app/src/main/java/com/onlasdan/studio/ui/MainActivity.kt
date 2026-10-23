@@ -99,6 +99,29 @@ class MainActivity : ComponentActivity() {
     private var pendingIntentToLoad by mutableStateOf<Intent?>(null)
     private var showUnsavedChangesPrompt by mutableStateOf(false)
 
+    // Android 13+ (API 33): notifikasi progres/hasil job butuh izin runtime
+    // POST_NOTIFICATIONS (sebelumnya hanya di-declare di manifest, jadi di
+    // Android 13+ notifikasi "Operasi Selesai/Gagal" di-drop diam-diam).
+    // Diminta SEKALI pada peluncuran pertama; penolakan dibiarkan karena
+    // helper notifikasi sudah menangkap SecurityException.
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
+    private fun maybeRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return
+        val prefs = getSharedPreferences("imgtxd_runtime_prefs", MODE_PRIVATE)
+        if (prefs.getBoolean("notif_perm_asked", false)) return
+        prefs.edit().putBoolean("notif_perm_asked", true).apply()
+        try {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } catch (_: Exception) {
+        }
+    }
+
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         if (!Shizuku.isPreV11()) {
             if (Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -142,6 +165,7 @@ class MainActivity : ComponentActivity() {
                 e.printStackTrace()
             }
 
+            maybeRequestNotificationPermission()
             handleIntent(intent, isNewIntent = false)
         }
 
