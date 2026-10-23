@@ -49,35 +49,4 @@ object RwChunk {
     const val FOURCC_DXT5 = 0x35545844 // "DXT5"
     const val FOURCC_ETC1 = 0x31435445 // "ETC1"
     const val FOURCC_PVR = 0x00525650  // "PVR\0"
-
-    /**
-     * Checks if the given 32-bit ID is a DXT compression FourCC.
-     */
-    fun isDxt(fourCc: Int): Boolean {
-        return fourCc == FOURCC_DXT1 || fourCc == FOURCC_DXT3 || fourCc == FOURCC_DXT5
-    }
-
-    /**
-     * Human-readable label for a given texture format.
-     */
-    fun getFormatName(rasterFormat: Int, d3dFormat: Int, depth: Int): String {
-        return when (d3dFormat) {
-            FOURCC_DXT1 -> "DXT1"
-            FOURCC_DXT3 -> "DXT3"
-            FOURCC_DXT5 -> "DXT5"
-            FOURCC_ETC1 -> "ETC1"
-            else -> {
-                when {
-                    (rasterFormat and FORMAT_PAL8) != 0 -> "Paletted 8-bit"
-                    (rasterFormat and FORMAT_PAL4) != 0 -> "Paletted 4-bit"
-                    (rasterFormat and FORMAT_8888) != 0 || depth == 32 -> "RGBA 32-bit"
-                    (rasterFormat and FORMAT_888) != 0 || depth == 24 -> "RGB 24-bit"
-                    (rasterFormat and FORMAT_565) != 0 -> "RGB 565"
-                    (rasterFormat and FORMAT_1555) != 0 -> "RGBA 1555"
-                    (rasterFormat and FORMAT_4444) != 0 -> "RGBA 4444"
-                    else -> "Raw ($depth-bit)"
-                }
-            }
-        }
-    }
 }

@@ -180,7 +180,7 @@ fun ImgEntryBottomSheet(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         EntryMenuItem(
                             icon = Icons.Outlined.Edit,
-                            title = "Ubah Nama (Rename)",
+                            title = "Rename",
                             subtitle = "Ganti nama file entri di dalam arsip",
                             onClick = {
                                 onDismissRequest()
@@ -190,7 +190,7 @@ fun ImgEntryBottomSheet(
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         EntryMenuItem(
                             icon = Icons.Outlined.DeleteOutline,
-                            title = "Hapus Berkas",
+                            title = "Delete File",
                             subtitle = "Keluarkan berkas ini dari arsip",
                             iconTint = MaterialTheme.colorScheme.error,
                             onClick = {

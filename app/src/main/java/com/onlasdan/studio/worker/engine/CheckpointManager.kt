@@ -164,7 +164,7 @@ object CheckpointManager {
     }
 
     /**
-     * Menandai status checkpoint menjadi INTERRUPTED (misal saat batas dataSync onTimeout dipicu).
+     * Menandai status checkpoint menjadi INTERRUPTED (misal saat batas FGS onTimeout dipicu).
      */
     @Synchronized
     fun markInterrupted(targetPath: String): ProcessCheckpoint? {

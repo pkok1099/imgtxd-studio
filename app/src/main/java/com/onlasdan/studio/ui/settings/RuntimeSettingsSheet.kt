@@ -40,6 +40,7 @@ import com.onlasdan.studio.ui.theme.PrimaryPink
 import com.onlasdan.studio.ui.theme.SectionHeaderStyle
 import com.onlasdan.studio.ui.theme.SemanticColors
 import com.onlasdan.studio.worker.WorkerContracts
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -520,6 +521,48 @@ fun RuntimeSettingsSheet(
                     text = if (isIgnoringBatteryOptimizations) "Optimasi Baterai Sudah Diabaikan" else "Abaikan Optimasi Baterai",
                     style = MaterialTheme.typography.labelLarge
                 )
+            }
+
+            // 7. Benchmark Engine (R0 — baseline sebelum keputusan Rust)
+            var benchmarkRunning by remember { mutableStateOf(false) }
+            var benchmarkResult by remember { mutableStateOf<String?>(null) }
+            val benchmarkScope = rememberCoroutineScope()
+            OutlinedButton(
+                onClick = {
+                    benchmarkRunning = true
+                    benchmarkScope.launch {
+                        benchmarkResult = com.onlasdan.studio.core.EngineBenchmark.run(context)
+                        benchmarkRunning = false
+                    }
+                },
+                enabled = !benchmarkRunning,
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text(
+                    text = if (benchmarkRunning) "Benchmark Berjalan…" else "Jalankan Benchmark Engine (R0)",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+            benchmarkResult?.let { result ->
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = result,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
             }
         }
     }

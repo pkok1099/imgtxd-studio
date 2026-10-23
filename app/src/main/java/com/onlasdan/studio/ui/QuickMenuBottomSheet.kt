@@ -30,12 +30,19 @@ fun QuickMenuBottomSheet(
     hasActiveArchive: Boolean,
     isShizukuActive: Boolean,
     onOpenArchive: () -> Unit,
-    onOpenTxd: () -> Unit,
     onAddFile: () -> Unit,
     onRebuildArchive: () -> Unit,
     onSelectAll: () -> Unit,
     onOpenSettings: () -> Unit,
-    onRequestShizuku: () -> Unit
+    onRequestShizuku: () -> Unit,
+    onExportMultipleTxd: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
+    onFixAudio: () -> Unit = {},
+    onOpenTexdbCache: () -> Unit = {},
+    onInspectDff: () -> Unit = {},
+    onVerifyArchive: () -> Unit = {},
+    onGameAudit: () -> Unit = {},
+    onDataLines: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -100,7 +107,7 @@ fun QuickMenuBottomSheet(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         QuickMenuItem(
                             icon = Icons.Outlined.FolderOpen,
-                            title = "Buka Arsip IMG",
+                            title = "Open IMG Archive",
                             subtitle = "Pilih berkas arsip .img dari penyimpanan",
                             onClick = {
                                 onDismissRequest()
@@ -109,12 +116,62 @@ fun QuickMenuBottomSheet(
                         )
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         QuickMenuItem(
-                            icon = Icons.Outlined.Palette,
-                            title = "Buka Tekstur TXD",
-                            subtitle = "Buka berkas .txd secara langsung",
+                            icon = Icons.Outlined.Layers,
+                            title = "Texdb",
+                            subtitle = "Telusuri & edit cache tekstur GTA (texdb) — pilih FOLDER cache-nya",
                             onClick = {
                                 onDismissRequest()
-                                onOpenTxd()
+                                onOpenTexdbCache()
+                            }
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        QuickMenuItem(
+                            icon = Icons.Outlined.ViewInAr,
+                            title = "Inspect DFF",
+                            subtitle = "Laporan struktur model (versi RW, geometri, tekstur) + ganti nama tekstur di dalam DFF",
+                            onClick = {
+                                onDismissRequest()
+                                onInspectDff()
+                            }
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        QuickMenuItem(
+                            icon = Icons.Outlined.Checklist,
+                            title = "Game Texture Audit",
+                            subtitle = "Cari tekstur hilang & tak terpakai di seluruh folder game (DFF vs cache texdb)",
+                            onClick = {
+                                onDismissRequest()
+                                onGameAudit()
+                            }
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        QuickMenuItem(
+                            icon = Icons.Outlined.FileCopy,
+                            title = "Paste Mod Data Lines",
+                            subtitle = "Tempel baris handling.cfg / vehicles.ide / carcols.dat dari readme mod ke berkas game",
+                            onClick = {
+                                onDismissRequest()
+                                onDataLines()
+                            }
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        QuickMenuItem(
+                            icon = Icons.Outlined.Audiotrack,
+                            title = "Fix SA Audio (.osw)",
+                            subtitle = "Buat ulang file .idx untuk arsip audio .osw hasil modifikasi",
+                            onClick = {
+                                onDismissRequest()
+                                onFixAudio()
+                            }
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        QuickMenuItem(
+                            icon = Icons.Outlined.FileCopy,
+                            title = "Export from Multiple TXDs",
+                            subtitle = "Ekspor semua tekstur dari beberapa berkas .txd sekaligus",
+                            onClick = {
+                                onDismissRequest()
+                                onExportMultipleTxd()
                             }
                         )
                     }
@@ -138,7 +195,7 @@ fun QuickMenuBottomSheet(
                         Column(modifier = Modifier.fillMaxWidth()) {
                             QuickMenuItem(
                                 icon = Icons.Outlined.Add,
-                                title = "Tambah Berkas Baru",
+                                title = "Add New File",
                                 subtitle = "Tambahkan entri .dff, .txd, dll ke arsip",
                                 onClick = {
                                     onDismissRequest()
@@ -148,7 +205,7 @@ fun QuickMenuBottomSheet(
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             QuickMenuItem(
                                 icon = Icons.Outlined.Checklist,
-                                title = "Pilih Semua Berkas",
+                                title = "Select All Files",
                                 subtitle = "Aktifkan seleksi ke semua entri arsip",
                                 onClick = {
                                     onDismissRequest()
@@ -157,8 +214,18 @@ fun QuickMenuBottomSheet(
                             )
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             QuickMenuItem(
+                                icon = Icons.Outlined.Checklist,
+                                title = "Check Archive Health",
+                                subtitle = "Duplikat, tumpang tindih, entri rusak, ruang terbuang (engine Rust)",
+                                onClick = {
+                                    onDismissRequest()
+                                    onVerifyArchive()
+                                }
+                            )
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            QuickMenuItem(
                                 icon = Icons.Outlined.Build,
-                                title = "Rebuild & Rapikan Arsip",
+                                title = "Rebuild Archive",
                                 subtitle = "Susun ulang sektor entri dan hemat ruang",
                                 onClick = {
                                     onDismissRequest()
@@ -235,7 +302,7 @@ fun QuickMenuBottomSheet(
                         // Settings Item
                         QuickMenuItem(
                             icon = Icons.Outlined.Settings,
-                            title = "Pengaturan Aplikasi",
+                            title = "Settings",
                             subtitle = "Mode jendela (multi-window) & info tema",
                             onClick = {
                                 onDismissRequest()
@@ -245,10 +312,23 @@ fun QuickMenuBottomSheet(
 
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
+                        // History Item
+                        QuickMenuItem(
+                            icon = Icons.Outlined.History,
+                            title = "Operations History",
+                            subtitle = "Hasil ekspor, rebuild, dan operasi latar terakhir",
+                            onClick = {
+                                onDismissRequest()
+                                onOpenHistory()
+                            }
+                        )
+
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
                         // About Item
                         QuickMenuItem(
                             icon = Icons.Outlined.Info,
-                            title = "Tentang ImgTxd Studio",
+                            title = "About",
                             subtitle = "v2.4.1 • Independen & Open-Source",
                             onClick = {
                                 onDismissRequest()

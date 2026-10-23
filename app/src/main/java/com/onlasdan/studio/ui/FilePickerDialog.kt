@@ -44,6 +44,9 @@ enum class PickerMode {
     PICK_FILE,
     PICK_IMAGE,
     PICK_MULTIPLE_IMAGES,
+    PICK_MULTIPLE_TXD,
+    PICK_OSW,
+    PICK_TEXDB_TXT,
     PICK_FOLDER,
     SELECT_FOLDER,
     SELECT_FOLDER_OR_IMG
@@ -108,6 +111,7 @@ fun FilePickerDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var shizukuGranted by remember { mutableStateOf(ShizukuManager.hasPermission()) }
     var selectedPaths by remember { mutableStateOf(emptySet<String>()) }
+    val isMultiSelectMode = mode == PickerMode.PICK_MULTIPLE_IMAGES || mode == PickerMode.PICK_MULTIPLE_TXD
 
     var animProgress by remember { mutableFloatStateOf(0f) }
     var isClosing by remember { mutableStateOf(false) }
@@ -228,8 +232,14 @@ fun FilePickerDialog(
                     PickerMode.OPEN_IMG -> items.filter {
                         it.isDirectory || it.name.endsWith(".img", ignoreCase = true) || it.name.endsWith(".dir", ignoreCase = true)
                     }
-                    PickerMode.OPEN_TXD -> items.filter {
+                    PickerMode.OPEN_TXD, PickerMode.PICK_MULTIPLE_TXD -> items.filter {
                         it.isDirectory || it.name.endsWith(".txd", ignoreCase = true)
+                    }
+                    PickerMode.PICK_OSW -> items.filter {
+                        it.isDirectory || it.name.endsWith(".osw", ignoreCase = true)
+                    }
+                    PickerMode.PICK_TEXDB_TXT -> items.filter {
+                        it.isDirectory || it.name.endsWith(".txt", ignoreCase = true)
                     }
                     PickerMode.PICK_IMAGE, PickerMode.PICK_MULTIPLE_IMAGES -> items.filter {
                         it.isDirectory || isImageFile(it.name)
@@ -531,7 +541,7 @@ fun FilePickerDialog(
                     else fileItems.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
                 }
 
-                if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
+                if (isMultiSelectMode) {
                     val selectableFiles = remember(displayedItems) { displayedItems.filter { !it.isDirectory } }
                     if (selectableFiles.isNotEmpty()) {
                         Row(
@@ -542,7 +552,7 @@ fun FilePickerDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${selectedPaths.size} dari ${selectableFiles.size} gambar dipilih",
+                                text = "${selectedPaths.size} dari ${selectableFiles.size} file dipilih",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -590,7 +600,7 @@ fun FilePickerDialog(
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
-                                bottom = if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER || mode == PickerMode.SELECT_FOLDER_OR_IMG || mode == PickerMode.PICK_MULTIPLE_IMAGES) 8.dp else 48.dp
+                                bottom = if (mode == PickerMode.SELECT_FOLDER || mode == PickerMode.PICK_FOLDER || mode == PickerMode.SELECT_FOLDER_OR_IMG || isMultiSelectMode) 8.dp else 48.dp
                             )
                         ) {
                             items(
@@ -603,7 +613,7 @@ fun FilePickerDialog(
                                     modifier = Modifier.clickable {
                                         if (item.isDirectory) {
                                             currentPath = item.path
-                                        } else if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
+                                        } else if (isMultiSelectMode) {
                                             selectedPaths = if (isItemSelected) {
                                                 selectedPaths - item.path
                                             } else {
@@ -624,7 +634,7 @@ fun FilePickerDialog(
                                         trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
                                     leadingContent = {
-                                        if (mode == PickerMode.PICK_MULTIPLE_IMAGES && !item.isDirectory) {
+                                        if (isMultiSelectMode && !item.isDirectory) {
                                             Checkbox(
                                                 checked = isItemSelected,
                                                 onCheckedChange = { checked ->
@@ -691,7 +701,7 @@ fun FilePickerDialog(
                 }
 
                 // Bottom actions bar
-                if (mode == PickerMode.PICK_MULTIPLE_IMAGES) {
+                if (isMultiSelectMode) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Row(
                         modifier = Modifier

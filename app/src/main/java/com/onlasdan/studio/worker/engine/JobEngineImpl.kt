@@ -6,8 +6,7 @@ import com.onlasdan.studio.core.ImgArchive
 import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.core.ImgVersion
 import com.onlasdan.studio.process.ProcessType
-import com.onlasdan.studio.txd.TxdBuilder
-import com.onlasdan.studio.txd.TxdParser
+import com.onlasdan.studio.txd.TxdStore
 import com.onlasdan.studio.worker.JobEngine
 import com.onlasdan.studio.worker.MemoryBudget
 import com.onlasdan.studio.worker.ShizukuFileBridge
@@ -21,9 +20,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -95,8 +91,11 @@ class JobEngineImpl(
 }
 
     /**
-     * Merekonstruksi arsip IMG tanpa celah (gap), menyusun ulang sektor secara streaming
-     * ke file .tmp, memperbarui header direktori, dan mengganti berkas secara atomik.
+     * Merekonstruksi arsip IMG tanpa celah (gap) via engine Rust
+     * (NativeCore.imgRebuild — repack ke berkas sementara lalu tukar atomik
+     * di dalam engine). Lock, checkpoint, dan sinkronisasi Shizuku tetap
+     * diatur di sini; progres dilaporkan di awal dan akhir karena engine
+     * tidak memberi progres per entri.
      */
     private fun executeRebuild(
         request: JobRequest,
@@ -113,16 +112,12 @@ class JobEngineImpl(
         }
 
         val lockHandle = SafeFileWriter.acquireLock(request.targetPath)
-        val tmpFile = SafeFileWriter.getTempFile(request.targetPath)
-        var tmpDirFile: File? = null
-        var isSuccess = false
 
         return try {
-            SafeFileWriter.cleanupFile(tmpFile)
             val archive = ImgArchive.open(targetFile)
             val version = archive.version
-            val entries = archive.entries
-            val total = entries.size
+            val dirFile = archive.dirFile
+            val total = archive.entryCount
 
             CheckpointManager.createCheckpoint(request.id, "REBUILD", request.targetPath, total)
             onProgress(
@@ -132,146 +127,20 @@ class JobEngineImpl(
                     currentItem = 0,
                     totalItems = total,
                     status = "RUNNING",
-                    message = "Mempersiapkan rebuild arsip..."
+                    message = "Menyusun ulang sektor via engine Rust..."
                 )
             )
 
-            val headerSize = 8 + total * ImgArchive.ENTRY_SIZE
-            val headerSectors = if (version == ImgVersion.VER2) {
-                (headerSize + ImgArchive.SECTOR_SIZE - 1) / ImgArchive.SECTOR_SIZE
-            } else {
-                0
-            }
-            var currentSector = headerSectors
+            if (isCancelled(request.id)) throw CancellationException("Dibatalkan oleh pengguna")
 
-            val dirFile = if (version == ImgVersion.VER1) {
-                archive.dirFile ?: File(targetFile.parentFile, targetFile.nameWithoutExtension + ".dir")
-            } else null
-
-            if (dirFile != null) {
-                tmpDirFile = File(dirFile.path + WorkerContracts.EXT_TMP)
-                SafeFileWriter.cleanupFile(tmpDirFile)
-            }
-
-            RandomAccessFile(targetFile, "r").use { srcRaf ->
-                val srcChannel = srcRaf.channel
-                RandomAccessFile(tmpFile, "rw").use { destRaf ->
-                    val destChannel = destRaf.channel
-
-                    if (version == ImgVersion.VER2) {
-                        // Alokasi ruang header di awal file
-                        destChannel.position(0)
-                        val magicBuf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
-                        magicBuf.put(ImgArchive.VER2_MAGIC)
-                        magicBuf.flip()
-                        destChannel.write(magicBuf)
-
-                        val padBytes = (headerSectors * ImgArchive.SECTOR_SIZE) - 4
-                        if (padBytes > 0) {
-                            val zeroChunk = ByteBuffer.allocate(minOf(padBytes, budget.ioBufferSize.coerceAtLeast(32 * 1024)))
-                            var remainingPad = padBytes
-                            while (remainingPad > 0) {
-                                if (isCancelled(request.id)) throw CancellationException("Dibatalkan oleh pengguna")
-                                zeroChunk.clear()
-                                val toWrite = minOf(remainingPad, zeroChunk.capacity())
-                                zeroChunk.limit(toWrite)
-                                destChannel.write(zeroChunk)
-                                remainingPad -= toWrite
-                            }
-                        }
-                    }
-
-                    val bufferSize = budget.ioBufferSize.coerceIn(16 * 1024, 1024 * 1024)
-                    val transferBuf = ByteBuffer.allocateDirect(bufferSize)
-
-                    for ((idx, entry) in entries.withIndex()) {
-                        if (isCancelled(request.id)) {
-                            throw CancellationException("Dibatalkan oleh pengguna")
-                        }
-
-                        srcChannel.position(entry.offsetInBytes)
-                        destChannel.position(currentSector.toLong() * ImgArchive.SECTOR_SIZE)
-
-                        var bytesRemaining = entry.sizeInBytes
-                        while (bytesRemaining > 0) {
-                            if (isCancelled(request.id)) throw CancellationException("Dibatalkan oleh pengguna")
-                            transferBuf.clear()
-                            if (bytesRemaining < transferBuf.capacity()) {
-                                transferBuf.limit(bytesRemaining.toInt())
-                            }
-                            val read = srcChannel.read(transferBuf)
-                            if (read <= 0) break
-                            transferBuf.flip()
-                            destChannel.write(transferBuf)
-                            bytesRemaining -= read
-                        }
-
-                        entry.offsetInSectors = currentSector
-                        currentSector += entry.sizeInSectors
-
-                        val current = idx + 1
-                        val percent = current.toFloat() / total.toFloat()
-                        onProgress(
-                            JobProgress(
-                                id = request.id,
-                                percent = percent,
-                                currentItem = current,
-                                totalItems = total,
-                                status = "RUNNING",
-                                currentItemName = entry.cleanName,
-                                message = "Menyusun ulang sektor ($current / $total)"
-                            )
-                        )
-                        CheckpointManager.updateCheckpoint(request.id, request.targetPath, current)
-                    }
-
-                    // Tulis struktur header untuk VER2
-                    if (version == ImgVersion.VER2) {
-                        destChannel.position(0)
-                        val headerBuf = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
-                        headerBuf.put(ImgArchive.VER2_MAGIC)
-                        headerBuf.putInt(entries.size)
-                        headerBuf.flip()
-                        destChannel.write(headerBuf)
-
-                        val entriesBuf = ByteBuffer.allocate(entries.size * ImgArchive.ENTRY_SIZE).order(ByteOrder.LITTLE_ENDIAN)
-                        for (entry in entries) {
-                            entriesBuf.putInt(entry.offsetInSectors)
-                            entriesBuf.putInt(entry.sizeInSectors)
-                            val nameBytes = ByteArray(ImgArchive.NAME_SIZE)
-                            val srcBytes = entry.cleanName.toByteArray(ImgArchive.CHARSET)
-                            System.arraycopy(srcBytes, 0, nameBytes, 0, minOf(srcBytes.size, ImgArchive.NAME_SIZE))
-                            entriesBuf.put(nameBytes)
-                        }
-                        entriesBuf.flip()
-                        destChannel.write(entriesBuf)
-                    }
-                }
-            }
-
-            // Tulis direktori untuk VER1 (.dir)
-            if (version == ImgVersion.VER1 && dirFile != null && tmpDirFile != null) {
-                FileOutputStream(tmpDirFile).use { fos ->
-                    val channel = fos.channel
-                    val entriesBuf = ByteBuffer.allocate(entries.size * ImgArchive.ENTRY_SIZE).order(ByteOrder.LITTLE_ENDIAN)
-                    for (entry in entries) {
-                        entriesBuf.putInt(entry.offsetInSectors)
-                        entriesBuf.putInt(entry.sizeInSectors)
-                        val nameBytes = ByteArray(ImgArchive.NAME_SIZE)
-                        val srcBytes = entry.cleanName.toByteArray(ImgArchive.CHARSET)
-                        System.arraycopy(srcBytes, 0, nameBytes, 0, minOf(srcBytes.size, ImgArchive.NAME_SIZE))
-                        entriesBuf.put(nameBytes)
-                    }
-                    entriesBuf.flip()
-                    channel.write(entriesBuf)
-                }
-            }
-
-            // Atomic replace
-            val replaced = SafeFileWriter.atomicReplace(tmpFile, targetFile)
-            if (!replaced) throw IOException("Gagal mengganti berkas arsip dengan hasil rebuild secara atomik")
-            if (tmpDirFile != null && dirFile != null) {
-                SafeFileWriter.atomicReplace(tmpDirFile, dirFile)
+            val result = com.onlasdan.studio.core.NativeCore.imgRebuild(
+                targetFile.absolutePath, dirFile?.absolutePath
+            )
+            when {
+                result == null ->
+                    throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+                result.startsWith("ERROR ") ->
+                    throw IOException(result.removePrefix("ERROR "))
             }
 
             // Sinkronisasi Shizuku jika path tujuan disediakan
@@ -286,7 +155,6 @@ class JobEngineImpl(
                 }
             }
 
-            isSuccess = true
             CheckpointManager.removeCheckpoint(request.targetPath)
             onProgress(
                 JobProgress(
@@ -312,10 +180,6 @@ class JobEngineImpl(
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "FAILED")
             JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Rebuild gagal")
         } finally {
-            if (!isSuccess) {
-                SafeFileWriter.cleanupFile(tmpFile)
-                SafeFileWriter.cleanupFile(tmpDirFile)
-            }
             lockHandle.release()
         }
     }
@@ -362,11 +226,11 @@ class JobEngineImpl(
         isAll: Boolean,
         onProgress: (JobProgress) -> Unit
     ): JobResult {
-        val txd = TxdParser.parse(targetFile)
+        val txd = TxdStore.load(targetFile)
         val textures = if (isAll || request.entryNames.isEmpty()) {
-            txd.textures
+            txd.entries
         } else {
-            txd.textures.filter { tex -> request.entryNames.any { it.equals(tex.name, ignoreCase = true) } }
+            txd.entries.filter { tex -> request.entryNames.any { it.equals(tex.name, ignoreCase = true) } }
         }
 
         val total = textures.size
@@ -444,42 +308,32 @@ class JobEngineImpl(
         val exportedPaths = mutableListOf<String>()
 
         return try {
-            RandomAccessFile(archive.imgFile, "r").use { raf ->
-                val srcChannel = raf.channel
-
-                for ((idx, entry) in entries.withIndex()) {
-                    if (isCancelled(request.id)) {
-                        throw CancellationException("Dibatalkan oleh pengguna")
-                    }
-
-                    val outEntry = File(destDir, entry.cleanName)
-                    val outTmp = File(outEntry.path + WorkerContracts.EXT_TMP)
-
-                    SafeFileWriter.streamExtract(
-                        srcChannel = srcChannel,
-                        destFile = outTmp,
-                        offset = entry.offsetInBytes,
-                        length = entry.sizeInBytes,
-                        bufferSize = budget.ioBufferSize,
-                        isCancelled = { isCancelled(request.id) }
-                    )
-                    SafeFileWriter.atomicReplace(outTmp, outEntry)
-                    exportedPaths.add(outEntry.absolutePath)
-
-                    val current = idx + 1
-                    onProgress(
-                        JobProgress(
-                            id = request.id,
-                            percent = current.toFloat() / total.toFloat(),
-                            currentItem = current,
-                            totalItems = total,
-                            status = "RUNNING",
-                            currentItemName = entry.cleanName,
-                            message = "Mengekstrak ${entry.cleanName} ($current / $total)"
-                        )
-                    )
-                    CheckpointManager.updateCheckpoint(request.id, request.targetPath, current)
+            for ((idx, entry) in entries.withIndex()) {
+                if (isCancelled(request.id)) {
+                    throw CancellationException("Dibatalkan oleh pengguna")
                 }
+
+                val outEntry = File(destDir, entry.cleanName)
+                val outTmp = File(outEntry.path + WorkerContracts.EXT_TMP)
+
+                // Ekstraksi byte kini di engine Rust (via fasad ImgArchive).
+                archive.extract(entry, outTmp)
+                SafeFileWriter.atomicReplace(outTmp, outEntry)
+                exportedPaths.add(outEntry.absolutePath)
+
+                val current = idx + 1
+                onProgress(
+                    JobProgress(
+                        id = request.id,
+                        percent = current.toFloat() / total.toFloat(),
+                        currentItem = current,
+                        totalItems = total,
+                        status = "RUNNING",
+                        currentItemName = entry.cleanName,
+                        message = "Mengekstrak ${entry.cleanName} ($current / $total)"
+                    )
+                )
+                CheckpointManager.updateCheckpoint(request.id, request.targetPath, current)
             }
 
             CheckpointManager.removeCheckpoint(request.targetPath)
@@ -818,9 +672,11 @@ class JobEngineImpl(
                 CheckpointManager.createCheckpoint(request.id, "AUTO_REPLACE", request.targetPath, total)
             }
 
-            val txd = TxdParser.parse(targetFile)
-            val textures = txd.textures
+            val txd = TxdStore.load(targetFile)
+            val textures = txd.entries
             var replacedCount = startIndex
+            val batchIndices = mutableListOf<Int>()
+            val batchImages = mutableListOf<Triple<IntArray, Int, Int>>()
 
             for (idx in startIndex until total) {
                 val srcFile = sourceFiles[idx]
@@ -834,7 +690,10 @@ class JobEngineImpl(
                 if (targetTexture != null) {
                     val bitmap = BitmapFactory.decodeFile(srcFile.absolutePath)
                     if (bitmap != null) {
-                        TxdBuilder.replaceTexture(targetTexture, bitmap)
+                        val px = IntArray(bitmap.width * bitmap.height)
+                        bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                        batchIndices.add(targetTexture.sourceIndex)
+                        batchImages.add(Triple(px, bitmap.width, bitmap.height))
                         bitmap.recycle()
                         replacedCount++
                     }
@@ -856,7 +715,14 @@ class JobEngineImpl(
             }
 
             if (replacedCount > 0) {
-                TxdBuilder.buildToFile(textures, tmpFile, txd.rwVersion)
+                // Engine Rust bekerja pada salinan .tmp, lalu tukar atomik.
+                SafeFileWriter.streamCopy(
+                    source = targetFile,
+                    dest = tmpFile,
+                    bufferSize = 256 * 1024,
+                    isCancelled = { isCancelled(request.id) }
+                )
+                TxdStore.replaceTextures(tmpFile, batchIndices, batchImages)
                 val moved = SafeFileWriter.atomicReplace(tmpFile, targetFile)
                 if (!moved) throw IOException("Gagal mengganti berkas TXD secara atomik")
 

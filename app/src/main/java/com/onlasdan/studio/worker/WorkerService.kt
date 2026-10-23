@@ -15,6 +15,7 @@ import android.os.RemoteCallbackList
 import android.os.RemoteException
 import android.os.SystemClock
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.onlasdan.studio.worker.engine.JobEngineImpl
 import com.onlasdan.studio.worker.memory.MemoryBudgetProviderImpl
 import com.onlasdan.studio.worker.model.JobProgress
@@ -170,11 +171,14 @@ class WorkerService : Service() {
         WorkerShizukuManager.init(applicationContext)
 
         val filter = IntentFilter(WorkerContracts.ACTION_CANCEL_JOB)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(cancelReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(cancelReceiver, filter)
-        }
+        // Broadcast murni internal (pengirim satu-satunya: tombol Batal di
+        // notifikasi aplikasi sendiri) -> tidak diekspor di semua API level.
+        ContextCompat.registerReceiver(
+            this,
+            cancelReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -230,7 +234,7 @@ class WorkerService : Service() {
 
     override fun onTimeout(startId: Int) {
         super.onTimeout(startId)
-        handleSystemTimeout(startId, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        handleSystemTimeout(startId, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
     }
 
     override fun onDestroy() {
@@ -503,11 +507,11 @@ class WorkerService : Service() {
 
     private fun startForegroundServiceInternal(notification: Notification) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
                     WorkerContracts.NOTIFICATION_ID,
                     notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
             } else {
                 startForeground(WorkerContracts.NOTIFICATION_ID, notification)

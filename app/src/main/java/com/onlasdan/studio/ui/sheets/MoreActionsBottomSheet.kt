@@ -14,8 +14,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.onlasdan.studio.R
 import com.onlasdan.studio.ui.FloatingSheet
 import com.onlasdan.studio.ui.theme.SectionHeaderStyle
 import com.onlasdan.studio.ui.theme.SemanticColors
@@ -32,12 +34,14 @@ fun MoreActionsBottomSheet(
     onRebuildArchive: (() -> Unit)? = null,
     isLargeImage: Boolean = false,
     onToggleTxdViewMode: (() -> Unit)? = null,
+    onAddTextures: (() -> Unit)? = null,
     onOpenWindowMode: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRuntimeSettings: () -> Unit = {},
     onOpenAbout: () -> Unit,
     onCloseFile: () -> Unit,
-    onOpenShizuku: () -> Unit
+    onOpenShizuku: () -> Unit,
+    onOpenModloader: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -91,6 +95,19 @@ fun MoreActionsBottomSheet(
                             }
                         )
 
+                        if (isTxd && onAddTextures != null) {
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            MoreActionRow(
+                                icon = Icons.Outlined.AddPhotoAlternate,
+                                title = "Add New Texture",
+                                subtitle = "Impor gambar sebagai tekstur baru ke TXD ini",
+                                onClick = {
+                                    onDismissRequest()
+                                    onAddTextures()
+                                }
+                            )
+                        }
+
                         if (isTxd && onToggleTxdViewMode != null) {
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             MoreActionRow(
@@ -108,7 +125,7 @@ fun MoreActionsBottomSheet(
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             MoreActionRow(
                                 icon = Icons.Outlined.Build,
-                                title = "Rebuild Arsip",
+                                title = "Rebuild Archive",
                                 subtitle = "Padatkan dan rapikan sektor file IMG",
                                 onClick = {
                                     onDismissRequest()
@@ -121,7 +138,7 @@ fun MoreActionsBottomSheet(
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             MoreActionRow(
                                 icon = Icons.Outlined.DriveFileRenameOutline,
-                                title = "Ganti Nama Berkas",
+                                title = "Rename File",
                                 subtitle = "Ubah nama file fisik di penyimpanan",
                                 onClick = {
                                     onDismissRequest()
@@ -150,7 +167,7 @@ fun MoreActionsBottomSheet(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         MoreActionRow(
                             icon = Icons.Outlined.Bolt,
-                            title = "Status & Akses Shizuku",
+                            title = "Shizuku Status & Access",
                             subtitle = "Kelola izin akses folder Android/data",
                             onClick = {
                                 onDismissRequest()
@@ -158,10 +175,23 @@ fun MoreActionsBottomSheet(
                             }
                         )
 
+                        if (onOpenModloader != null) {
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            MoreActionRow(
+                                icon = Icons.Outlined.SportsEsports,
+                                title = stringResource(R.string.modloader_title),
+                                subtitle = stringResource(R.string.modloader_menu_subtitle),
+                                onClick = {
+                                    onDismissRequest()
+                                    onOpenModloader()
+                                }
+                            )
+                        }
+
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         MoreActionRow(
                             icon = Icons.Outlined.Layers,
-                            title = "Mode Jendela",
+                            title = "Window Mode",
                             subtitle = "Atur jendela multi-window atau single-window",
                             onClick = {
                                 onDismissRequest()
@@ -172,7 +202,7 @@ fun MoreActionsBottomSheet(
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         MoreActionRow(
                             icon = Icons.Outlined.Settings,
-                            title = "Pengaturan",
+                            title = "Settings",
                             subtitle = "Konfigurasi tema & preferensi aplikasi",
                             onClick = {
                                 onDismissRequest()
@@ -183,7 +213,7 @@ fun MoreActionsBottomSheet(
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         MoreActionRow(
                             icon = Icons.Outlined.Memory,
-                            title = "Pengaturan Proses Runtime",
+                            title = "Runtime Process Settings",
                             subtitle = "Service latar belakang & anggaran RAM",
                             isEnabled = true,
                             onClick = {
@@ -195,7 +225,7 @@ fun MoreActionsBottomSheet(
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         MoreActionRow(
                             icon = Icons.Outlined.Info,
-                            title = "Tentang ImgTxd Studio",
+                            title = "About",
                             subtitle = "Informasi versi & lisensi aplikasi",
                             onClick = {
                                 onDismissRequest()
@@ -222,7 +252,7 @@ fun MoreActionsBottomSheet(
                 ) {
                     MoreActionRow(
                         icon = Icons.Outlined.Close,
-                        title = "Tutup Berkas",
+                        title = "Close File",
                         subtitle = if (isFileBusy) "Menunggu proses selesai..." else "Tutup berkas dan kembali ke beranda",
                         iconTint = if (isFileBusy) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                         isEnabled = !isFileBusy,

@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 /**
  * Watchdog Guardian Receiver yang bertugas menjaga ketahanan operasi latar belakang:
  * 1. Memulihkan pekerjaan setelah perangkat dinyalakan kembali (BOOT_COMPLETED).
- * 2. Menghidupkan kembali WorkerService secara instan saat siklus onTimeout dataSync selesai.
+ * 2. Menghidupkan kembali WorkerService secara instan saat siklus onTimeout FGS selesai.
  * 3. Menjalankan watchdog berkala via AlarmManager untuk memastikan tidak ada pekerjaan terhenti.
  */
 class JobGuardianReceiver : BroadcastReceiver() {
@@ -57,11 +57,25 @@ class JobGuardianReceiver : BroadcastReceiver() {
 
                 val triggerAt = SystemClock.elapsedRealtime() + delayMs
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAt,
-                        pendingIntent
-                    )
+                    // Android 12+: exact alarm hanya bila izinnya aktif
+                    // (SCHEDULE_EXACT_ALARM bisa dicabut user); bila tidak,
+                    // jatuh ke setAndAllowWhileIdle — resume tetap jalan,
+                    // hanya kurang presisi.
+                    val exactAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                        alarmManager.canScheduleExactAlarms()
+                    if (exactAllowed) {
+                        alarmManager.setExactAndAllowWhileIdle(
+                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                            triggerAt,
+                            pendingIntent
+                        )
+                    } else {
+                        alarmManager.setAndAllowWhileIdle(
+                            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                            triggerAt,
+                            pendingIntent
+                        )
+                    }
                 } else {
                     alarmManager.set(
                         AlarmManager.ELAPSED_REALTIME_WAKEUP,

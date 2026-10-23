@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.DefaultProcessRepository
+import com.onlasdan.studio.process.JobHistoryStore
+import com.onlasdan.studio.process.OperationHistoryRecord
 import com.onlasdan.studio.process.ProcessRepository
 import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.process.ProcessType
@@ -128,7 +130,38 @@ class ProcessRepositoryStrategy private constructor(
         title: String,
         block: suspend (updateProgress: (current: Int, total: Int, message: String?) -> Unit) -> Result<Unit>
     ): Result<Unit> {
-        return activeRepository.executeProcess(type, targetFile, title, block)
+        JobHistoryStore.init(context)
+        val startedAt = System.currentTimeMillis()
+        try {
+            val result = activeRepository.executeProcess(type, targetFile, title, block)
+            JobHistoryStore.record(
+                OperationHistoryRecord(
+                    id = java.util.UUID.randomUUID().toString(),
+                    typeLabel = type.label,
+                    title = title,
+                    targetFile = targetFile,
+                    status = if (result.isSuccess) "COMPLETED" else "FAILED",
+                    message = result.exceptionOrNull()?.localizedMessage,
+                    timestamp = startedAt,
+                    durationMs = System.currentTimeMillis() - startedAt
+                )
+            )
+            return result
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            JobHistoryStore.record(
+                OperationHistoryRecord(
+                    id = java.util.UUID.randomUUID().toString(),
+                    typeLabel = type.label,
+                    title = title,
+                    targetFile = targetFile,
+                    status = "CANCELLED",
+                    message = null,
+                    timestamp = startedAt,
+                    durationMs = System.currentTimeMillis() - startedAt
+                )
+            )
+            throw e
+        }
     }
 
     override fun cancelProcess(id: String): Boolean {

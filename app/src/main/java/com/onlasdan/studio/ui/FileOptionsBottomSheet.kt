@@ -158,7 +158,7 @@ fun FileOptionsBottomSheet(
                         if (isTxd) {
                             FileOptionItem(
                                 icon = Icons.Outlined.Palette,
-                                title = "Buka & Sunting Tekstur (TXD)",
+                                title = "Open & Edit Texture (TXD)",
                                 subtitle = "Lihat tekstur renderware, ganti gambar, atau ekspor PNG",
                                 iconTint = MaterialTheme.colorScheme.secondary,
                                 onClick = {
@@ -171,7 +171,7 @@ fun FileOptionsBottomSheet(
 
                         FileOptionItem(
                             icon = Icons.Outlined.DriveFileRenameOutline,
-                            title = "Ubah Nama (Rename)",
+                            title = "Rename",
                             subtitle = "Maksimal 24 karakter termasuk ekstensi",
                             onClick = {
                                 onDismissRequest()
@@ -183,7 +183,7 @@ fun FileOptionsBottomSheet(
 
                         FileOptionItem(
                             icon = Icons.Outlined.Delete,
-                            title = "Hapus dari Arsip",
+                            title = "Delete from Archive",
                             subtitle = "Menghapus entri berkas ini dari arsip .img",
                             titleColor = MaterialTheme.colorScheme.error,
                             iconTint = MaterialTheme.colorScheme.error,

@@ -11,3 +11,7 @@ app/build
 *.jks
 .cxx
 .externalNativeBuild
+
+# Rust build artifacts
+rust-core/target/
+target/

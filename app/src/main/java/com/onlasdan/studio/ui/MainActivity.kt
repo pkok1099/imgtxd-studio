@@ -44,6 +44,11 @@ import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.DefaultProcessRepository
 import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessStatus
+import com.onlasdan.studio.ui.components.BusySheet
+import com.onlasdan.studio.ui.components.ConfirmSheet
+import com.onlasdan.studio.ui.components.InputSheet
+import com.onlasdan.studio.ui.components.MessageSheet
+import com.onlasdan.studio.ui.components.SheetTitle
 import com.onlasdan.studio.ui.settings.RuntimeSettingsSheet
 import com.onlasdan.studio.ui.framework.ArchiveEntryCard
 import com.onlasdan.studio.ui.framework.ArchiveScreen
@@ -51,7 +56,9 @@ import com.onlasdan.studio.ui.framework.ContextualDockItem
 import com.onlasdan.studio.ui.framework.ContextualPillDock
 import com.onlasdan.studio.ui.sheets.AboutBottomSheet
 import com.onlasdan.studio.ui.sheets.ImgEntryBottomSheet
+import com.onlasdan.studio.ui.sheets.ModloaderSheet
 import com.onlasdan.studio.ui.sheets.MoreActionsBottomSheet
+import com.onlasdan.studio.ui.sheets.OperationsHistorySheet
 import com.onlasdan.studio.ui.sheets.ProcessDetailBottomSheet
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.ui.theme.SectionHeaderStyle
@@ -66,9 +73,16 @@ import com.onlasdan.studio.util.StorageHelper
 import com.onlasdan.studio.util.WindowLauncher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import com.onlasdan.studio.core.NativeCore
 import rikka.shizuku.Shizuku
 import java.io.File
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -153,57 +167,53 @@ class MainActivity : ComponentActivity() {
                         )
 
                         if (showUnsavedChangesPrompt) {
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showUnsavedChangesPrompt = false
-                                    pendingIntentToLoad = null
-                                },
-                                shape = RoundedCornerShape(28.dp),
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                title = { Text("Perubahan Belum Disimpan", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
-                                text = {
-                                    Text(
-                                        "Arsip IMG saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan sebelum membuka file baru?",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            showUnsavedChangesPrompt = false
+                            FloatingSheet(onDismissRequest = {
+                                showUnsavedChangesPrompt = false
+                                pendingIntentToLoad = null
+                            }) {
+                                SheetTitle("Perubahan Belum Disimpan")
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "Arsip IMG saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan sebelum membuka file baru?",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Button(
+                                    onClick = {
+                                        showUnsavedChangesPrompt = false
                                             val next = pendingIntentToLoad
                                             pendingIntentToLoad = null
                                             if (next != null) {
                                                 executeLoadIntent(next)
                                             }
-                                        },
-                                        shape = CircleShape,
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                    ) {
-                                        Text("Simpan & Buka", fontWeight = FontWeight.SemiBold)
-                                    }
-                                },
-                                dismissButton = {
-                                    OutlinedButton(
-                                        onClick = {
-                                            showUnsavedChangesPrompt = false
-                                            val next = pendingIntentToLoad
-                                            pendingIntentToLoad = null
-                                            if (next != null) {
-                                                executeLoadIntent(next)
-                                            }
-                                        },
-                                        shape = CircleShape,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                                    ) {
-                                        Text("Buang", fontWeight = FontWeight.SemiBold)
-                                    }
+                                    },
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Simpan & Buka", fontWeight = FontWeight.SemiBold)
                                 }
-                            )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        showUnsavedChangesPrompt = false
+                                            val next = pendingIntentToLoad
+                                            pendingIntentToLoad = null
+                                            if (next != null) {
+                                                executeLoadIntent(next)
+                                            }
+                                    },
+                                    shape = CircleShape,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Buang", fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                         }
                     }
                 }
@@ -302,6 +312,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 fun MainScreen(
     viewModel: ImgToolViewModel,
     requestedTab: String? = null,
@@ -335,7 +346,21 @@ fun MainScreen(
     // Sub-sheets & Dialogs
     var selectedImgEntryForSheet by remember { mutableStateOf<ImgEntry?>(null) }
     var showMoreActionsSheet by rememberSaveable { mutableStateOf(false) }
+    var showModloaderSheet by rememberSaveable { mutableStateOf(false) }
     var showQuickMenuSheet by rememberSaveable { mutableStateOf(false) }
+    var showHistorySheet by rememberSaveable { mutableStateOf(false) }
+    var showMultiTxdPicker by remember { mutableStateOf(false) }
+    var showOswPicker by remember { mutableStateOf(false) }
+    var showTexdbPicker by remember { mutableStateOf(false) }
+    var showDffInspectPicker by remember { mutableStateOf(false) }
+    var imgVerifyReport by remember { mutableStateOf<String?>(null) }
+    var showAuditFolderPicker by remember { mutableStateOf(false) }
+    var auditReport by remember { mutableStateOf<String?>(null) }
+    var auditBusy by remember { mutableStateOf(false) }
+    var showDataFilePicker by remember { mutableStateOf(false) }
+    var pendingMultiTxdFiles by remember { mutableStateOf<List<Pair<String, Boolean>>?>(null) }
+    var multiTxdSubfolders by remember { mutableStateOf(true) }
+    var showMultiTxdDestPicker by remember { mutableStateOf(false) }
     var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
     var showAboutSheet by rememberSaveable { mutableStateOf(false) }
     var selectedProcessForDetail by remember { mutableStateOf<AppProcess?>(null) }
@@ -349,7 +374,6 @@ fun MainScreen(
 
     // In-App File Picker Dialog States
     var showOpenArchivePicker by remember { mutableStateOf(false) }
-    var showOpenTxdPicker by remember { mutableStateOf(false) }
     var showAddFilePicker by remember { mutableStateOf(false) }
     var entryToReplace by remember { mutableStateOf<ImgEntry?>(null) }
     var showExtractSelectedPicker by remember { mutableStateOf(false) }
@@ -418,6 +442,7 @@ fun MainScreen(
     // BACK NAVIGATION RULES (Priority 1 -> 5)
     val isAnySheetOpen = selectedImgEntryForSheet != null ||
             showMoreActionsSheet ||
+            showModloaderSheet ||
             showQuickMenuSheet ||
             showSettingsSheet ||
             showAboutSheet ||
@@ -436,6 +461,7 @@ fun MainScreen(
             // Rule 1: Sheet terbuka -> tutup sheet
             selectedProcessForDetail != null -> selectedProcessForDetail = null
             selectedImgEntryForSheet != null -> selectedImgEntryForSheet = null
+            showModloaderSheet -> showModloaderSheet = false
             showMoreActionsSheet -> showMoreActionsSheet = false
             showQuickMenuSheet -> showQuickMenuSheet = false
             showSettingsSheet -> showSettingsSheet = false
@@ -503,8 +529,8 @@ fun MainScreen(
         ),
         ContextualDockItem(
             id = "txd",
-            icon = Icons.Outlined.Palette,
-            contentDescription = "Tekstur TXD",
+            icon = Icons.Outlined.Layers,
+            contentDescription = "Texdb",
             showDotBadge = isAnyTxdOpen,
             onClick = {
                 if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
@@ -515,7 +541,7 @@ fun MainScreen(
                     }
                     context.startActivity(intent)
                 } else {
-                    showOpenTxdPicker = true
+                    showTexdbPicker = true
                 }
             }
         ),
@@ -629,7 +655,7 @@ fun MainScreen(
                                 }
                                 context.startActivity(intent)
                             } else {
-                                showOpenTxdPicker = true
+                                showTexdbPicker = true
                             }
                         },
                         onOpenRecent = { item ->
@@ -766,11 +792,14 @@ fun MainScreen(
                     onExportSelected = { entries, destDir ->
                         viewModel.exportSelectedTextures(entries, destDir)
                     },
-                    onReplaceTexture = { entry, imagePath, isShizuku ->
-                        viewModel.replaceTexture(context, entry, imagePath, isShizuku)
+                    onReplaceTexture = { entry, imagePath, isShizuku, options ->
+                        viewModel.replaceTexture(context, entry, imagePath, isShizuku, options)
                     },
-                    onAutoReplace = { matches, isShizuku ->
-                        viewModel.autoReplaceTextures(context, matches, isShizuku)
+                    onAutoReplace = { matches, isShizuku, options ->
+                        viewModel.autoReplaceTextures(context, matches, isShizuku, options)
+                    },
+                    onAddTextures = { images, policy, options ->
+                        viewModel.addTextures(context, images, policy, options)
                     },
                     onClearMessages = { viewModel.clearMessages() },
                     showDock = true,
@@ -868,7 +897,33 @@ fun MainScreen(
                 } else {
                     Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
                 }
+            },
+            onOpenModloader = {
+                showMoreActionsSheet = false
+                showModloaderSheet = true
             }
+        )
+    }
+
+    // 2b. Sheet Modloader (IPC ke plugin di dalam game)
+    if (showModloaderSheet) {
+        ModloaderSheet(
+            onDismissRequest = { showModloaderSheet = false },
+            hasArchive = uiState.archive != null,
+            modelEntries = uiState.entries.filter {
+                it.cleanName.endsWith(".dff", ignoreCase = true) ||
+                    it.cleanName.endsWith(".txd", ignoreCase = true)
+            },
+            selectedEntry = uiState.loaderSelectedEntry,
+            modelIdText = uiState.loaderModelId,
+            connected = uiState.loaderConnected,
+            busy = uiState.loaderBusy,
+            feedback = uiState.loaderFeedback,
+            onCheckConnection = { viewModel.checkLoaderConnection() },
+            onSelectEntry = { viewModel.selectLoaderEntry(it) },
+            onModelIdChange = { viewModel.setLoaderModelId(it) },
+            onSubstitute = { viewModel.substituteLoaderEntry(context) },
+            onReload = { viewModel.reloadLoaderModel() }
         )
     }
 
@@ -879,11 +934,32 @@ fun MainScreen(
             hasActiveArchive = uiState.archive != null,
             isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
             onOpenArchive = { showOpenArchivePicker = true },
-            onOpenTxd = { showOpenTxdPicker = true },
             onAddFile = { showAddFilePicker = true },
             onRebuildArchive = { showRebuildDialog = true },
             onSelectAll = { viewModel.selectAll() },
             onOpenSettings = { showSettingsSheet = true },
+            onExportMultipleTxd = { showMultiTxdPicker = true },
+            onOpenHistory = { showHistorySheet = true },
+            onFixAudio = { showOswPicker = true },
+            onOpenTexdbCache = { showTexdbPicker = true },
+            onInspectDff = { showDffInspectPicker = true },
+            onVerifyArchive = {
+                val imgPath = uiState.archive?.imgFile?.absolutePath
+                if (imgPath == null) {
+                    Toast.makeText(context, "Tidak ada arsip yang terbuka", Toast.LENGTH_SHORT).show()
+                } else {
+                    coroutineScope.launch {
+                        val result = withContext(Dispatchers.IO) { NativeCore.imgVerify(imgPath) }
+                        imgVerifyReport = when {
+                            result == null -> "Engine Rust tidak tersedia"
+                            result.startsWith("OK") -> result.removePrefix("OK\n")
+                            else -> result.removePrefix("ERROR ")
+                        }
+                    }
+                }
+            },
+            onGameAudit = { showAuditFolderPicker = true },
+            onDataLines = { showDataFilePicker = true },
             onRequestShizuku = {
                 if (!ShizukuManager.isShizukuAvailable()) {
                     Toast.makeText(context, "Shizuku service tidak terdeteksi.", Toast.LENGTH_SHORT).show()
@@ -891,6 +967,225 @@ fun MainScreen(
                     ShizukuManager.requestPermission()
                 } else {
                     Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    // 3b. Operations History Bottom Sheet
+    if (showHistorySheet) {
+        OperationsHistorySheet(
+            onDismissRequest = { showHistorySheet = false },
+            onClearAll = { }
+        )
+    }
+
+    // 3b2. SA Audio Fixer: pick an .osw archive, regenerate its .idx
+    if (showOswPicker) {
+        FilePickerDialog(
+            title = "Pilih Arsip Audio .osw",
+            mode = PickerMode.PICK_OSW,
+            onDismissRequest = { showOswPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showOswPicker = false
+                viewModel.fixAudioIdx(context, path, isShizuku)
+            }
+        )
+    }
+
+    // 3b2a. IMG health report sheet
+    imgVerifyReport?.let { report ->
+        MessageSheet(
+            title = "Kesehatan Arsip IMG",
+            message = report,
+            monospace = true,
+            onDismissRequest = { imgVerifyReport = null }
+        )
+    }
+
+    // 3b2a2. Game texture audit: pick the GTA files/ folder, run, show report
+    if (showAuditFolderPicker) {
+        FilePickerDialog(
+            title = "Pilih Folder files/ GTA (berisi texdb/ dan .img)",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { showAuditFolderPicker = false },
+            onFileSelected = { path, _ ->
+                showAuditFolderPicker = false
+                auditBusy = true
+                coroutineScope.launch {
+                    val result = withContext(Dispatchers.IO) { NativeCore.gameAudit(path) }
+                    auditBusy = false
+                    auditReport = when {
+                        result == null -> "Engine Rust tidak tersedia"
+                        result.startsWith("OK") -> result.removePrefix("OK\n")
+                        else -> result.removePrefix("ERROR ")
+                    }
+                }
+            }
+        )
+    }
+    if (auditBusy) {
+        BusySheet("Memeriksa belasan ribu DFF melawan semua cache…")
+    }
+    auditReport?.let { report ->
+        MessageSheet(
+            title = "Audit Tekstur Game",
+            message = report,
+            monospace = true,
+            onDismissRequest = { auditReport = null }
+        )
+    }
+
+    // 3b2a3. Data lines helper: pick a data file, open the activity
+    if (showDataFilePicker) {
+        FilePickerDialog(
+            title = "Pilih Berkas Data (handling.cfg / vehicles.ide / carcols.dat)",
+            mode = PickerMode.PICK_FILE,
+            onDismissRequest = { showDataFilePicker = false },
+            onFileSelected = { path, isShizuku ->
+                showDataFilePicker = false
+                val intent = Intent(context, DataLinesActivity::class.java).apply {
+                    putExtra(DataLinesActivity.EXTRA_FILE_PATH, path)
+                    putExtra(DataLinesActivity.EXTRA_IS_SHIZUKU, isShizuku)
+                }
+                context.startActivity(intent)
+            }
+        )
+    }
+
+    // 3b2b. DFF inspector: pick a .dff, open the inspector activity
+    if (showDffInspectPicker) {
+        FilePickerDialog(
+            title = "Pilih Berkas Model .dff",
+            mode = PickerMode.PICK_FILE,
+            onDismissRequest = { showDffInspectPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showDffInspectPicker = false
+                val intent = Intent(context, DffInspectorActivity::class.java).apply {
+                    putExtra(DffInspectorActivity.EXTRA_FILE_PATH, path)
+                    putExtra(DffInspectorActivity.EXTRA_IS_SHIZUKU, isShizuku)
+                }
+                context.startActivity(intent)
+            }
+        )
+    }
+
+    // 3b3. Texdb cache browser/editor: pick the cache FOLDER itself
+    // (user feedback 2026-10-23: folder, not the manifest file).
+    if (showTexdbPicker) {
+        FilePickerDialog(
+            title = "Masuk ke Folder Cache (mis. texdb/txd), lalu Pilih Folder Ini",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { showTexdbPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showTexdbPicker = false
+                val openBrowser: (String, String?) -> Unit = { cacheDir, gameDir ->
+                    val intent = Intent(context, TexdbBrowserActivity::class.java).apply {
+                        putExtra(TexdbBrowserActivity.EXTRA_CACHE_DIR, cacheDir)
+                        if (gameDir != null) {
+                            putExtra(TexdbBrowserActivity.EXTRA_GAME_DIR, gameDir)
+                        }
+                    }
+                    context.startActivity(intent)
+                }
+                if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
+                    // Stage the whole cache folder locally (browser reads via java.io.File).
+                    // The original folder travels as EXTRA_GAME_DIR so edits made to the
+                    // staged copy can be applied back from the browser's menu.
+                    coroutineScope.launch {
+                        Toast.makeText(context, "Menyalin folder cache via Shizuku…", Toast.LENGTH_SHORT).show()
+                        val srcDir = path.trimEnd('/')
+                        val destDir = File(context.cacheDir, "texdb_stage/" + File(srcDir).name)
+                        destDir.deleteRecursively()
+                        destDir.mkdirs()
+                        val (code, _) = ShizukuManager.exec("cp -r \"$srcDir/.\" \"${destDir.absolutePath}/\"")
+                        if (code == 0) {
+                            openBrowser(destDir.absolutePath, srcDir)
+                        } else {
+                            Toast.makeText(context, "Gagal menyalin cache via Shizuku", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    openBrowser(path.trimEnd('/'), null)
+                }
+            }
+        )
+    }
+
+    // 3c. Multi-TXD Export: pick TXD files, options dialog, destination folder
+    if (showMultiTxdPicker) {
+        FilePickerDialog(
+            title = "Pilih Berkas TXD untuk Diekspor",
+            mode = PickerMode.PICK_MULTIPLE_TXD,
+            onDismissRequest = { showMultiTxdPicker = false },
+            onMultipleFilesSelected = { filePaths, isShizuku ->
+                showMultiTxdPicker = false
+                pendingMultiTxdFiles = filePaths.map { it to isShizuku }
+            }
+        )
+    }
+
+    pendingMultiTxdFiles?.let { files ->
+        FloatingSheet(onDismissRequest = { pendingMultiTxdFiles = null }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Outlined.FileCopy,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                SheetTitle("Ekspor dari ${files.size} TXD")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Semua tekstur dari ${files.size} berkas TXD akan diekspor sebagai PNG.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = multiTxdSubfolders,
+                    onCheckedChange = { multiTxdSubfolders = it }
+                )
+                Text(
+                    text = "Subfolder untuk setiap TXD",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = { pendingMultiTxdFiles = null }) {
+                    Text("Batal")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = { showMultiTxdDestPicker = true },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("Pilih Folder Tujuan", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (showMultiTxdDestPicker) {
+        val files = pendingMultiTxdFiles
+        FilePickerDialog(
+            title = "Pilih Folder Tujuan Ekspor Multi-TXD",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { showMultiTxdDestPicker = false },
+            onFileSelected = { folderPath, _ ->
+                showMultiTxdDestPicker = false
+                pendingMultiTxdFiles = null
+                if (files != null) {
+                    viewModel.exportMultipleTxds(context, files, File(folderPath), multiTxdSubfolders)
                 }
             }
         )
@@ -920,91 +1215,34 @@ fun MainScreen(
         )
     }
 
-    // 7. Busy Process Dialog (Back Navigation Rule 3)
+    // 7. Busy Process Sheet (Back Navigation Rule 3)
     if (showBusyProcessDialog) {
-        AlertDialog(
+        ConfirmSheet(
+            title = "Proses Sedang Berjalan",
+            message = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
+            confirmLabel = "Lanjut di Latar Belakang",
+            dismissLabel = "Tetap di Sini",
             onDismissRequest = { showBusyProcessDialog = false },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = {
-                Text(
-                    text = "Proses Sedang Berjalan",
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Text(
-                    text = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showBusyProcessDialog = false
-                        activeDockTab = "home"
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text("Lanjut di Latar Belakang", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = { showBusyProcessDialog = false },
-                    shape = CircleShape,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Text("Tetap di Sini", fontWeight = FontWeight.SemiBold)
-                }
+            onConfirm = {
+                showBusyProcessDialog = false
+                activeDockTab = "home"
             }
         )
     }
 
-    // 8. Unsaved Close Prompt Dialog
+    // 8. Unsaved Close Prompt Sheet
     if (showUnsavedClosePrompt) {
-        AlertDialog(
+        ConfirmSheet(
+            title = "Tutup Tanpa Menyimpan?",
+            message = "Arsip ini memiliki perubahan yang belum direbuild/disimpan ke file. Menutup sekarang akan membatalkan perubahan yang belum tersimpan.",
+            confirmLabel = "Tutup Saja",
+            dismissLabel = "Batal",
+            danger = true,
             onDismissRequest = { showUnsavedClosePrompt = false },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("Tutup Tanpa Menyimpan?", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "Arsip ini memiliki perubahan yang belum direbuild/disimpan ke file. Menutup sekarang akan membatalkan perubahan yang belum tersimpan.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showUnsavedClosePrompt = false
-                        viewModel.closeArchive()
-                        activeDockTab = "home"
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                ) {
-                    Text("Tutup Saja", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = { showUnsavedClosePrompt = false },
-                    shape = CircleShape,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Text("Batal")
-                }
+            onConfirm = {
+                showUnsavedClosePrompt = false
+                viewModel.closeArchive()
+                activeDockTab = "home"
             }
         )
     }
@@ -1026,28 +1264,6 @@ fun MainScreen(
                     isShizuku = isShizuku,
                     onSingleWindowAction = {
                         viewModel.openArchiveFromPath(context, path, isShizuku)
-                    }
-                )
-            }
-        )
-    }
-
-    // Open TXD Picker
-    if (showOpenTxdPicker) {
-        FilePickerDialog(
-            title = "Buka Berkas Tekstur (TXD)",
-            mode = PickerMode.OPEN_TXD,
-            onDismissRequest = { showOpenTxdPicker = false },
-            onFileSelected = { path, isShizuku ->
-                showOpenTxdPicker = false
-                WindowLauncher.open(
-                    context = context,
-                    filePath = path,
-                    fileType = LauncherFileType.TXD,
-                    isShizuku = isShizuku,
-                    onSingleWindowAction = {
-                        viewModel.openStandaloneTxd(context, path, isShizuku)
-                        activeDockTab = "txd"
                     }
                 )
             }
@@ -1146,124 +1362,47 @@ fun MainScreen(
         )
     }
 
-    // Rename Dialog (28dp)
+    // Rename Sheet
     entryToRename?.let { entry ->
-        var newNameText by remember { mutableStateOf(entry.cleanName) }
-        AlertDialog(
+        InputSheet(
+            title = "Ubah Nama Entri",
+            label = "Nama Berkas (Maks 24 karakter)",
+            initial = entry.cleanName,
             onDismissRequest = { entryToRename = null },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("Ubah Nama Entri", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
-            text = {
-                OutlinedTextField(
-                    value = newNameText,
-                    onValueChange = { newNameText = it },
-                    label = { Text("Nama Berkas (Maks 24 karakter)") },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                    ),
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (newNameText.isNotBlank()) {
-                            viewModel.renameEntry(entry, newNameText.trim())
-                            entryToRename = null
-                        }
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text("Simpan", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { entryToRename = null }) {
-                    Text("Batal")
-                }
+            onConfirm = { newName ->
+                viewModel.renameEntry(entry, newName)
+                entryToRename = null
             }
         )
     }
 
-    // Rebuild Confirm Dialog (28dp)
+    // Rebuild Confirm Sheet
     if (showRebuildDialog) {
-        AlertDialog(
+        ConfirmSheet(
+            title = "Rebuild Arsip IMG",
+            message = "Rebuild akan menyusun ulang seluruh entri secara berurutan dan membersihkan ruang sektor kosong yang terfragmentasi.\n\n" +
+                (if (uiState.isShizukuBacked) "Perubahan akan otomatis disimpan kembali ke folder game via Shizuku.\n\n" else "") +
+                "Pastikan arsip memiliki cadangan sebelum memulai rebuild.",
+            confirmLabel = "Rebuild Sekarang",
             onDismissRequest = { showRebuildDialog = false },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("Rebuild Arsip IMG", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "Rebuild akan menyusun ulang seluruh entri secara berurutan dan membersihkan ruang sektor kosong yang terfragmentasi.\n\n" +
-                            (if (uiState.isShizukuBacked) "Perubahan akan otomatis disimpan kembali ke folder game via Shizuku.\n\n" else "") +
-                            "Pastikan arsip memiliki cadangan sebelum memulai rebuild.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showRebuildDialog = false
-                        viewModel.rebuildArchive()
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text("Rebuild Sekarang", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRebuildDialog = false }) {
-                    Text("Batal")
-                }
+            onConfirm = {
+                showRebuildDialog = false
+                viewModel.rebuildArchive()
             }
         )
     }
 
-    // Delete Selected Confirm Dialog (28dp)
+    // Delete Selected Confirm Sheet
     if (showDeleteSelectedDialog) {
-        AlertDialog(
+        ConfirmSheet(
+            title = "Hapus Entri Terpilih",
+            message = "Apakah Anda yakin ingin menghapus ${uiState.selectedEntries.size} entri dari arsip ini?",
+            confirmLabel = "Hapus (${uiState.selectedEntries.size})",
+            danger = true,
             onDismissRequest = { showDeleteSelectedDialog = false },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("Hapus Entri Terpilih", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "Apakah Anda yakin ingin menghapus ${uiState.selectedEntries.size} entri dari arsip ini?",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showDeleteSelectedDialog = false
-                        viewModel.deleteSelected()
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                ) {
-                    Text("Hapus (${uiState.selectedEntries.size})", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteSelectedDialog = false }) {
-                    Text("Batal")
-                }
+            onConfirm = {
+                showDeleteSelectedDialog = false
+                viewModel.deleteSelected()
             }
         )
     }
@@ -1400,7 +1539,7 @@ private fun HomeScreen(
                         ) {
                             Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Buka IMG", fontWeight = FontWeight.SemiBold)
+                            Text("Open IMG", fontWeight = FontWeight.SemiBold)
                         }
                         OutlinedButton(
                             onClick = onOpenTxd,
@@ -1415,7 +1554,7 @@ private fun HomeScreen(
                         ) {
                             Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Buka TXD", fontWeight = FontWeight.SemiBold)
+                            Text("Texdb", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

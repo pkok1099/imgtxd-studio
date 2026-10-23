@@ -93,7 +93,7 @@ fun AutoReplaceBottomSheet(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         AutoReplaceModeItem(
                             icon = Icons.Outlined.FolderOpen,
-                            title = "Pindai Folder (Scan Otomatis)",
+                            title = "Scan Folder (Auto)",
                             subtitle = "Periksa seluruh gambar di dalam direktori folder mod",
                             onClick = {
                                 onDismissRequest()
@@ -103,7 +103,7 @@ fun AutoReplaceBottomSheet(
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         AutoReplaceModeItem(
                             icon = Icons.Outlined.PhotoLibrary,
-                            title = "Pilih Beberapa Berkas Gambar",
+                            title = "Select Image Files",
                             subtitle = "Pilih file gambar mod secara spesifik untuk dicocokkan",
                             onClick = {
                                 onDismissRequest()

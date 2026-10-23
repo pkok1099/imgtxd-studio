@@ -14,6 +14,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.process.DefaultProcessRepository
 import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessStatus
+import com.onlasdan.studio.ui.components.ConfirmSheet
+import com.onlasdan.studio.ui.components.SheetTitle
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.util.ActiveSessionManager
 import com.onlasdan.studio.util.AppIntegrity
@@ -40,6 +47,7 @@ import com.onlasdan.studio.util.ShizukuManager
 import com.onlasdan.studio.util.WindowLauncher
 import rikka.shizuku.Shizuku
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 class TxdEditorActivity : ComponentActivity() {
 
     private val viewModel: TxdEditorViewModel by viewModels()
@@ -153,11 +161,14 @@ class TxdEditorActivity : ComponentActivity() {
                             onExportSelected = { entries, destDir ->
                                 viewModel.exportSelectedTextures(entries, destDir)
                             },
-                            onReplaceTexture = { entry, imagePath, isShizuku ->
-                                viewModel.replaceTexture(this@TxdEditorActivity, entry, imagePath, isShizuku)
+                            onReplaceTexture = { entry, imagePath, isShizuku, options ->
+                                viewModel.replaceTexture(this@TxdEditorActivity, entry, imagePath, isShizuku, options)
                             },
-                            onAutoReplace = { matches, isShizuku ->
-                                viewModel.autoReplaceTextures(this@TxdEditorActivity, matches, isShizuku)
+                            onAutoReplace = { matches, isShizuku, options ->
+                                viewModel.autoReplaceTextures(this@TxdEditorActivity, matches, isShizuku, options)
+                            },
+                            onAddTextures = { images, policy, options ->
+                                viewModel.addTextures(this@TxdEditorActivity, images, policy, options)
                             },
                             onClearMessages = {
                                 viewModel.clearMessages()
@@ -172,120 +183,85 @@ class TxdEditorActivity : ComponentActivity() {
                             }
                         )
 
-                        // Busy Process Dialog
+                        // Busy Process Sheet
                         if (showBusyProcessDialog) {
-                            AlertDialog(
+                            ConfirmSheet(
+                                title = "Proses Sedang Berjalan",
+                                message = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
+                                confirmLabel = "Lanjut di Latar Belakang",
+                                dismissLabel = "Tetap di Sini",
                                 onDismissRequest = { showBusyProcessDialog = false },
-                                shape = RoundedCornerShape(28.dp),
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                title = {
-                                    Text(
-                                        text = "Proses Sedang Berjalan",
-                                        fontFamily = FontFamily.Serif,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                text = {
-                                    Text(
-                                        text = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            showBusyProcessDialog = false
-                                            val intent = Intent(this@TxdEditorActivity, MainActivity::class.java).apply {
-                                                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
-                                                putExtra(MainActivity.EXTRA_NAVIGATE_TAB, "home")
-                                            }
-                                            startActivity(intent)
-                                        },
-                                        shape = CircleShape,
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                    ) {
-                                        Text("Lanjut di Latar Belakang", fontWeight = FontWeight.SemiBold)
+                                onConfirm = {
+                                    showBusyProcessDialog = false
+                                    val intent = Intent(this@TxdEditorActivity, MainActivity::class.java).apply {
+                                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                                        putExtra(MainActivity.EXTRA_NAVIGATE_TAB, "home")
                                     }
-                                },
-                                dismissButton = {
-                                    OutlinedButton(
-                                        onClick = { showBusyProcessDialog = false },
-                                        shape = CircleShape,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                                    ) {
-                                        Text("Tetap di Sini", fontWeight = FontWeight.SemiBold)
-                                    }
+                                    startActivity(intent)
                                 }
                             )
                         }
 
-                        // Unsaved Changes Prompt Dialog on New File Request
+                        // Unsaved Changes Prompt Sheet on New File Request
                         if (showUnsavedChangesPrompt) {
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showUnsavedChangesPrompt = false
-                                    pendingIntentToLoad = null
-                                },
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                title = {
-                                    Text(
-                                        text = "Perubahan Belum Disimpan",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                text = {
-                                    Text(
-                                        text = "File TXD saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan perubahan sebelum membuka file baru?",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            showUnsavedChangesPrompt = false
-                                            val next = pendingIntentToLoad
-                                            pendingIntentToLoad = null
-                                            if (next != null) {
-                                                executeLoadIntent(next)
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        )
-                                    ) {
-                                        Text("Simpan & Buka")
-                                    }
-                                },
-                                dismissButton = {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        TextButton(onClick = {
-                                            showUnsavedChangesPrompt = false
-                                            pendingIntentToLoad = null
-                                        }) {
-                                            Text("Batal")
-                                        }
-                                        OutlinedButton(
-                                            onClick = {
-                                                showUnsavedChangesPrompt = false
+                            FloatingSheet(onDismissRequest = {
+                                showUnsavedChangesPrompt = false
+                                pendingIntentToLoad = null
+                            }) {
+                                SheetTitle("Perubahan Belum Disimpan")
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "File TXD saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan perubahan sebelum membuka file baru?",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Button(
+                                    onClick = {
+                                        showUnsavedChangesPrompt = false
                                                 val next = pendingIntentToLoad
                                                 pendingIntentToLoad = null
                                                 if (next != null) {
                                                     executeLoadIntent(next)
                                                 }
-                                            },
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                                        ) {
-                                            Text("Buang")
-                                        }
+                                    },
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Simpan & Buka", fontWeight = FontWeight.SemiBold)
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(onClick = {
+                                        showUnsavedChangesPrompt = false
+                                        pendingIntentToLoad = null
+                                    }) {
+                                        Text("Batal")
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            showUnsavedChangesPrompt = false
+                                                val next = pendingIntentToLoad
+                                                pendingIntentToLoad = null
+                                                if (next != null) {
+                                                    executeLoadIntent(next)
+                                                }
+                                        },
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                    ) {
+                                        Text("Buang")
                                     }
                                 }
-                            )
+                            }
                         }
                     }
                 }

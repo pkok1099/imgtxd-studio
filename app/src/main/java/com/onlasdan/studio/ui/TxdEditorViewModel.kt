@@ -8,9 +8,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.onlasdan.studio.core.ArchiveRepository
-import com.onlasdan.studio.txd.TxdBuilder
 import com.onlasdan.studio.txd.TxdEntry
-import com.onlasdan.studio.txd.TxdParser
+import com.onlasdan.studio.txd.TxdStore
 import com.onlasdan.studio.util.ParentArchiveInfo
 import com.onlasdan.studio.util.ShizukuManager
 import com.onlasdan.studio.util.StorageHelper
@@ -96,21 +95,21 @@ class TxdEditorViewModel(
                 }
 
                 val parser = withContext(Dispatchers.IO) {
-                    TxdParser.parse(txdFile)
+                    TxdStore.load(txdFile)
                 }
 
                 _uiState.update {
                     it.copy(
                         txdName = name,
-                        txdEntries = parser.textures,
+                        txdEntries = parser.entries,
                         activeTxdFile = txdFile,
                         originalPath = effectiveOriginalPath,
                         isShizuku = isShizuku,
                         parentArchiveInfo = parentInfo,
-                        selectedEntry = parser.textures.firstOrNull(),
+                        selectedEntry = parser.entries.firstOrNull(),
                         isLoading = false,
                         hasUnsavedChanges = false,
-                        statusMessage = "Berhasil memuat ${parser.textures.size} tekstur"
+                        statusMessage = "Berhasil memuat ${parser.entries.size} tekstur"
                     )
                 }
             } catch (e: Exception) {
@@ -224,9 +223,14 @@ class TxdEditorViewModel(
         }
     }
 
-    fun replaceTexture(context: Context, targetEntry: TxdEntry, imagePath: String, isImageShizuku: Boolean) {
+    fun replaceTexture(
+        context: Context,
+        targetEntry: TxdEntry,
+        imagePath: String,
+        isImageShizuku: Boolean,
+        options: com.onlasdan.studio.txd.TextureImportOptions = com.onlasdan.studio.txd.TextureImportOptions()
+    ) {
         val txdFile = _uiState.value.activeTxdFile ?: return
-        val currentEntries = _uiState.value.txdEntries
         val parentInfo = _uiState.value.parentArchiveInfo
         val originalPath = _uiState.value.originalPath
         val isShizuku = _uiState.value.isShizuku
@@ -250,8 +254,14 @@ class TxdEditorViewModel(
                         imageFile.delete()
                     }
 
-                    TxdBuilder.replaceTexture(targetEntry, newBitmap)
-                    TxdBuilder.buildToFile(currentEntries, txdFile)
+                    val newPixels = IntArray(newBitmap.width * newBitmap.height)
+                    newBitmap.getPixels(newPixels, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                    TxdStore.replaceTextures(
+                        txdFile,
+                        listOf(targetEntry.sourceIndex),
+                        listOf(Triple(newPixels, newBitmap.width, newBitmap.height)),
+                        options = options
+                    )
 
                     // If opened from parent IMG archive, update parent archive safely with Mutex
                     if (parentInfo != null) {
@@ -266,11 +276,12 @@ class TxdEditorViewModel(
                     }
                 }
 
+                val reloaded = withContext(Dispatchers.IO) { TxdStore.load(txdFile).entries }
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        txdEntries = currentEntries.toList(),
-                        selectedEntry = targetEntry,
+                        txdEntries = reloaded,
+                        selectedEntry = reloaded.getOrNull(targetEntry.sourceIndex) ?: targetEntry,
                         statusMessage = "Tekstur ${targetEntry.name} berhasil diganti!"
                     )
                 }
@@ -285,9 +296,13 @@ class TxdEditorViewModel(
         }
     }
 
-    fun autoReplaceTextures(context: Context, matches: List<Pair<TxdEntry, String>>, isImageShizuku: Boolean) {
+    fun autoReplaceTextures(
+        context: Context,
+        matches: List<Pair<TxdEntry, String>>,
+        isImageShizuku: Boolean,
+        options: com.onlasdan.studio.txd.TextureImportOptions = com.onlasdan.studio.txd.TextureImportOptions()
+    ) {
         val txdFile = _uiState.value.activeTxdFile ?: return
-        val currentEntries = _uiState.value.txdEntries
         val parentInfo = _uiState.value.parentArchiveInfo
         val originalPath = _uiState.value.originalPath
         val isShizuku = _uiState.value.isShizuku
@@ -297,6 +312,8 @@ class TxdEditorViewModel(
             try {
                 var count = 0
                 withContext(Dispatchers.IO) {
+                    val batchIndices = mutableListOf<Int>()
+                    val batchImages = mutableListOf<Triple<IntArray, Int, Int>>()
                     for ((entry, path) in matches) {
                         val imageFile = if (isImageShizuku || ShizukuManager.isRestrictedPath(path)) {
                             val tmp = File(context.cacheDir, "autoreplace_tmp_" + File(path).name)
@@ -312,13 +329,16 @@ class TxdEditorViewModel(
                         }
 
                         if (bmp != null) {
-                            TxdBuilder.replaceTexture(entry, bmp)
+                            val px = IntArray(bmp.width * bmp.height)
+                            bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+                            batchIndices.add(entry.sourceIndex)
+                            batchImages.add(Triple(px, bmp.width, bmp.height))
                             count++
                         }
                     }
 
                     if (count > 0) {
-                        TxdBuilder.buildToFile(currentEntries, txdFile)
+                        TxdStore.replaceTextures(txdFile, batchIndices, batchImages, options = options)
 
                         if (parentInfo != null) {
                             ArchiveRepository.updateEntryInArchive(
@@ -333,10 +353,11 @@ class TxdEditorViewModel(
                     }
                 }
 
+                val reloaded = withContext(Dispatchers.IO) { TxdStore.load(txdFile).entries }
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        txdEntries = currentEntries.toList(),
+                        txdEntries = reloaded,
                         statusMessage = "Berhasil mengganti $count tekstur secara otomatis!"
                     )
                 }
@@ -345,6 +366,89 @@ class TxdEditorViewModel(
                     it.copy(
                         isSaving = false,
                         errorMessage = "Gagal auto-replace: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Import Wizard "add" path: adds new textures from image files into this TXD.
+     * Name conflicts follow [policy] (TXD Tool: Just add = suffix name, Overwrite = replace existing).
+     */
+    fun addTextures(
+        context: Context,
+        images: List<Pair<String, Boolean>>,
+        policy: com.onlasdan.studio.txd.TextureNames.ConflictPolicy,
+        options: com.onlasdan.studio.txd.TextureImportOptions = com.onlasdan.studio.txd.TextureImportOptions()
+    ) {
+        val txdFile = _uiState.value.activeTxdFile ?: return
+        val parentInfo = _uiState.value.parentArchiveInfo
+        val originalPath = _uiState.value.originalPath
+        val isShizuku = _uiState.value.isShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Mengimpor ${images.size} tekstur baru...") }
+            try {
+                var added = 0
+                var overwritten = 0
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    val names = mutableListOf<String>()
+                    val batch = mutableListOf<Triple<IntArray, Int, Int>>()
+                    for ((imagePath, isImageShizuku) in images) {
+                        val imageFile = if (isImageShizuku || ShizukuManager.isRestrictedPath(imagePath)) {
+                            val tmp = File(context.cacheDir, "addtex_tmp_" + File(imagePath).name)
+                            ShizukuManager.copyToLocal(imagePath, tmp)
+                            tmp
+                        } else {
+                            File(imagePath)
+                        }
+                        val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
+                        if (imageFile != File(imagePath)) {
+                            imageFile.delete()
+                        }
+                        if (bitmap == null) continue
+
+                        val pixels = IntArray(bitmap.width * bitmap.height)
+                        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                        names.add(File(imagePath).nameWithoutExtension)
+                        batch.add(Triple(pixels, bitmap.width, bitmap.height))
+                    }
+
+                    if (batch.isNotEmpty()) {
+                        val result = TxdStore.addTextures(txdFile, names, batch, policy, options)
+                        added = result.added
+                        overwritten = result.overwritten
+                    }
+
+                    if (added + overwritten > 0) {
+                        if (parentInfo != null) {
+                            ArchiveRepository.updateEntryInArchive(
+                                archiveFile = File(parentInfo.archivePath),
+                                entryName = parentInfo.entryName,
+                                newFile = txdFile,
+                                shizukuDestPath = if (parentInfo.isShizuku) parentInfo.originalRestrictedPath else null
+                            )
+                        } else if (isShizuku && originalPath != null) {
+                            ShizukuManager.copyFromLocal(txdFile, originalPath)
+                        }
+                    }
+                    TxdStore.load(txdFile).entries
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        txdEntries = updatedEntries,
+                        hasUnsavedChanges = true,
+                        statusMessage = "Impor selesai: $added tekstur baru ditambahkan, $overwritten ditimpa"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "Gagal mengimpor tekstur: ${e.localizedMessage}"
                     )
                 }
             }

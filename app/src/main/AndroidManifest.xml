@@ -2,13 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -56,6 +57,30 @@
 
         </activity>
 
+        <!-- Texdb Cache Browser (Fase 2, read-only) -->
+        <activity
+            android:name="com.onlasdan.studio.ui.TexdbBrowserActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"
+            android:label="Cache Texdb - ImgTxd Studio" />
+
+        <!-- Data Lines Helper (tempel baris handling/ide/carcols) -->
+        <activity
+            android:name="com.onlasdan.studio.ui.DataLinesActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"
+            android:label="Tempel Baris Data - ImgTxd Studio" />
+
+        <!-- DFF Inspector (report + rename texture di dalam DFF) -->
+        <activity
+            android:name="com.onlasdan.studio.ui.DffInspectorActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"
+            android:label="Inspeksi DFF - ImgTxd Studio" />
+
         <!-- TXD Texture Editor Activity -->
         <activity
             android:name="com.onlasdan.studio.ui.TxdEditorActivity"
@@ -86,8 +111,12 @@
         <service
             android:name="com.onlasdan.studio.worker.WorkerService"
             android:process=":worker"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Long-running local file processing (archive rebuild, texture conversion) that the user starts explicitly and monitors in-app; not covered by any other FGS type." />
+        </service>
 
         <!-- Watchdog Guardian Receiver for Resilience & Auto-Resume -->
         <receiver

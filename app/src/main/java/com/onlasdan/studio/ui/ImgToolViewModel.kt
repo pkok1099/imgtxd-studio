@@ -11,9 +11,10 @@ import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.core.ImgVersion
 import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessType
-import com.onlasdan.studio.txd.TxdBuilder
+import com.onlasdan.studio.txd.TextureImportOptions
+import com.onlasdan.studio.txd.TextureNames
 import com.onlasdan.studio.txd.TxdEntry
-import com.onlasdan.studio.txd.TxdParser
+import com.onlasdan.studio.txd.TxdStore
 import com.onlasdan.studio.util.ShizukuManager
 import com.onlasdan.studio.util.StorageHelper
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import com.onlasdan.studio.core.ArchiveRepository
+import com.onlasdan.studio.loader.LoaderClient
 import com.onlasdan.studio.util.AppSettings
 import com.onlasdan.studio.util.LauncherFileType
 import com.onlasdan.studio.util.ParentArchiveInfo
@@ -61,7 +63,14 @@ data class ImgToolUiState(
     val isTxdShizuku: Boolean = false,
     val selectedTxdEntry: TxdEntry? = null,
     val isTxdLoading: Boolean = false,
-    val hasTxdUnsavedChanges: Boolean = false
+    val hasTxdUnsavedChanges: Boolean = false,
+
+    // Modloader (in-game plugin IPC) states
+    val loaderConnected: Boolean? = null,
+    val loaderBusy: Boolean = false,
+    val loaderSelectedEntry: ImgEntry? = null,
+    val loaderModelId: String = "",
+    val loaderFeedback: String? = null
 ) {
     val hasMorePages: Boolean
         get() = displayedEntries.size < filteredEntries.size
@@ -727,21 +736,21 @@ class ImgToolViewModel : ViewModel() {
                 }
 
                 val parser = withContext(Dispatchers.IO) {
-                    TxdParser.parse(tempTxdFile)
+                    TxdStore.load(tempTxdFile)
                 }
 
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isTxdViewerOpen = true,
-                        txdEntries = parser.textures,
+                        txdEntries = parser.entries,
                         activeTxdName = imgEntry.cleanName,
                         activeTxdSourceEntry = imgEntry,
                         activeTxdTempFile = tempTxdFile,
                         activeTxdOriginalPath = null,
                         isTxdShizuku = false,
-                        selectedTxdEntry = parser.textures.firstOrNull(),
-                        statusMessage = "Berhasil memuat ${parser.textures.size} tekstur dari ${imgEntry.cleanName}"
+                        selectedTxdEntry = parser.entries.firstOrNull(),
+                        statusMessage = "Berhasil memuat ${parser.entries.size} tekstur dari ${imgEntry.cleanName}"
                     )
                 }
             } catch (e: Exception) {
@@ -782,21 +791,21 @@ class ImgToolViewModel : ViewModel() {
                 }
 
                 val parser = withContext(Dispatchers.IO) {
-                    TxdParser.parse(txdFile)
+                    TxdStore.load(txdFile)
                 }
 
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isTxdViewerOpen = true,
-                        txdEntries = parser.textures,
+                        txdEntries = parser.entries,
                         activeTxdName = File(path).name,
                         activeTxdSourceEntry = null,
                         activeTxdTempFile = txdFile,
                         activeTxdOriginalPath = path,
                         isTxdShizuku = isShizuku,
-                        selectedTxdEntry = parser.textures.firstOrNull(),
-                        statusMessage = "Berhasil memuat ${parser.textures.size} tekstur dari ${File(path).name}"
+                        selectedTxdEntry = parser.entries.firstOrNull(),
+                        statusMessage = "Berhasil memuat ${parser.entries.size} tekstur dari ${File(path).name}"
                     )
                 }
             } catch (e: Exception) {
@@ -947,9 +956,14 @@ class ImgToolViewModel : ViewModel() {
         }
     }
 
-    fun replaceTexture(context: Context, targetEntry: TxdEntry, imagePath: String, isShizuku: Boolean) {
+    fun replaceTexture(
+        context: Context,
+        targetEntry: TxdEntry,
+        imagePath: String,
+        isShizuku: Boolean,
+        options: TextureImportOptions = TextureImportOptions()
+    ) {
         val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
-        val currentEntries = _uiState.value.txdEntries
         val sourceImgEntry = _uiState.value.activeTxdSourceEntry
         val originalPath = _uiState.value.activeTxdOriginalPath
         val isShizukuTxd = _uiState.value.isTxdShizuku
@@ -973,8 +987,14 @@ class ImgToolViewModel : ViewModel() {
                         imageFile.delete()
                     }
 
-                    TxdBuilder.replaceTexture(targetEntry, newBitmap)
-                    TxdBuilder.buildToFile(currentEntries, tempTxdFile)
+                    val newPixels = IntArray(newBitmap.width * newBitmap.height)
+                    newBitmap.getPixels(newPixels, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                    TxdStore.replaceTextures(
+                        tempTxdFile,
+                        listOf(targetEntry.sourceIndex),
+                        listOf(Triple(newPixels, newBitmap.width, newBitmap.height)),
+                        options = options
+                    )
 
                     val archive = _uiState.value.archive
                     if (sourceImgEntry != null && archive != null) {
@@ -991,12 +1011,12 @@ class ImgToolViewModel : ViewModel() {
                     }
                 }
 
-                val updatedList = currentEntries.toList()
+                val updatedList = withContext(Dispatchers.IO) { TxdStore.load(tempTxdFile).entries }
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
                         txdEntries = updatedList,
-                        selectedTxdEntry = targetEntry,
+                        selectedTxdEntry = updatedList.getOrNull(targetEntry.sourceIndex) ?: targetEntry,
                         statusMessage = "Tekstur ${targetEntry.name} berhasil diganti!"
                     )
                 }
@@ -1014,10 +1034,10 @@ class ImgToolViewModel : ViewModel() {
     fun autoReplaceTextures(
         context: Context,
         matches: List<Pair<TxdEntry, String>>,
-        isShizuku: Boolean
+        isShizuku: Boolean,
+        options: TextureImportOptions = TextureImportOptions()
     ) {
         val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
-        val currentEntries = _uiState.value.txdEntries
         val sourceImgEntry = _uiState.value.activeTxdSourceEntry
         val originalPath = _uiState.value.activeTxdOriginalPath
         val isShizukuTxd = _uiState.value.isTxdShizuku
@@ -1033,6 +1053,8 @@ class ImgToolViewModel : ViewModel() {
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
+                        val batchIndices = mutableListOf<Int>()
+                        val batchImages = mutableListOf<Triple<IntArray, Int, Int>>()
                         for ((idx, match) in matches.withIndex()) {
                             val (entry, imagePath) = match
                             val imageFile = if (isShizuku || ShizukuManager.isRestrictedPath(imagePath)) {
@@ -1049,14 +1071,17 @@ class ImgToolViewModel : ViewModel() {
                             }
 
                             if (newBitmap != null) {
-                                TxdBuilder.replaceTexture(entry, newBitmap)
+                                val px = IntArray(newBitmap.width * newBitmap.height)
+                                newBitmap.getPixels(px, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                                batchIndices.add(entry.sourceIndex)
+                                batchImages.add(Triple(px, newBitmap.width, newBitmap.height))
                                 replacedCount++
                             }
                             onProgress(idx + 1, matches.size, "Mengganti ${entry.name} (${idx + 1}/${matches.size})")
                         }
 
                         if (replacedCount > 0) {
-                            TxdBuilder.buildToFile(currentEntries, tempTxdFile)
+                            TxdStore.replaceTextures(tempTxdFile, batchIndices, batchImages, options = options)
 
                             val archive = _uiState.value.archive
                             if (sourceImgEntry != null && archive != null) {
@@ -1079,7 +1104,7 @@ class ImgToolViewModel : ViewModel() {
                 }
             }
 
-            val updatedList = currentEntries.toList()
+            val updatedList = withContext(Dispatchers.IO) { TxdStore.load(tempTxdFile).entries }
             _uiState.update {
                 it.copy(
                     isTxdLoading = false,
@@ -1089,6 +1114,342 @@ class ImgToolViewModel : ViewModel() {
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
+        }
+    }
+
+    /**
+     * Import Wizard "add" path: adds new textures from image files into the active TXD.
+     * Name conflicts follow [policy] (TXD Tool: Just add = suffix name, Overwrite = replace existing).
+     */
+    fun addTextures(
+        context: Context,
+        images: List<Pair<String, Boolean>>,
+        policy: TextureNames.ConflictPolicy,
+        options: TextureImportOptions = TextureImportOptions()
+    ) {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Mengimpor ${images.size} tekstur baru...") }
+            try {
+                var added = 0
+                var overwritten = 0
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    val names = mutableListOf<String>()
+                    val batch = mutableListOf<Triple<IntArray, Int, Int>>()
+                    for ((imagePath, isImageShizuku) in images) {
+                        val imageFile = if (isImageShizuku || ShizukuManager.isRestrictedPath(imagePath)) {
+                            val tmp = File(context.cacheDir, "addtex_tmp_" + File(imagePath).name)
+                            ShizukuManager.copyToLocal(imagePath, tmp)
+                            tmp
+                        } else {
+                            File(imagePath)
+                        }
+                        val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
+                        if (imageFile != File(imagePath)) {
+                            imageFile.delete()
+                        }
+                        if (bitmap == null) continue
+
+                        val pixels = IntArray(bitmap.width * bitmap.height)
+                        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                        names.add(File(imagePath).nameWithoutExtension)
+                        batch.add(Triple(pixels, bitmap.width, bitmap.height))
+                    }
+
+                    if (batch.isNotEmpty()) {
+                        val result = TxdStore.addTextures(tempTxdFile, names, batch, policy, options)
+                        added = result.added
+                        overwritten = result.overwritten
+                    }
+
+                    if (added + overwritten > 0) {
+
+                        val archive = _uiState.value.archive
+                        if (sourceImgEntry != null && archive != null) {
+                            archive.replace(sourceImgEntry, tempTxdFile)
+
+                            val imgOriginalPath = _uiState.value.originalPath
+                            if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                                ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)
+                            }
+                        }
+
+                        if (isShizukuTxd && originalPath != null) {
+                            ShizukuManager.copyFromLocal(tempTxdFile, originalPath)
+                        }
+                    }
+                    TxdStore.load(tempTxdFile).entries
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        txdEntries = updatedEntries,
+                        hasTxdUnsavedChanges = true,
+                        statusMessage = "Impor selesai: $added tekstur baru ditambahkan, $overwritten ditimpa"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Gagal mengimpor tekstur: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * IMG Tool "SA audio fixer" (parity item I13): regenerates the `.idx` companion
+     * file for a modified `.osw` audio archive so the game indexes it correctly.
+     */
+    fun fixAudioIdx(context: Context, oswPath: String, isShizuku: Boolean) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true) }
+            try {
+                val entryCount = withContext(Dispatchers.IO) {
+                    if (isShizuku || ShizukuManager.isRestrictedPath(oswPath)) {
+                        val tmp = File(context.cacheDir, "oswfix_tmp_" + File(oswPath).name)
+                        if (!ShizukuManager.copyToLocal(oswPath, tmp)) {
+                            throw IOException("Gagal menyalin file dari Shizuku: $oswPath")
+                        }
+                        val result = com.onlasdan.studio.audio.OswIdxFixer.fix(tmp)
+                        if (!ShizukuManager.copyFromLocal(result.idxFile, oswPath + ".idx")) {
+                            throw IOException("Gagal menulis .idx ke lokasi asal")
+                        }
+                        tmp.delete()
+                        result.idxFile.delete()
+                        result.entries.size
+                    } else {
+                        com.onlasdan.studio.audio.OswIdxFixer.fix(File(oswPath)).entries.size
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        statusMessage = "IDX fixed successfully! $entryCount entri audio diindeks ulang untuk ${File(oswPath).name}"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Gagal memperbaiki .idx: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * TXD Tool "Export from Multiple TXDs": exports every texture of several TXD files
+     * as PNG into [destinationDir], optionally in a subfolder named after each TXD.
+     * A file that fails to parse is skipped and counted, the rest still export.
+     */
+    fun exportMultipleTxds(
+        context: Context,
+        txdFiles: List<Pair<String, Boolean>>,
+        destinationDir: File,
+        createSubfolders: Boolean
+    ) {
+        if (txdFiles.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true) }
+            var exportedTextures = 0
+            var failedFiles = 0
+            val res = ProcessRepositoryLocator.get().executeProcess(
+                type = ProcessType.EXPORT_ALL,
+                targetFile = destinationDir.absolutePath,
+                title = "Ekspor Multi-TXD (${txdFiles.size} file)"
+            ) { onProgress ->
+                try {
+                    withContext(Dispatchers.IO) {
+                        destinationDir.mkdirs()
+                        for ((idx, pair) in txdFiles.withIndex()) {
+                            val (path, isShizuku) = pair
+                            val baseName = File(path).nameWithoutExtension
+                            try {
+                                val localFile = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
+                                    val tmp = File(context.cacheDir, "multitxd_tmp_" + File(path).name)
+                                    if (!ShizukuManager.copyToLocal(path, tmp)) {
+                                        throw IOException("Gagal menyalin file dari Shizuku: $path")
+                                    }
+                                    tmp
+                                } else {
+                                    File(path)
+                                }
+                                val parser = TxdStore.load(localFile)
+                                val outDir = if (createSubfolders) File(destinationDir, baseName) else destinationDir
+                                outDir.mkdirs()
+                                for (entry in parser.entries) {
+                                    val bmp = entry.bitmap ?: continue
+                                    val targetFile = File(outDir, "${entry.name}.png")
+                                    targetFile.outputStream().use { out ->
+                                        bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                                    }
+                                    exportedTextures++
+                                }
+                                if (localFile.absolutePath != File(path).absolutePath) {
+                                    localFile.delete()
+                                }
+                            } catch (e: Exception) {
+                                failedFiles++
+                            }
+                            onProgress(idx + 1, txdFiles.size, "Mengekspor $baseName.txd (${idx + 1}/${txdFiles.size})")
+                        }
+                    }
+                    if (exportedTextures == 0 && failedFiles > 0) {
+                        Result.failure(IOException("Semua file TXD gagal diekspor"))
+                    } else {
+                        Result.success(Unit)
+                    }
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    isTxdLoading = false,
+                    statusMessage = if (res.isSuccess) {
+                        "Ekspor multi-TXD selesai: $exportedTextures tekstur dari ${txdFiles.size - failedFiles} file" +
+                            if (failedFiles > 0) " ($failedFiles file gagal)" else ""
+                    } else null,
+                    errorMessage = res.exceptionOrNull()?.localizedMessage
+                )
+            }
+        }
+    }
+
+    // --- Modloader (in-game plugin IPC) ---
+
+    fun setLoaderModelId(text: String) {
+        _uiState.update {
+            it.copy(loaderModelId = text.filter { ch -> ch.isDigit() }.take(5))
+        }
+    }
+
+    fun selectLoaderEntry(entry: ImgEntry) {
+        _uiState.update { it.copy(loaderSelectedEntry = entry, loaderFeedback = null) }
+    }
+
+    fun checkLoaderConnection() {
+        if (_uiState.value.loaderBusy) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(loaderBusy = true, loaderFeedback = null) }
+            val ok = LoaderClient.ping()
+            _uiState.update {
+                it.copy(
+                    loaderBusy = false,
+                    loaderConnected = ok,
+                    loaderFeedback = if (ok) {
+                        "Terhubung ke plugin Modloader di dalam game."
+                    } else {
+                        "Game tidak terdeteksi. Pastikan GTA SA sedang berjalan dan plugin Modloader aktif."
+                    }
+                )
+            }
+        }
+    }
+
+    private fun validLoaderModelId(): Int? {
+        val modelId = _uiState.value.loaderModelId.toIntOrNull() ?: return null
+        return modelId.takeIf { it in 0..LoaderClient.MAX_MODEL_ID }
+    }
+
+    fun substituteLoaderEntry(context: Context) {
+        val state = _uiState.value
+        if (state.loaderBusy) return
+        val archive = state.archive ?: return
+        val entry = state.loaderSelectedEntry ?: run {
+            _uiState.update { it.copy(loaderFeedback = "Pilih dulu berkas model (.dff/.txd) dari arsip.") }
+            return
+        }
+        val modelId = validLoaderModelId() ?: run {
+            _uiState.update {
+                it.copy(loaderFeedback = "Isi Model ID yang valid (0–${LoaderClient.MAX_MODEL_ID}).")
+            }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(loaderBusy = true, loaderFeedback = null) }
+            val result = try {
+                val bytes = withContext(Dispatchers.IO) {
+                    val tmp = File.createTempFile("loader_", entry.cleanName, context.cacheDir)
+                    try {
+                        archive.extract(entry, tmp)
+                        tmp.readBytes()
+                    } finally {
+                        tmp.delete()
+                    }
+                }
+                LoaderClient.substitute(modelId, bytes)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            result.fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            loaderBusy = false,
+                            loaderConnected = true,
+                            loaderFeedback = "${entry.cleanName} terkirim sebagai model $modelId. " +
+                                "Tekan Reload Model agar game memuat ulang modelnya.",
+                            statusMessage = "Model $modelId dikirim ke game"
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            loaderBusy = false,
+                            loaderConnected = false,
+                            loaderFeedback = e.localizedMessage,
+                            errorMessage = e.localizedMessage
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun reloadLoaderModel() {
+        if (_uiState.value.loaderBusy) return
+        val modelId = validLoaderModelId() ?: run {
+            _uiState.update {
+                it.copy(loaderFeedback = "Isi Model ID yang valid (0–${LoaderClient.MAX_MODEL_ID}).")
+            }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(loaderBusy = true, loaderFeedback = null) }
+            LoaderClient.reload(modelId).fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            loaderBusy = false,
+                            loaderConnected = true,
+                            loaderFeedback = "Perintah muat ulang model $modelId terkirim ke game.",
+                            statusMessage = "Model $modelId dimuat ulang di game"
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            loaderBusy = false,
+                            loaderConnected = false,
+                            loaderFeedback = e.localizedMessage,
+                            errorMessage = e.localizedMessage
+                        )
+                    }
+                }
+            )
         }
     }
 }

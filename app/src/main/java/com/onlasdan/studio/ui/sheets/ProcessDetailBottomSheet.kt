@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.ProcessStatus
 import com.onlasdan.studio.ui.FloatingSheet
+import com.onlasdan.studio.ui.components.ConfirmSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -128,39 +129,17 @@ fun ProcessDetailBottomSheet(
     }
 
     if (showConfirmCancel) {
-        AlertDialog(
+        ConfirmSheet(
+            title = "Batalkan Proses?",
+            message = "Apakah Anda yakin ingin membatalkan operasi ini? Perubahan yang belum selesai akan di-rollback dengan aman.",
+            confirmLabel = "Ya, Batalkan",
+            dismissLabel = "Lanjutkan Proses",
+            danger = true,
             onDismissRequest = { showConfirmCancel = false },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = {
-                Text("Batalkan Proses?", fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text("Apakah Anda yakin ingin membatalkan operasi ini? Perubahan yang belum selesai akan di-rollback dengan aman.")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showConfirmCancel = false
-                        onCancelProcess(process.id)
-                        onDismissRequest()
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                ) {
-                    Text("Ya, Batalkan", fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showConfirmCancel = false },
-                    shape = CircleShape
-                ) {
-                    Text("Lanjutkan Proses")
-                }
+            onConfirm = {
+                showConfirmCancel = false
+                onCancelProcess(process.id)
+                onDismissRequest()
             }
         )
     }

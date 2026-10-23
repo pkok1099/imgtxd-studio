@@ -1,4 +1,6 @@
 package com.onlasdan.studio.ui
+import com.onlasdan.studio.ui.components.ConfirmSheet
+import com.onlasdan.studio.ui.components.SheetTitle
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -28,6 +30,9 @@ import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.DefaultProcessRepository
 import com.onlasdan.studio.process.ProcessRepositoryLocator
 import com.onlasdan.studio.process.ProcessStatus
+import com.onlasdan.studio.txd.MipFilter
+import com.onlasdan.studio.txd.TextureImportOptions
+import com.onlasdan.studio.txd.TextureNames
 import com.onlasdan.studio.txd.TxdEntry
 import com.onlasdan.studio.ui.framework.ArchiveEntryCard
 import com.onlasdan.studio.ui.framework.ArchiveScreen
@@ -60,8 +65,9 @@ fun TxdEditorScreen(
     onExportSingle: (entry: TxdEntry, destDir: File) -> Unit,
     onExportAll: (destDir: File) -> Unit,
     onExportSelected: ((entries: List<TxdEntry>, destDir: File) -> Unit)? = null,
-    onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean) -> Unit,
-    onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean) -> Unit,
+    onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean, options: TextureImportOptions) -> Unit,
+    onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean, options: TextureImportOptions) -> Unit,
+    onAddTextures: ((images: List<Pair<String, Boolean>>, policy: TextureNames.ConflictPolicy, options: TextureImportOptions) -> Unit)? = null,
     onClearMessages: (() -> Unit)? = null,
     showDock: Boolean = true,
     hasUnsavedChanges: Boolean = false,
@@ -148,6 +154,15 @@ fun TxdEditorScreen(
     var entryToExport by remember { mutableStateOf<TxdEntry?>(null) }
     var showExportAllPicker by remember { mutableStateOf(false) }
     var showExportSelectedPicker by remember { mutableStateOf(false) }
+
+    // Import options shared by replace / auto-replace / add-textures (TXD Tool Import Wizard model)
+    var importOptions by remember { mutableStateOf(TextureImportOptions(generateMipmaps = true)) }
+
+    // Add Textures State (Import Wizard "add" path)
+    var showAddTexturesPicker by remember { mutableStateOf(false) }
+    var pendingAddImages by remember { mutableStateOf<List<Pair<String, Boolean>>?>(null) }
+    var pendingAddConflicts by remember { mutableStateOf<List<String>>(emptyList()) }
+    var addConflictPolicy by remember { mutableStateOf(TextureNames.ConflictPolicy.JUST_ADD) }
 
     // Auto Replace State
     var showAutoReplaceModeChoice by rememberSaveable { mutableStateOf(false) }
@@ -305,25 +320,6 @@ fun TxdEditorScreen(
             activeProcess?.let { selectedProcessForDetail = it }
         },
         gridColumns = if (txdViewMode == TxdViewMode.LARGE) 2 else 1,
-        headerTrailingContent = {
-            IconButton(
-                onClick = { toggleViewMode() },
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = if (txdViewMode == TxdViewMode.LARGE)
-                        Icons.Outlined.ViewCompact
-                    else
-                        Icons.Outlined.PhotoSizeSelectActual,
-                    contentDescription = if (txdViewMode == TxdViewMode.LARGE)
-                        "Ubah ke Mode Gambar Kecil"
-                    else
-                        "Ubah ke Mode Gambar Besar",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        },
         itemContent = { entry ->
             ArchiveEntryCard(
                 title = entry.name,
@@ -382,6 +378,7 @@ fun TxdEditorScreen(
             isFileBusy = ProcessRepositoryLocator.get(context).hasRunningProcess(txdName),
             isLargeImage = (txdViewMode == TxdViewMode.LARGE),
             onToggleTxdViewMode = { toggleViewMode() },
+            onAddTextures = if (onAddTextures != null) ({ showAddTexturesPicker = true }) else null,
             onExportAll = { showExportAllPicker = true },
             onOpenWindowMode = { onOpenWindowMode?.invoke() },
             onOpenSettings = {
@@ -489,25 +486,17 @@ fun TxdEditorScreen(
     // 6b. Single Replace Thumbnail Comparison Dialog
     singleReplaceCandidate?.let { (target, imgPath, isShizuku) ->
         val replacementFile = File(imgPath)
-        AlertDialog(
-            onDismissRequest = { singleReplaceCandidate = null },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            icon = {
+        FloatingSheet(onDismissRequest = { singleReplaceCandidate = null }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Outlined.CompareArrows,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
                 )
-            },
-            title = {
-                Text(
-                    text = "Konfirmasi Ganti Tekstur",
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
+                Spacer(modifier = Modifier.width(8.dp))
+                SheetTitle("Konfirmasi Ganti Tekstur")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -610,13 +599,71 @@ fun TxdEditorScreen(
                             }
                         }
                     }
+
+                    // Opsi impor (berlaku juga untuk Auto Replace & Tambah Tekstur)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Checkbox(
+                                checked = importOptions.generateMipmaps,
+                                onCheckedChange = { checked ->
+                                    importOptions = importOptions.copy(generateMipmaps = checked)
+                                }
+                            )
+                            Text(
+                                text = "Buat mipmaps",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        if (importOptions.generateMipmaps) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                MipFilter.values().forEach { filter ->
+                                    FilterChip(
+                                        selected = importOptions.mipFilter == filter,
+                                        onClick = { importOptions = importOptions.copy(mipFilter = filter) },
+                                        label = { Text(filter.label, style = MaterialTheme.typography.labelSmall) }
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = "Batasi ukuran maksimum",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val sizeChoices = listOf<Int?>(null, 2048, 1024, 512, 256)
+                            sizeChoices.forEach { choice ->
+                                FilterChip(
+                                    selected = importOptions.maxDimension == choice,
+                                    onClick = { importOptions = importOptions.copy(maxDimension = choice) },
+                                    label = {
+                                        Text(
+                                            choice?.toString() ?: "Asli",
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
-            },
-            confirmButton = {
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = { singleReplaceCandidate = null }) {
+                    Text("Batal")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
                 Button(
                     onClick = {
                         singleReplaceCandidate = null
-                        onReplaceTexture(target, imgPath, isShizuku)
+                        onReplaceTexture(target, imgPath, isShizuku, importOptions)
                     },
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
@@ -626,16 +673,8 @@ fun TxdEditorScreen(
                 ) {
                     Text("Ganti Tekstur", fontWeight = FontWeight.Bold)
                 }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { singleReplaceCandidate = null },
-                    shape = CircleShape
-                ) {
-                    Text("Batal")
-                }
             }
-        )
+        }
     }
 
     // 7. Auto Replace Mode Chooser
@@ -681,44 +720,128 @@ fun TxdEditorScreen(
             onConfirm = {
                 val targets = autoReplaceMatches ?: return@AutoReplaceConfirmationSheet
                 autoReplaceMatches = null
-                onAutoReplace(targets, isAutoReplaceShizuku)
+                onAutoReplace(targets, isAutoReplaceShizuku, importOptions)
             }
         )
     }
 
-    // 11. No Matches Warning Dialog
+    // 11. No Matches Warning Sheet
     if (showNoMatchesDialog) {
-        AlertDialog(
-            onDismissRequest = { showNoMatchesDialog = false },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            icon = { Icon(Icons.Outlined.Info, contentDescription = null, tint = SemanticColors.Warning) },
-            title = { Text("Tidak Ada Tekstur Cocok", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    text = noMatchesSourceMessage.ifEmpty {
-                        "Tidak ada file gambar yang cocok dengan nama tekstur di TXD ini. Pastikan nama file gambar sama dengan nama tekstur (contoh: cj_face.png)."
-                    },
-                    style = MaterialTheme.typography.bodyMedium
-                )
+        ConfirmSheet(
+            title = "Tidak Ada Tekstur Cocok",
+            message = noMatchesSourceMessage.ifEmpty {
+                "Tidak ada file gambar yang cocok dengan nama tekstur di TXD ini. Pastikan nama file gambar sama dengan nama tekstur (contoh: cj_face.png)."
             },
-            confirmButton = {
-                Button(
-                    onClick = { showNoMatchesDialog = false },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text("Mengerti", fontWeight = FontWeight.SemiBold)
-                }
-            }
+            confirmLabel = "Mengerti",
+            dismissLabel = null,
+            onDismissRequest = { showNoMatchesDialog = false },
+            onConfirm = { showNoMatchesDialog = false }
         )
     }
 
     // 12. Settings Bottom Sheet
     if (showSettingsDialog) {
         SettingsBottomSheet(onDismissRequest = { showSettingsDialog = false })
+    }
+
+    // 13. File Picker for Add Textures (Import Wizard "add" path)
+    if (showAddTexturesPicker && onAddTextures != null) {
+        FilePickerDialog(
+            title = "Pilih Gambar untuk Ditambahkan sebagai Tekstur",
+            mode = PickerMode.PICK_MULTIPLE_IMAGES,
+            onDismissRequest = { showAddTexturesPicker = false },
+            onMultipleFilesSelected = { filePaths, isShizuku ->
+                showAddTexturesPicker = false
+                val picked = filePaths.map { it to isShizuku }
+                val existingNames = textures.map { it.name.lowercase() }.toHashSet()
+                val conflicts = filePaths.filter {
+                    File(it).nameWithoutExtension.lowercase() in existingNames
+                }
+                if (conflicts.isEmpty()) {
+                    onAddTextures(picked, TextureNames.ConflictPolicy.JUST_ADD, importOptions)
+                } else {
+                    pendingAddImages = picked
+                    pendingAddConflicts = conflicts.map { File(it).nameWithoutExtension }
+                    addConflictPolicy = TextureNames.ConflictPolicy.JUST_ADD
+                }
+            }
+        )
+    }
+
+    // 14. Add Textures Name-Conflict Dialog (TXD Tool: Just add / Overwrite)
+    if (pendingAddImages != null && onAddTextures != null) {
+        FloatingSheet(onDismissRequest = { pendingAddImages = null }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Outlined.AddPhotoAlternate,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                SheetTitle("Nama Tekstur Sudah Ada")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "${pendingAddConflicts.size} nama gambar sama dengan tekstur yang sudah ada " +
+                            "(${pendingAddConflicts.take(4).joinToString(", ")}${if (pendingAddConflicts.size > 4) ", …" else ""}). " +
+                            "Pilih perlakuan untuk nama yang bentrok:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextureNames.ConflictPolicy.values().forEach { policy ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            RadioButton(
+                                selected = addConflictPolicy == policy,
+                                onClick = { addConflictPolicy = policy }
+                            )
+                            Column {
+                                Text(
+                                    text = policy.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = if (policy == TextureNames.ConflictPolicy.JUST_ADD) {
+                                        "Tetap ditambahkan, nama diberi akhiran _1, _2, …"
+                                    } else {
+                                        "Tekstur lama diganti dengan gambar baru"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = { pendingAddImages = null }) {
+                    Text("Batal")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        val images = pendingAddImages ?: return@Button
+                        pendingAddImages = null
+                        onAddTextures(images, addConflictPolicy, importOptions)
+                    },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("Impor", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }

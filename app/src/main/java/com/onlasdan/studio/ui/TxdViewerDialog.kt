@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.onlasdan.studio.txd.TextureImportOptions
 import com.onlasdan.studio.txd.TxdEntry
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import java.io.File
@@ -20,8 +21,8 @@ fun TxdViewerDialog(
     onDismissRequest: () -> Unit,
     onExportSingle: (entry: TxdEntry, destDir: File) -> Unit,
     onExportAll: (destDir: File) -> Unit,
-    onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean) -> Unit,
-    onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean) -> Unit,
+    onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean, options: TextureImportOptions) -> Unit,
+    onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean, options: TextureImportOptions) -> Unit,
     onClearMessages: (() -> Unit)? = null
 ) {
     Dialog(
