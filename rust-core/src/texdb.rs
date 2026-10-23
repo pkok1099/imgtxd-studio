@@ -375,6 +375,26 @@ fn parse_manifest(text: &str) -> Vec<ManifestEntry> {
     entries
 }
 
+/// Affiliate lines carry no dimensions in real manifests; inherit them
+/// from the target texture so UIs can show real sizes.
+fn inherit_affiliate_dims(manifest: &mut [ManifestEntry]) {
+    let dims: std::collections::HashMap<String, (usize, usize)> = manifest
+        .iter()
+        .filter(|e| e.affiliate.is_none())
+        .map(|e| (e.name.to_lowercase(), (e.width, e.height)))
+        .collect();
+    for entry in manifest.iter_mut() {
+        if entry.width == 0 && entry.height == 0 {
+            if let Some(target) = &entry.affiliate {
+                if let Some(&(w, h)) = dims.get(&target.to_lowercase()) {
+                    entry.width = w;
+                    entry.height = h;
+                }
+            }
+        }
+    }
+}
+
 pub struct TexdbCache {
     pub manifest: Vec<ManifestEntry>,
     /// The manifest file verbatim, for structure-preserving rewrites.
@@ -391,23 +411,7 @@ impl TexdbCache {
     pub fn load(dir: &std::path::Path, cache_name: &str) -> std::io::Result<Self> {
         let text = std::fs::read_to_string(dir.join(format!("{cache_name}.txt")))?;
         let mut manifest = parse_manifest(&text);
-        // Affiliate lines carry no dimensions in real manifests; inherit
-        // them from the target texture so UIs can show real sizes.
-        let dims: std::collections::HashMap<String, (usize, usize)> = manifest
-            .iter()
-            .filter(|e| e.affiliate.is_none())
-            .map(|e| (e.name.to_lowercase(), (e.width, e.height)))
-            .collect();
-        for entry in manifest.iter_mut() {
-            if entry.width == 0 && entry.height == 0 {
-                if let Some(target) = &entry.affiliate {
-                    if let Some(&(w, h)) = dims.get(&target.to_lowercase()) {
-                        entry.width = w;
-                        entry.height = h;
-                    }
-                }
-            }
-        }
+        inherit_affiliate_dims(&mut manifest);
         let mut variants: Vec<String> = Vec::new();
         for entry in std::fs::read_dir(dir)? {
             let path = entry?.path();
@@ -460,12 +464,7 @@ impl TexdbCache {
                 continue;
             }
             let start = off as usize;
-            let end = offsets[i + 1..]
-                .iter()
-                .find(|&&o| o > off)
-                .map(|&o| o as usize)
-                .unwrap_or(dat.len());
-            if start + 16 > dat.len() || end > dat.len() || end < start + 16 {
+            if start + 16 > dat.len() {
                 return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "listing out of range"));
             }
             let h = &dat[start..start + 16];
@@ -475,6 +474,16 @@ impl TexdbCache {
             let hm = u16::from_le_bytes(h[6..8].try_into().unwrap());
             let compressed_size = u32::from_le_bytes(h[8..12].try_into().unwrap());
             let rle_indicator = u32::from_le_bytes(h[12..16].try_into().unwrap());
+            // The span comes from the listing's own header (span = csize + 12),
+            // NOT from the next toc offset: in-place writes append changed
+            // listings at the end of the .dat and leave dead spans behind, so
+            // offsets are no longer packed in manifest order. In shipped
+            // (packed) caches both definitions coincide — the game's own
+            // sequential fallback walks exactly this csize chain.
+            let end = start + compressed_size as usize + 12;
+            if end > dat.len() || end < start + 16 {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "listing out of range"));
+            }
             if hash != hash_name(&entry.name) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -701,6 +710,10 @@ pub struct ImportOptions {
     pub generate_mipmaps: bool,
     /// Mip filter: 0 Nearest, 1 Box, 2 Bilinear, 3 Cubic, 4 Gaussian, 5 Lanczos4.
     pub mip_filter: i32,
+    /// TXD Tool "fast overwrite": write the result in a clean, defragmented
+    /// layout (full .dat rebuild) within this same operation — one sync
+    /// total, instead of a separate rebuild_cache pass afterwards.
+    pub defragment: bool,
 }
 
 #[derive(Default, Debug)]
@@ -745,6 +758,244 @@ fn import_manifest_line(
     )
 }
 
+/// Parses a listing header from raw listing bytes placed at `span_start`.
+fn listing_from_bytes(bytes: &[u8], span_start: usize) -> Option<Listing> {
+    if bytes.len() < 16 {
+        return None;
+    }
+    let h = &bytes[..16];
+    let encoding_raw = u16::from_le_bytes(h[2..4].try_into().ok()?);
+    let hm = u16::from_le_bytes(h[6..8].try_into().ok()?);
+    Some(Listing {
+        hash: u16::from_le_bytes(h[0..2].try_into().ok()?),
+        encoding: TexEncoding::from_u16(encoding_raw),
+        encoding_raw,
+        width: u16::from_le_bytes(h[4..6].try_into().ok()?) as usize,
+        height: (hm & 0x7FFF) as usize,
+        full_chain: hm & 0x8000 != 0,
+        compressed_size: u32::from_le_bytes(h[8..12].try_into().ok()?),
+        rle_indicator: u32::from_le_bytes(h[12..16].try_into().ok()?),
+        span_start,
+        span_end: span_start + bytes.len(),
+    })
+}
+
+/// One slot of a post-write manifest, in final manifest order.
+enum FinalSlot {
+    /// Affiliate or data-less entry: toc offset -1.
+    NoData,
+    /// Keep the old cache's entry byte-identical at its existing offset.
+    Unchanged(usize),
+    /// New listing bytes (appended to the .dat, or laid out by a rebuild).
+    New(Vec<u8>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WriteMode {
+    /// Append new listings at the end of the .dat; fall back to a full
+    /// rebuild layout when the appended bytes exceed half the current .dat
+    /// (a rewrite is then cheaper than the dead space it would leave).
+    Auto,
+    /// Always lay the whole .dat out fresh (explicit Rebuild Cache,
+    /// fast-overwrite imports): defragment and reclaim all dead spans.
+    ForceRebuild,
+}
+
+/// Applies a manifest-level write to the ACTIVE variant and returns the
+/// (pre-write, post-write) cache states built in memory — nothing is
+/// re-read from disk afterwards; the incremental sync consumes both.
+///
+/// Append mode touches only: the appended payload bytes at the end of the
+/// .dat, the small .toc, and the manifest. Untouched entries keep their
+/// offsets and bytes; removed/overwritten spans become dead space that an
+/// explicit Rebuild Cache reclaims. Invariants after every call: the .toc
+/// holds one offset per manifest entry (-1 for affiliates) and toc[0]
+/// equals the .dat length.
+fn apply_write(
+    dir: &std::path::Path,
+    cache_name: &str,
+    old: TexdbCache,
+    slots: &[FinalSlot],
+    new_txt: &str,
+    mode: WriteMode,
+) -> Result<(TexdbCache, TexdbCache), String> {
+    let variant = old.variant.clone();
+    let dat_path = dir.join(format!("{cache_name}.{variant}.dat"));
+    let toc_path = dir.join(format!("{cache_name}.{variant}.toc"));
+    let old_dat_len = old.dat.len();
+    let appended_len: usize = slots
+        .iter()
+        .map(|s| match s {
+            FinalSlot::New(b) => b.len(),
+            _ => 0,
+        })
+        .sum();
+    let rebuild = mode == WriteMode::ForceRebuild
+        || (old_dat_len > 0 && appended_len * 2 > old_dat_len);
+
+    let (new_dat, new_listings): (Vec<u8>, Vec<Option<Listing>>) = if rebuild {
+        let refs: Vec<Option<&[u8]>> = slots
+            .iter()
+            .map(|s| match s {
+                FinalSlot::NoData => None,
+                FinalSlot::Unchanged(oi) => old.raw_listing(*oi),
+                FinalSlot::New(b) => Some(&b[..]),
+            })
+            .collect();
+        let (dat, toc) = rebuild_dat_toc(&refs);
+        std::fs::write(&dat_path, &dat).map_err(|e| e.to_string())?;
+        std::fs::write(&toc_path, &toc).map_err(|e| e.to_string())?;
+        let mut listings = Vec::with_capacity(slots.len());
+        let mut cursor = 0usize;
+        for r in &refs {
+            match r {
+                None => listings.push(None),
+                Some(b) => {
+                    listings.push(listing_from_bytes(b, cursor));
+                    cursor += b.len();
+                }
+            }
+        }
+        (dat, listings)
+    } else {
+        let mut offsets: Vec<i64> = Vec::with_capacity(slots.len());
+        let mut appended: Vec<u8> = Vec::new();
+        let mut cursor = old_dat_len;
+        for s in slots {
+            match s {
+                FinalSlot::NoData => offsets.push(-1),
+                FinalSlot::Unchanged(oi) => {
+                    let l = old
+                        .listings
+                        .get(*oi)
+                        .and_then(|l| l.as_ref())
+                        .ok_or("slot Unchanged tanpa listing")?;
+                    offsets.push(l.span_start as i64);
+                }
+                FinalSlot::New(b) => {
+                    offsets.push(cursor as i64);
+                    appended.extend_from_slice(b);
+                    cursor += b.len();
+                }
+            }
+        }
+        let mut new_listings: Vec<Option<Listing>> = Vec::with_capacity(slots.len());
+        for (s, off) in slots.iter().zip(offsets.iter()) {
+            new_listings.push(match s {
+                FinalSlot::NoData => None,
+                FinalSlot::Unchanged(oi) => old.listings.get(*oi).and_then(|l| l.clone()),
+                FinalSlot::New(b) => listing_from_bytes(b, *off as usize),
+            });
+        }
+        if !appended.is_empty() {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&dat_path)
+                .map_err(|e| e.to_string())?;
+            f.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
+            f.write_all(&appended).map_err(|e| e.to_string())?;
+        }
+        let mut toc = Vec::with_capacity(4 + offsets.len() * 4);
+        toc.extend_from_slice(&(cursor as u32).to_le_bytes());
+        for o in &offsets {
+            toc.extend_from_slice(&(*o as i32).to_le_bytes());
+        }
+        std::fs::write(&toc_path, &toc).map_err(|e| e.to_string())?;
+        // One flat clone for the post-write state; the pre-write state
+        // keeps the original buffer (its spans must stay pre-write).
+        let mut dat = old.dat.clone();
+        dat.extend_from_slice(&appended);
+        (dat, new_listings)
+    };
+
+    std::fs::write(dir.join(format!("{cache_name}.txt")), new_txt).map_err(|e| e.to_string())?;
+    let mut manifest = parse_manifest(new_txt);
+    inherit_affiliate_dims(&mut manifest);
+    let new_cache = TexdbCache {
+        manifest,
+        raw_txt: new_txt.to_string(),
+        listings: new_listings,
+        variant: variant.clone(),
+        dat: new_dat,
+    };
+    let old_cache = TexdbCache {
+        manifest: old.manifest,
+        raw_txt: old.raw_txt,
+        listings: old.listings,
+        variant,
+        dat: old.dat,
+    };
+    Ok((old_cache, new_cache))
+}
+
+/// Metadata-only view of one variant family: listing headers read via
+/// seeks (no whole-.dat load). Enough for the incremental sync to keep
+/// unchanged entries at their existing offsets. `None` mirrors
+/// [TexdbCache::load_variant] failing (family not loadable — ignored).
+struct VariantMeta {
+    listings: Vec<Option<Listing>>,
+    dat_len: usize,
+}
+
+fn load_variant_meta(
+    dir: &std::path::Path,
+    cache_name: &str,
+    variant: &str,
+    manifest: &[ManifestEntry],
+) -> Option<VariantMeta> {
+    use std::io::{Read, Seek, SeekFrom};
+    let toc_bytes = std::fs::read(dir.join(format!("{cache_name}.{variant}.toc"))).ok()?;
+    if toc_bytes.len() < 4 || (toc_bytes.len() - 4) / 4 < manifest.len() {
+        return None;
+    }
+    let dat_path = dir.join(format!("{cache_name}.{variant}.dat"));
+    let dat_len = std::fs::metadata(&dat_path).ok()?.len() as usize;
+    if u32::from_le_bytes(toc_bytes[0..4].try_into().ok()?) as usize != dat_len {
+        return None;
+    }
+    let mut f = std::fs::File::open(&dat_path).ok()?;
+    let mut listings = Vec::with_capacity(manifest.len());
+    for (i, entry) in manifest.iter().enumerate() {
+        let off = i32::from_le_bytes(toc_bytes[4 + i * 4..8 + i * 4].try_into().ok()?) as i64;
+        if off < 0 {
+            listings.push(None);
+            continue;
+        }
+        let start = off as usize;
+        if start + 16 > dat_len {
+            return None;
+        }
+        f.seek(SeekFrom::Start(off as u64)).ok()?;
+        let mut h = [0u8; 16];
+        f.read_exact(&mut h).ok()?;
+        let hash = u16::from_le_bytes(h[0..2].try_into().ok()?);
+        if hash != hash_name(&entry.name) {
+            return None;
+        }
+        let encoding_raw = u16::from_le_bytes(h[2..4].try_into().ok()?);
+        let hm = u16::from_le_bytes(h[6..8].try_into().ok()?);
+        let compressed_size = u32::from_le_bytes(h[8..12].try_into().ok()?);
+        let span_end = start + compressed_size as usize + 12;
+        if span_end > dat_len || span_end < start + 16 {
+            return None;
+        }
+        listings.push(Some(Listing {
+            hash,
+            encoding: TexEncoding::from_u16(encoding_raw),
+            encoding_raw,
+            width: u16::from_le_bytes(h[4..6].try_into().ok()?) as usize,
+            height: (hm & 0x7FFF) as usize,
+            full_chain: hm & 0x8000 != 0,
+            compressed_size,
+            rle_indicator: u32::from_le_bytes(h[12..16].try_into().ok()?),
+            span_start: start,
+            span_end,
+        }));
+    }
+    Some(VariantMeta { listings, dat_len })
+}
+
 /// Imports images (name, PNG bytes) into the cache in `dir`, TXD Tool style:
 /// decode, reduce to fit, encode, build listings, rebuild .dat/.toc/.txt in
 /// place (only the validated variant is rewritten). Returns a report line.
@@ -756,9 +1007,10 @@ pub fn import_textures(
 ) -> Result<String, String> {
     let cache = TexdbCache::load(dir, cache_name).map_err(|e| e.to_string())?;
     let mut lines: Vec<String> = cache.manifest.iter().map(|e| e.line.clone()).collect();
-    let mut listings: Vec<Option<Vec<u8>>> = (0..cache.manifest.len())
-        .map(|i| cache.raw_listing(i).map(|b| b.to_vec()))
-        .collect();
+    // Only slots an image actually replaces carry owned bytes — untouched
+    // entries are never copied (the old code cloned every listing in the
+    // cache, ~185 MB of copies on the gta3 cache, before writing anything).
+    let mut changed: Vec<Option<Vec<u8>>> = vec![None; cache.manifest.len()];
     let mut appended_lines: Vec<String> = Vec::new();
     let mut appended_listings: Vec<Option<Vec<u8>>> = Vec::new();
     let mut report = ImportReport::default();
@@ -846,15 +1098,16 @@ pub fn import_textures(
                     // Raster-hash check: never overwrite an entry whose stored
                     // hash does not match its manifest name.
                     if opts.hash_check {
-                        if let Some(existing) = &listings[i] {
-                            let stored = u16::from_le_bytes([existing[0], existing[1]]);
-                            if stored != hash_name(&cache.manifest[i].name) {
+                        if let Some(existing) =
+                            cache.listings.get(i).and_then(|l| l.as_ref())
+                        {
+                            if existing.hash != hash_name(&cache.manifest[i].name) {
                                 report.skipped += 1;
                                 continue;
                             }
                         }
                     }
-                    listings[i] = Some(listing);
+                    changed[i] = Some(listing);
                     lines[i] = line;
                     report.replaced += 1;
                 } else {
@@ -889,12 +1142,27 @@ pub fn import_textures(
         }
     }
 
-    let total_listings: Vec<Option<&[u8]>> = listings
-        .iter()
-        .map(|l| l.as_deref())
-        .chain(appended_listings.iter().map(|l| l.as_deref()))
-        .collect();
-    let (dat, toc) = rebuild_dat_toc(&total_listings);
+    // Final slots in manifest order: replaced entries carry their new
+    // bytes; everything else stays byte-identical at its existing offset.
+    let mut slots: Vec<FinalSlot> = Vec::with_capacity(cache.manifest.len() + appended_listings.len());
+    for (i, slot) in changed.into_iter().enumerate() {
+        slots.push(match slot {
+            Some(bytes) => FinalSlot::New(bytes),
+            None => {
+                if cache.listings.get(i).and_then(|l| l.as_ref()).is_some() {
+                    FinalSlot::Unchanged(i)
+                } else {
+                    FinalSlot::NoData
+                }
+            }
+        });
+    }
+    for listing in appended_listings {
+        slots.push(match listing {
+            Some(bytes) => FinalSlot::New(bytes),
+            None => FinalSlot::NoData,
+        });
+    }
 
     // Rewrite the manifest preserving its original structure: texture lines
     // are substituted by ordinal, additions go last.
@@ -915,12 +1183,13 @@ pub fn import_textures(
     let mut txt = out_lines.join("\n");
     txt.push('\n');
 
-    std::fs::write(dir.join(format!("{cache_name}.txt")), txt).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{cache_name}.{}.dat", cache.variant)), &dat)
-        .map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{cache_name}.{}.toc", cache.variant)), &toc)
-        .map_err(|e| e.to_string())?;
-    let notes = sync_after_write(dir, cache_name, &cache);
+    let mode = if opts.defragment {
+        WriteMode::ForceRebuild
+    } else {
+        WriteMode::Auto
+    };
+    let (old_cache, new_cache) = apply_write(dir, cache_name, cache, &slots, &txt, mode)?;
+    let notes = sync_after_write(dir, cache_name, &old_cache, &new_cache);
     Ok(with_notes(report.to_line(), notes))
 }
 
@@ -928,25 +1197,24 @@ pub fn import_textures(
 /// repair), leaving every texture's bytes untouched.
 pub fn rebuild_cache(dir: &std::path::Path, cache_name: &str) -> Result<String, String> {
     let cache = TexdbCache::load(dir, cache_name).map_err(|e| e.to_string())?;
-    let slots: Vec<Option<&[u8]>> = (0..cache.manifest.len())
+    let entries = cache.manifest.len();
+    let raw_txt = cache.raw_txt.clone();
+    let slots: Vec<FinalSlot> = (0..entries)
         .map(|i| {
             if cache.manifest[i].affiliate.is_some() {
-                None
+                FinalSlot::NoData
+            } else if cache.listings.get(i).and_then(|l| l.as_ref()).is_some() {
+                FinalSlot::Unchanged(i)
             } else {
-                cache.raw_listing(i)
+                FinalSlot::NoData
             }
         })
         .collect();
-    let (dat, toc) = rebuild_dat_toc(&slots);
-    std::fs::write(dir.join(format!("{cache_name}.{}.dat", cache.variant)), &dat)
-        .map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{cache_name}.{}.toc", cache.variant)), &toc)
-        .map_err(|e| e.to_string())?;
-    let notes = sync_after_write(dir, cache_name, &cache);
-    Ok(with_notes(
-        format!("entries={};bytes={}", cache.manifest.len(), dat.len()),
-        notes,
-    ))
+    let (old_cache, new_cache) =
+        apply_write(dir, cache_name, cache, &slots, &raw_txt, WriteMode::ForceRebuild)?;
+    let bytes = new_cache.dat.len();
+    let notes = sync_after_write(dir, cache_name, &old_cache, &new_cache);
+    Ok(with_notes(format!("entries={entries};bytes={bytes}"), notes))
 }
 
 /// Decodes one texture's level-0 pixels without loading the whole .dat:
@@ -993,15 +1261,20 @@ pub fn decode_pixels_at(
             return None;
         }
         let start = off as usize;
-        let end = offsets[index + 1..]
-            .iter()
-            .find(|&&o| o > off)
-            .map(|&o| o as usize)
-            .unwrap_or(dat_len);
         let mut file = std::fs::File::open(&dat_path).ok()?;
         file.seek(SeekFrom::Start(start as u64)).ok()?;
-        let mut span = vec![0u8; end - start];
-        file.read_exact(&mut span).ok()?;
+        // Span from the listing's own header (csize + 12): toc neighbours no
+        // longer bound a listing once in-place writes leave dead spans.
+        let mut header = [0u8; 16];
+        file.read_exact(&mut header).ok()?;
+        let span_len = u32::from_le_bytes(header[8..12].try_into().ok()?) as usize + 12;
+        if span_len < 16 || start + span_len > dat_len {
+            return None;
+        }
+        let mut span = Vec::with_capacity(span_len);
+        span.extend_from_slice(&header);
+        span.resize(span_len, 0);
+        file.read_exact(&mut span[16..]).ok()?;
         let h = &span[..16];
         let listing = Listing {
             hash: u16::from_le_bytes(h[0..2].try_into().ok()?),
@@ -1063,31 +1336,31 @@ pub fn decode_pixels_at(
     None
 }
 
+/// Listing payload for one kept edit slot.
+pub enum EditListing {
+    /// Reuse the entry's current bytes at their current offset — the edit
+    /// engine never copies an untouched listing.
+    Keep,
+    /// Replacement listing bytes.
+    Bytes(Vec<u8>),
+}
+
 /// One edit slot per original manifest entry: `None` deletes the entry,
 /// `Some((line, listing))` keeps/replaces it (listing `None` = affiliate).
 pub struct CacheEdit {
-    pub entries: Vec<Option<(String, Option<Vec<u8>>)>>,
+    pub entries: Vec<Option<(String, Option<EditListing>)>>,
     pub appended: Vec<(String, Option<Vec<u8>>)>,
 }
 
 /// Applies a [CacheEdit]: rewrites the manifest (original structure kept,
-/// texture lines substituted by ordinal, additions appended), .dat and .toc.
+/// texture lines substituted by ordinal, additions appended) and writes
+/// the active variant in place (see [apply_write]).
 pub fn write_cache_edit(
     dir: &std::path::Path,
     cache_name: &str,
-    cache: &TexdbCache,
-    edit: &CacheEdit,
+    cache: TexdbCache,
+    edit: CacheEdit,
 ) -> Result<String, String> {
-    let mut slots: Vec<Option<&[u8]>> = Vec::new();
-    for slot in &edit.entries {
-        if let Some((_, listing)) = slot {
-            slots.push(listing.as_deref());
-        }
-    }
-    for (_, listing) in &edit.appended {
-        slots.push(listing.as_deref());
-    }
-    let (dat, toc) = rebuild_dat_toc(&slots);
     let mut out_lines: Vec<String> = Vec::new();
     let mut ordinal = 0usize;
     for raw_line in cache.raw_txt.lines() {
@@ -1106,13 +1379,31 @@ pub fn write_cache_edit(
     }
     let mut txt = out_lines.join("\n");
     txt.push('\n');
-    std::fs::write(dir.join(format!("{cache_name}.txt")), txt).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{cache_name}.{}.dat", cache.variant)), &dat)
-        .map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{cache_name}.{}.toc", cache.variant)), &toc)
-        .map_err(|e| e.to_string())?;
-    let notes = sync_after_write(dir, cache_name, cache);
-    Ok(notes)
+
+    let mut slots: Vec<FinalSlot> = Vec::with_capacity(edit.entries.len() + edit.appended.len());
+    for (oi, slot) in edit.entries.into_iter().enumerate() {
+        if let Some((_, listing)) = slot {
+            slots.push(match listing {
+                None => FinalSlot::NoData,
+                Some(EditListing::Keep) => FinalSlot::Unchanged(oi),
+                Some(EditListing::Bytes(b)) => {
+                    if cache.raw_listing(oi) == Some(&b[..]) {
+                        FinalSlot::Unchanged(oi)
+                    } else {
+                        FinalSlot::New(b)
+                    }
+                }
+            });
+        }
+    }
+    for (_, listing) in edit.appended {
+        slots.push(match listing {
+            None => FinalSlot::NoData,
+            Some(b) => FinalSlot::New(b),
+        });
+    }
+    let (old_cache, new_cache) = apply_write(dir, cache_name, cache, &slots, &txt, WriteMode::Auto)?;
+    Ok(sync_after_write(dir, cache_name, &old_cache, &new_cache))
 }
 
 fn with_notes(base: String, notes: String) -> String {
@@ -1255,17 +1546,22 @@ fn parse_tmb_records(bytes: &[u8]) -> Option<Vec<(u16, Vec<u8>)>> {
 /// for every variant family it can load: the variant's .toc count equals
 /// the manifest count AND its .tmb thumbnail count + alias count equals the
 /// manifest count. So: every other VALID variant receives the same edit at
-/// listing level (untouched textures keep that variant's raw spans;
-/// new/changed textures are re-encoded into that variant's encoding), and
-/// every .tmb is regenerated with one record per non-affiliate texture
-/// (old records reused byte-for-byte for unchanged textures). Variants or
-/// .tmb files that fail to parse (the shipped broken .360 family) are left
-/// alone, exactly like TXD Tool ignores them. Returns machine-style notes.
-fn sync_after_write(dir: &std::path::Path, cache_name: &str, old: &TexdbCache) -> String {
+/// listing level (untouched textures keep that variant's offsets and bytes;
+/// new/changed textures are re-encoded into that variant's encoding and
+/// APPENDED to its .dat, only its small .toc rewritten), and every .tmb is
+/// regenerated with one record per non-affiliate texture (old records
+/// reused byte-for-byte for unchanged textures; the file is only written
+/// when its content actually changes). Variants or .tmb files that fail to
+/// parse (the shipped broken .360 family) are left alone, exactly like TXD
+/// Tool ignores them. Both cache states are passed in by the caller — the
+/// sync never re-reads the active cache from disk. Returns machine notes.
+fn sync_after_write(
+    dir: &std::path::Path,
+    cache_name: &str,
+    old: &TexdbCache,
+    new: &TexdbCache,
+) -> String {
     use std::collections::{BTreeSet, HashMap};
-    let Ok(new) = TexdbCache::load(dir, cache_name) else {
-        return String::new();
-    };
     let mut notes: Vec<String> = Vec::new();
     let old_index: HashMap<String, usize> = old
         .manifest
@@ -1299,38 +1595,44 @@ fn sync_after_write(dir: &std::path::Path, cache_name: &str, old: &TexdbCache) -
         if *v == new.variant {
             continue;
         }
-        let Ok(vold) =
-            TexdbCache::load_variant(dir, cache_name, v, &old.manifest, &old.raw_txt)
-        else {
+        let Some(meta) = load_variant_meta(dir, cache_name, v, &old.manifest) else {
             continue;
         };
-        let vold_index: HashMap<String, usize> = vold
+        let vold_index: HashMap<String, usize> = old
             .manifest
             .iter()
             .enumerate()
             .map(|(i, e)| (e.name.clone(), i))
             .collect();
-        let mut slots: Vec<Option<Vec<u8>>> = Vec::new();
+        // Plan first (all-or-nothing per variant, like the old full
+        // rewrite): unchanged entries keep their offsets; changed/new
+        // entries are encoded and appended at the variant's .dat end.
+        let mut offsets: Vec<i64> = Vec::with_capacity(new.manifest.len());
+        let mut appends: Vec<u8> = Vec::new();
+        let mut cursor = meta.dat_len;
         let mut enc_map: HashMap<String, TexEncoding> = HashMap::new();
         let mut failed = false;
         for (ni, entry) in new.manifest.iter().enumerate() {
             if entry.affiliate.is_some() {
-                slots.push(None);
+                offsets.push(-1);
                 continue;
             }
             let lname = entry.name.clone();
             if unchanged(ni, &entry.name) {
                 if let Some(&voi) = vold_index.get(&lname) {
-                    slots.push(vold.raw_listing(voi).map(|b| b.to_vec()));
-                    if let Some(l) = &vold.listings[voi] {
-                        enc_map.insert(lname, l.encoding);
+                    match &meta.listings[voi] {
+                        Some(l) => {
+                            offsets.push(l.span_start as i64);
+                            enc_map.insert(lname.clone(), l.encoding);
+                        }
+                        None => offsets.push(-1),
                     }
                     continue;
                 }
             }
             let enc = vold_index
                 .get(&lname)
-                .and_then(|&voi| vold.listings[voi].as_ref().map(|l| l.encoding))
+                .and_then(|&voi| meta.listings[voi].as_ref().map(|l| l.encoding))
                 .or_else(|| new.listings[ni].as_ref().map(|l| l.encoding))
                 .unwrap_or(TexEncoding::Rgb565);
             if matches!(enc, TexEncoding::Unknown(_)) {
@@ -1353,7 +1655,9 @@ fn sync_after_write(dir: &std::path::Path, cache_name: &str, old: &TexdbCache) -
                 use_rle,
             ) {
                 Some(listing) => {
-                    slots.push(Some(listing));
+                    offsets.push(cursor as i64);
+                    cursor += listing.len();
+                    appends.extend_from_slice(&listing);
                     enc_map.insert(lname, enc);
                 }
                 None => {
@@ -1366,11 +1670,34 @@ fn sync_after_write(dir: &std::path::Path, cache_name: &str, old: &TexdbCache) -
             notes.push(format!("variant_skip={v}"));
             continue;
         }
-        let refs: Vec<Option<&[u8]>> = slots.iter().map(|s| s.as_deref()).collect();
-        let (dat, toc) = rebuild_dat_toc(&refs);
-        if std::fs::write(dir.join(format!("{cache_name}.{v}.dat")), &dat).is_ok()
-            && std::fs::write(dir.join(format!("{cache_name}.{v}.toc")), &toc).is_ok()
-        {
+        // Already in the target state (toc would be byte-identical)?
+        let already_synced = appends.is_empty()
+            && offsets.len() == meta.listings.len()
+            && offsets.iter().enumerate().all(|(i, &o)| {
+                o == meta.listings[i].as_ref().map_or(-1, |l| l.span_start as i64)
+            });
+        let wrote = if already_synced {
+            true
+        } else {
+            (|| -> std::io::Result<()> {
+                use std::io::{Seek, SeekFrom, Write};
+                if !appends.is_empty() {
+                    let mut f = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(dir.join(format!("{cache_name}.{v}.dat")))?;
+                    f.seek(SeekFrom::End(0))?;
+                    f.write_all(&appends)?;
+                }
+                let mut toc = Vec::with_capacity(4 + offsets.len() * 4);
+                toc.extend_from_slice(&(cursor as u32).to_le_bytes());
+                for o in &offsets {
+                    toc.extend_from_slice(&(*o as i32).to_le_bytes());
+                }
+                std::fs::write(dir.join(format!("{cache_name}.{v}.toc")), &toc)
+            })()
+            .is_ok()
+        };
+        if wrote {
             notes.push(format!("variant_sync={v}"));
             variant_enc.insert(v.clone(), enc_map);
         }
@@ -1448,7 +1775,11 @@ fn sync_after_write(dir: &std::path::Path, cache_name: &str, old: &TexdbCache) -
             );
             out.extend_from_slice(&rec);
         }
-        if std::fs::write(&path, &out).is_ok() {
+        // The .tmb is small and most records are reused byte-for-byte, so
+        // after a no-op or single-texture edit the regenerated content is
+        // often identical to what's on disk — only write when it differs.
+        let already = std::fs::read(&path).map_or(false, |cur| cur == out);
+        if already || std::fs::write(&path, &out).is_ok() {
             notes.push(format!("tmb_sync={t}"));
         }
     }
@@ -1459,10 +1790,12 @@ fn current_edit(cache: &TexdbCache) -> CacheEdit {
     CacheEdit {
         entries: (0..cache.manifest.len())
             .map(|i| {
-                Some((
-                    cache.manifest[i].line.clone(),
-                    cache.raw_listing(i).map(|b| b.to_vec()),
-                ))
+                let listing = if cache.listings.get(i).and_then(|l| l.as_ref()).is_some() {
+                    Some(EditListing::Keep)
+                } else {
+                    None
+                };
+                Some((cache.manifest[i].line.clone(), listing))
             })
             .collect(),
         appended: Vec::new(),
@@ -1497,7 +1830,7 @@ pub fn delete_textures(
             }
         }
     }
-    let notes = write_cache_edit(dir, cache_name, &cache, &edit)?;
+    let notes = write_cache_edit(dir, cache_name, cache, edit)?;
     Ok(with_notes(
         format!(
             "deleted={};affiliates_removed={}",
@@ -1536,8 +1869,10 @@ pub fn rename_texture(
     let mut edit = current_edit(&cache);
     if let Some(Some((line, listing))) = edit.entries.get_mut(index) {
         *line = line.replacen(&format!("\"{old_name}\""), &format!("\"{new_name}\""), 1);
-        if let Some(bytes) = listing {
+        if let Some(raw) = cache.raw_listing(index) {
+            let mut bytes = raw.to_vec();
             bytes[0..2].copy_from_slice(&hash_name(new_name).to_le_bytes());
+            *listing = Some(EditListing::Bytes(bytes));
         }
     }
     for (i, entry) in cache.manifest.iter().enumerate() {
@@ -1555,7 +1890,7 @@ pub fn rename_texture(
             }
         }
     }
-    let notes = write_cache_edit(dir, cache_name, &cache, &edit)?;
+    let notes = write_cache_edit(dir, cache_name, cache, edit)?;
     Ok(with_notes(format!("renamed={old_name}->{new_name}"), notes))
 }
 
@@ -1577,15 +1912,15 @@ pub fn add_alias(
     if cache.manifest.iter().any(|e| e.name.eq_ignore_ascii_case(alias_name)) {
         return Err(format!("nama '{alias_name}' sudah dipakai"));
     }
-    let target = &cache.manifest[target_index];
+    let target_name = cache.manifest[target_index].name.clone();
     let mut edit = current_edit(&cache);
     edit.appended.push((
-        format!("\"{}\" \"affiliate={}\"", alias_name, target.name),
+        format!("\"{}\" \"affiliate={}\"", alias_name, target_name),
         None,
     ));
-    let notes = write_cache_edit(dir, cache_name, &cache, &edit)?;
+    let notes = write_cache_edit(dir, cache_name, cache, edit)?;
     Ok(with_notes(
-        format!("alias={alias_name};target={}", target.name),
+        format!("alias={alias_name};target={target_name}"),
         notes,
     ))
 }
@@ -1720,10 +2055,10 @@ pub fn repack_cache(
             entry.line.contains("camnorm=1"),
             entry.line.contains("hassibling=1"),
         );
-        edit.entries[i] = Some((line, Some(listing)));
+        edit.entries[i] = Some((line, Some(EditListing::Bytes(listing))));
         converted += 1;
     }
-    let notes = write_cache_edit(dir, cache_name, &cache, &edit)?;
+    let notes = write_cache_edit(dir, cache_name, cache, edit)?;
     Ok(with_notes(
         format!("converted={converted};kept={kept};alpha_dropped={alpha_dropped}"),
         notes,
@@ -1900,6 +2235,7 @@ mod tests {
             use_rle: true,
             generate_mipmaps: true,
             mip_filter: 1,
+            defragment: false,
         };
         let report = import_textures(&dir, "beta", &[("beta".to_string(), tiny_png())], &opts).unwrap();
         assert!(report.contains("replaced=1"), "report: {report}");
@@ -1925,6 +2261,136 @@ mod tests {
         .unwrap();
         std::fs::write(dir.join("beta.etc.dat"), &dat).unwrap();
         std::fs::write(dir.join("beta.etc.toc"), &toc).unwrap();
+    }
+
+    fn toc_offsets(dir: &std::path::Path, file: &str) -> Vec<i32> {
+        let toc = std::fs::read(dir.join(file)).unwrap();
+        let n = (toc.len() - 4) / 4;
+        (0..n)
+            .map(|i| i32::from_le_bytes(toc[4 + i * 4..8 + i * 4].try_into().unwrap()))
+            .collect()
+    }
+
+    fn toc_stated_len(dir: &std::path::Path, file: &str) -> usize {
+        let toc = std::fs::read(dir.join(file)).unwrap();
+        u32::from_le_bytes(toc[0..4].try_into().unwrap()) as usize
+    }
+
+    #[test]
+    fn import_overwrite_appends_and_keeps_unchanged_offsets() {
+        // Three real textures; overwriting the middle one must not move
+        // the other two (the old engine rewrote the whole .dat every time).
+        let mk = |name: &str, fill: u8| {
+            build_listing(name, TexEncoding::Dxt1, 4, 4, &[&[fill; 8]], true).unwrap()
+        };
+        let (l1, l2, l3) = (mk("t1", 1), mk("t2", 2), mk("t3", 3));
+        let (dat, toc) = rebuild_dat_toc(&[Some(&l1), Some(&l2), Some(&l3)]);
+        let dir = std::env::temp_dir().join(format!("texdb-append-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("beta.txt"),
+            "\"t1\" width=4 height=4\n\"t2\" width=4 height=4\n\"t3\" width=4 height=4\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("beta.etc.dat"), &dat).unwrap();
+        std::fs::write(dir.join("beta.etc.toc"), &toc).unwrap();
+        let old_dat_len = dat.len();
+        let before = toc_offsets(&dir, "beta.etc.toc");
+        let opts = ImportOptions {
+            format: ImportFormat::CompressedNoAlpha,
+            conflict: ConflictPolicy::Overwrite,
+            sibling_model: None,
+            reduce_to: 0,
+            camnorm: true,
+            hash_check: true,
+            correct_caps: false,
+            use_rle: true,
+            generate_mipmaps: true,
+            mip_filter: 1,
+            defragment: false,
+        };
+        let report = import_textures(&dir, "beta", &[("t2".to_string(), tiny_png())], &opts).unwrap();
+        assert!(report.contains("replaced=1"), "report: {report}");
+        let after = toc_offsets(&dir, "beta.etc.toc");
+        assert_eq!(after.len(), 3, "one toc offset per manifest entry");
+        assert_eq!(after[0], before[0], "t1 must keep its offset");
+        assert_eq!(after[2], before[2], "t3 must keep its offset");
+        assert_eq!(after[1] as usize, old_dat_len, "t2's new listing is appended at the old EOF");
+        let new_len = std::fs::metadata(dir.join("beta.etc.dat")).unwrap().len() as usize;
+        assert_eq!(toc_stated_len(&dir, "beta.etc.toc"), new_len, "toc[0] == .dat length");
+        assert!(new_len > old_dat_len, "dat grew by append only");
+        let cache = TexdbCache::load(&dir, "beta").unwrap();
+        assert_eq!(cache.raw_listing(0).unwrap(), &l1[..], "t1 bytes untouched");
+        assert_eq!(cache.raw_listing(2).unwrap(), &l3[..], "t3 bytes untouched");
+        assert!(cache.decode_raw(1).is_some(), "t2 still decodes");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn second_variant_syncs_by_append_only() {
+        let mk = |name: &str, fill: u8| {
+            build_listing(name, TexEncoding::Dxt1, 4, 4, &[&[fill; 8]], true).unwrap()
+        };
+        let (la, lb) = (mk("aa", 7), mk("bb", 9));
+        // A third, larger texture keeps the cache big enough that the
+        // append heuristic (not the full-rebuild fallback) is exercised.
+        let lc = build_listing("cc", TexEncoding::Dxt1, 16, 16, &[&[5u8; 128]], true).unwrap();
+        let (dat, toc) = rebuild_dat_toc(&[Some(&la), Some(&lb), Some(&lc)]);
+        let dir = std::env::temp_dir().join(format!("texdb-variants-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("multi.txt"),
+            "\"aa\" width=4 height=4\n\"bb\" width=4 height=4\n\"cc\" width=16 height=16\n",
+        )
+        .unwrap();
+        for v in ["etc", "dxt"] {
+            std::fs::write(dir.join(format!("multi.{v}.dat")), &dat).unwrap();
+            std::fs::write(dir.join(format!("multi.{v}.toc")), &toc).unwrap();
+            // Correct .tmb files (one record per non-affiliate texture).
+            let mut tmb = thumb_record("aa", None, TexEncoding::Dxt1, v);
+            tmb.extend_from_slice(&thumb_record("bb", None, TexEncoding::Dxt1, v));
+            tmb.extend_from_slice(&thumb_record("cc", None, TexEncoding::Dxt1, v));
+            std::fs::write(dir.join(format!("multi.{v}.tmb")), &tmb).unwrap();
+        }
+        let opts = ImportOptions {
+            format: ImportFormat::CompressedNoAlpha,
+            conflict: ConflictPolicy::Overwrite,
+            sibling_model: None,
+            reduce_to: 0,
+            camnorm: true,
+            hash_check: true,
+            correct_caps: false,
+            use_rle: true,
+            generate_mipmaps: true,
+            mip_filter: 1,
+            defragment: false,
+        };
+        import_textures(&dir, "multi", &[("aa".to_string(), tiny_png())], &opts).unwrap();
+        // In BOTH families (the directly written one and the synced one):
+        // bb/cc keep their offsets, aa's replacement sits at the old EOF —
+        // neither .dat was rewritten wholesale.
+        for v in ["etc", "dxt"] {
+            let offs = toc_offsets(&dir, &format!("multi.{v}.toc"));
+            assert_eq!(offs.len(), 3, "{v}: toc count == manifest count");
+            assert_eq!(offs[1], la.len() as i32, "{v}: bb kept its original offset");
+            assert_eq!(
+                offs[2],
+                (la.len() + lb.len()) as i32,
+                "{v}: cc kept its original offset"
+            );
+            assert_eq!(offs[0] as usize, dat.len(), "{v}: aa appended at the old EOF");
+            let dat_len = std::fs::metadata(dir.join(format!("multi.{v}.dat"))).unwrap().len() as usize;
+            assert_eq!(toc_stated_len(&dir, &format!("multi.{v}.toc")), dat_len, "{v}: toc[0] == .dat len");
+            let tmb = std::fs::read(dir.join(format!("multi.{v}.tmb"))).unwrap();
+            assert_eq!(
+                parse_tmb_records(&tmb).map(|r| r.len()),
+                Some(3),
+                "{v} .tmb record count + 0 aliases == manifest count"
+            );
+        }
+        let cache = TexdbCache::load(&dir, "multi").unwrap();
+        assert!(cache.decode_raw(0).is_some() && cache.decode_raw(1).is_some());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

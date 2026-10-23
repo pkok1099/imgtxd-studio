@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +47,7 @@ fun <T> ArchiveScreen(
     onSearchQueryChange: (String) -> Unit = {},
     onCloseSearch: () -> Unit = {},
     activeProcess: AppProcess? = null,
+    isLoading: Boolean = false,
     onProcessPillClick: () -> Unit = {},
     gridColumns: Int = 1,
     headerTrailingContent: (@Composable () -> Unit)? = null,
@@ -193,6 +195,20 @@ fun <T> ArchiveScreen(
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
+            // Immediate busy feedback: visible from the same frame the action
+            // is tapped, long before the background process pill registers.
+            if (isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = padding.calculateTopPadding())
+                        .align(Alignment.TopCenter)
+                        .zIndex(1f),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+            }
+
             if (items.isEmpty()) {
                 // Empty state konsisten
                 Box(

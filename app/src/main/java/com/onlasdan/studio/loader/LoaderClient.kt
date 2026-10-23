@@ -35,7 +35,9 @@ object LoaderClient {
     private const val CONNECT_TIMEOUT_MS = 1500
     private const val IO_TIMEOUT_MS = 3000
     private const val WRITE_CHUNK_BYTES = 64 * 1024
-    private const val MAX_PAYLOAD_BYTES = 512L * 1024 * 1024
+
+    /** Largest payload [substitute] accepts; shared with payload readers. */
+    const val MAX_PAYLOAD_BYTES = 512L * 1024 * 1024
 
     const val MAX_MODEL_ID = 26315
 

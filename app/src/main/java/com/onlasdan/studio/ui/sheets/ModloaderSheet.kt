@@ -31,13 +31,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.onlasdan.studio.R
 import com.onlasdan.studio.core.ImgEntry
+import com.onlasdan.studio.loader.LoaderLooseFile
 import com.onlasdan.studio.ui.FloatingSheet
+import com.onlasdan.studio.ui.ModelIdHint
 import com.onlasdan.studio.ui.components.SearchableChoiceSheet
 import com.onlasdan.studio.ui.components.SheetChoice
 import com.onlasdan.studio.ui.components.SheetTitle
@@ -45,8 +48,9 @@ import com.onlasdan.studio.ui.theme.SectionHeaderStyle
 import java.util.Locale
 
 /**
- * Modloader sheet: sends one .dff/.txd entry from the open IMG archive to
- * the running game through the in-game plugin (see loader/LoaderClient).
+ * Modloader sheet: sends one .dff/.txd payload — an entry from the open
+ * IMG archive, or a loose file picked from storage — to the running game
+ * through the in-game plugin (see loader/LoaderClient).
  * Stateless — all state lives in ImgToolViewModel.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -56,13 +60,19 @@ fun ModloaderSheet(
     hasArchive: Boolean,
     modelEntries: List<ImgEntry>,
     selectedEntry: ImgEntry?,
+    selectedFile: LoaderLooseFile?,
     modelIdText: String,
+    modelIdHint: ModelIdHint?,
+    ideModelCount: Int?,
+    ideBusy: Boolean,
     connected: Boolean?,
     busy: Boolean,
     feedback: String?,
     onCheckConnection: () -> Unit,
     onSelectEntry: (ImgEntry) -> Unit,
+    onPickFile: () -> Unit,
     onModelIdChange: (String) -> Unit,
+    onScanIde: () -> Unit,
     onSubstitute: () -> Unit,
     onReload: () -> Unit
 ) {
@@ -134,7 +144,8 @@ fun ModloaderSheet(
                 }
             }
 
-            // Model file picker (entries of the open archive)
+            // Model payload picker: an entry of the open archive, or a
+            // loose file from storage. Picking one clears the other.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "BERKAS MODEL",
@@ -181,6 +192,82 @@ fun ModloaderSheet(
                         )
                     }
                 }
+                if (selectedFile != null) {
+                    Column(modifier = Modifier.padding(vertical = 2.dp)) {
+                        Text(
+                            text = selectedFile.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = stringResource(
+                                R.string.modloader_file_source,
+                                formatBytes(selectedFile.sizeBytes)
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = onPickFile,
+                    enabled = !busy,
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.modloader_choose_file))
+                }
+            }
+
+            // IDE index (auto-fill source for the Model ID field)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "INDEKS IDE",
+                    style = SectionHeaderStyle,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (ideModelCount != null) {
+                            pluralStringResource(
+                                R.plurals.modloader_ide_status,
+                                ideModelCount,
+                                ideModelCount
+                            )
+                        } else {
+                            stringResource(R.string.modloader_ide_none)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = onScanIde,
+                        enabled = !busy && !ideBusy,
+                        shape = CircleShape
+                    ) {
+                        if (ideBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(
+                            stringResource(
+                                if (ideModelCount != null) {
+                                    R.string.modloader_ide_rescan
+                                } else {
+                                    R.string.modloader_ide_scan
+                                }
+                            )
+                        )
+                    }
+                }
             }
 
             // Model ID + actions
@@ -191,7 +278,26 @@ fun ModloaderSheet(
                     singleLine = true,
                     enabled = !busy,
                     label = { Text(stringResource(R.string.modloader_model_id_label)) },
-                    supportingText = { Text(stringResource(R.string.modloader_model_id_help)) },
+                    supportingText = {
+                        Text(
+                            when (val hint = modelIdHint) {
+                                ModelIdHint.FromIndex ->
+                                    stringResource(R.string.modloader_ide_hint_from_index)
+
+                                is ModelIdHint.TxdCandidates ->
+                                    pluralStringResource(
+                                        R.plurals.modloader_ide_hint_candidates,
+                                        hint.count,
+                                        hint.count
+                                    )
+
+                                ModelIdHint.NotInIndex ->
+                                    stringResource(R.string.modloader_ide_hint_not_found)
+
+                                null -> stringResource(R.string.modloader_model_id_help)
+                            }
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -202,7 +308,9 @@ fun ModloaderSheet(
                 ) {
                     Button(
                         onClick = onSubstitute,
-                        enabled = !busy && selectedEntry != null && modelIdText.isNotEmpty(),
+                        enabled = !busy &&
+                            (selectedEntry != null || selectedFile != null) &&
+                            modelIdText.isNotEmpty(),
                         shape = CircleShape,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,

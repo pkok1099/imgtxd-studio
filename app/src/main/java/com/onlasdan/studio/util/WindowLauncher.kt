@@ -15,7 +15,8 @@ import java.io.Serializable
 
 enum class LauncherFileType {
     IMG,
-    TXD
+    TXD,
+    FOLDER
 }
 
 data class ParentArchiveInfo(
@@ -66,6 +67,10 @@ object WindowLauncher {
             }
         }
 
+        // Folders (e.g. texdb caches) are recorded in recents only; reopening
+        // them is handled by the caller, there is no window to launch.
+        if (fileType == LauncherFileType.FOLDER) return
+
         val windowMode = AppSettings.cachedWindowMode
 
         // 1. SINGLE_WINDOW mode: keep inside same window if in-app action provided
@@ -77,6 +82,7 @@ object WindowLauncher {
         val targetClass = when (fileType) {
             LauncherFileType.IMG -> MainActivity::class.java
             LauncherFileType.TXD -> TxdEditorActivity::class.java
+            LauncherFileType.FOLDER -> MainActivity::class.java // unreachable, guarded above
         }
 
         val intent = Intent(context, targetClass).apply {

@@ -28,8 +28,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import com.onlasdan.studio.R
 import com.onlasdan.studio.core.ArchiveRepository
+import com.onlasdan.studio.core.NativeCore
+import com.onlasdan.studio.loader.IdeIndex
+import com.onlasdan.studio.loader.IdeIndexStore
 import com.onlasdan.studio.loader.LoaderClient
+import com.onlasdan.studio.loader.LoaderFileRules
+import com.onlasdan.studio.loader.LoaderLooseFile
 import com.onlasdan.studio.util.AppSettings
 import com.onlasdan.studio.util.LauncherFileType
 import com.onlasdan.studio.util.ParentArchiveInfo
@@ -69,11 +75,29 @@ data class ImgToolUiState(
     val loaderConnected: Boolean? = null,
     val loaderBusy: Boolean = false,
     val loaderSelectedEntry: ImgEntry? = null,
+    val loaderSelectedFile: LoaderLooseFile? = null,
     val loaderModelId: String = "",
-    val loaderFeedback: String? = null
+    val loaderFeedback: String? = null,
+
+    // IDE index (model name -> streaming id) for Model ID auto-fill
+    val loaderIdeIndex: IdeIndex? = null,
+    val loaderIdeBusy: Boolean = false,
+    val loaderModelIdHint: ModelIdHint? = null
 ) {
     val hasMorePages: Boolean
         get() = displayedEntries.size < filteredEntries.size
+}
+
+/** Where the current Model ID value came from (IDE index auto-fill). */
+sealed interface ModelIdHint {
+    /** The field was filled from the IDE index (model name, or a unique txd match). */
+    data object FromIndex : ModelIdHint
+
+    /** A .txd name shared by [count] models — the user must pick the id manually. */
+    data class TxdCandidates(val count: Int) : ModelIdHint
+
+    /** The selected entry's name is not in the IDE index. */
+    data object NotInIndex : ModelIdHint
 }
 
 class ImgToolViewModel : ViewModel() {
@@ -467,8 +491,10 @@ class ImgToolViewModel : ViewModel() {
         val allEntries = archive.entries
         if (allEntries.isEmpty()) return
 
+        // Same-frame busy feedback, same pattern as rebuildArchive().
+        _uiState.update { it.copy(isLoading = true) }
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
                 targetFile = archive.imgFile.absolutePath,
@@ -509,9 +535,10 @@ class ImgToolViewModel : ViewModel() {
     }
 
     fun addFileFromPath(context: Context, path: String, isShizuku: Boolean, customName: String? = null) {
+        val archive = _uiState.value.archive ?: return
+        // Same-frame busy feedback (staging copy can take seconds via Shizuku).
+        _uiState.update { it.copy(isLoading = true, statusMessage = "Adding file...") }
         viewModelScope.launch {
-            val archive = _uiState.value.archive ?: return@launch
-            _uiState.update { it.copy(isLoading = true, statusMessage = "Adding file...") }
             try {
                 withContext(Dispatchers.IO) {
                     val fileToUse = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
@@ -540,9 +567,10 @@ class ImgToolViewModel : ViewModel() {
     }
 
     fun replaceEntryFromPath(context: Context, entry: ImgEntry, path: String, isShizuku: Boolean) {
+        val archive = _uiState.value.archive ?: return
+        // Same-frame busy feedback (staging copy can take seconds via Shizuku).
+        _uiState.update { it.copy(isLoading = true, statusMessage = "Replacing ${entry.cleanName}...") }
         viewModelScope.launch {
-            val archive = _uiState.value.archive ?: return@launch
-            _uiState.update { it.copy(isLoading = true, statusMessage = "Replacing ${entry.cleanName}...") }
             try {
                 withContext(Dispatchers.IO) {
                     val fileToUse = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
@@ -571,9 +599,9 @@ class ImgToolViewModel : ViewModel() {
     }
 
     fun renameEntry(entry: ImgEntry, newName: String) {
+        val archive = _uiState.value.archive ?: return
+        _uiState.update { it.copy(isLoading = true, statusMessage = "Renaming entry...") }
         viewModelScope.launch {
-            val archive = _uiState.value.archive ?: return@launch
-            _uiState.update { it.copy(isLoading = true, statusMessage = "Renaming entry...") }
             try {
                 withContext(Dispatchers.IO) {
                     archive.rename(entry, newName)
@@ -631,12 +659,15 @@ class ImgToolViewModel : ViewModel() {
     }
 
     fun rebuildArchive() {
-        viewModelScope.launch {
-            val archive = _uiState.value.archive ?: return@launch
-            val originalPath = _uiState.value.originalPath
-            val isShizukuBacked = _uiState.value.isShizukuBacked
+        val archive = _uiState.value.archive ?: return
+        val originalPath = _uiState.value.originalPath
+        val isShizukuBacked = _uiState.value.isShizukuBacked
 
-            _uiState.update { it.copy(isLoading = true) }
+        // Busy state is set synchronously in the tap handler so the indicator
+        // paints on the same frame; all heavy work happens inside the job.
+        _uiState.update { it.copy(isLoading = true) }
+
+        viewModelScope.launch {
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.REBUILD,
                 targetFile = archive.archiveName,
@@ -1330,12 +1361,175 @@ class ImgToolViewModel : ViewModel() {
 
     fun setLoaderModelId(text: String) {
         _uiState.update {
-            it.copy(loaderModelId = text.filter { ch -> ch.isDigit() }.take(5))
+            it.copy(
+                loaderModelId = text.filter { ch -> ch.isDigit() }.take(5),
+                // Manual typing detaches the value from the IDE index hint.
+                loaderModelIdHint = null
+            )
         }
     }
 
     fun selectLoaderEntry(entry: ImgEntry) {
-        _uiState.update { it.copy(loaderSelectedEntry = entry, loaderFeedback = null) }
+        _uiState.update { state ->
+            val (idText, hint) = autoFillModelIdForName(entry.cleanName, state.loaderIdeIndex)
+            state.copy(
+                loaderSelectedEntry = entry,
+                loaderSelectedFile = null,
+                loaderFeedback = null,
+                loaderModelId = idText ?: state.loaderModelId,
+                loaderModelIdHint = hint
+            )
+        }
+    }
+
+    /** Selects a loose payload file, clearing any archive entry selection. */
+    fun selectLoaderFile(file: LoaderLooseFile) {
+        _uiState.update { state ->
+            val (idText, hint) = autoFillModelIdForName(file.name, state.loaderIdeIndex)
+            state.copy(
+                loaderSelectedEntry = null,
+                loaderSelectedFile = file,
+                loaderFeedback = null,
+                loaderModelId = idText ?: state.loaderModelId,
+                loaderModelIdHint = hint
+            )
+        }
+    }
+
+    /**
+     * Entry point for the loose-file picker: only .dff/.txd are accepted,
+     * and the size is resolved up front (through Shizuku for restricted
+     * paths) so the sheet can show it and a vanished file fails here with
+     * a clear message instead of at send time.
+     */
+    fun selectLoaderFileFromPicker(context: Context, path: String, isShizuku: Boolean) {
+        val name = File(path).name
+        if (!LoaderFileRules.isModelFileName(name)) {
+            _uiState.update {
+                it.copy(loaderFeedback = context.getString(R.string.modloader_file_wrong_type))
+            }
+            return
+        }
+        viewModelScope.launch {
+            val size = withContext(Dispatchers.IO) { loaderFileSize(path, isShizuku) }
+            if (size == null) {
+                _uiState.update {
+                    it.copy(
+                        loaderFeedback = context.getString(R.string.modloader_file_missing, name)
+                    )
+                }
+            } else {
+                selectLoaderFile(LoaderLooseFile(name, path, isShizuku, size))
+            }
+        }
+    }
+
+    private suspend fun loaderFileSize(path: String, isShizuku: Boolean): Long? {
+        return if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
+            val (code, out) = ShizukuManager.exec("stat -c %s \"$path\"")
+            if (code != 0) null
+            else out.trim().lines().firstOrNull()?.toLongOrNull()?.takeIf { it >= 0 }
+        } else {
+            File(path).takeIf { it.isFile }?.length()
+        }
+    }
+
+    /** Display name of the currently selected payload (archive entry or loose file). */
+    private fun ImgToolUiState.loaderSelectedName(): String? =
+        loaderSelectedEntry?.cleanName ?: loaderSelectedFile?.name
+
+    /** Loads the persisted IDE index (if any) for the Modloader sheet. */
+    fun loadLoaderIdeIndex(context: Context) {
+        if (_uiState.value.loaderIdeIndex != null) return
+        viewModelScope.launch {
+            val index = withContext(Dispatchers.IO) { IdeIndexStore.load(context) }
+            if (index != null) {
+                _uiState.update { state ->
+                    val selected = state.loaderSelectedName()
+                    if (selected != null && state.loaderIdeIndex == null) {
+                        val (idText, hint) = autoFillModelIdForName(selected, index)
+                        state.copy(
+                            loaderIdeIndex = index,
+                            loaderModelId = idText ?: state.loaderModelId,
+                            loaderModelIdHint = hint ?: state.loaderModelIdHint
+                        )
+                    } else {
+                        state.copy(loaderIdeIndex = index)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Scans the picked game data folder for .ide files (via the Rust IDE
+     * parser), persists the resulting index, and re-runs auto-fill for the
+     * currently selected entry. Restricted (Android/data) folders are
+     * staged into cacheDir through Shizuku first, like the texdb browser.
+     */
+    fun scanLoaderIdeIndex(context: Context, path: String, isShizuku: Boolean) {
+        if (_uiState.value.loaderIdeBusy) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(loaderIdeBusy = true) }
+            val index = withContext(Dispatchers.IO) {
+                try {
+                    val scanRoot = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
+                        val srcDir = path.trimEnd('/')
+                        val destDir = File(context.cacheDir, "ide_stage")
+                        destDir.deleteRecursively()
+                        destDir.mkdirs()
+                        val (code, _) = ShizukuManager.exec(
+                            "cp -r \"$srcDir/.\" \"${destDir.absolutePath}/\""
+                        )
+                        if (code != 0) return@withContext null
+                        destDir.absolutePath
+                    } else {
+                        path
+                    }
+                    val scan = NativeCore.ideScanDir(scanRoot) ?: return@withContext null
+                    IdeIndex(
+                        models = scan.models,
+                        txdToIds = scan.txdToIds,
+                        rootPath = path,
+                        scannedAtMillis = System.currentTimeMillis(),
+                        ideFileCount = scan.filesRead
+                    ).also { IdeIndexStore.save(context, it) }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            _uiState.update { state ->
+                if (index == null) {
+                    state.copy(
+                        loaderIdeBusy = false,
+                        loaderFeedback = context.getString(R.string.modloader_ide_scan_failed)
+                    )
+                } else {
+                    val selected = state.loaderSelectedName()
+                    val (idText, hint) = if (selected != null) {
+                        autoFillModelIdForName(selected, index)
+                    } else {
+                        null to null
+                    }
+                    state.copy(
+                        loaderIdeBusy = false,
+                        loaderIdeIndex = index,
+                        loaderModelId = idText ?: state.loaderModelId,
+                        loaderModelIdHint = hint ?: state.loaderModelIdHint,
+                        loaderFeedback = if (index.modelCount == 0) {
+                            context.getString(R.string.modloader_ide_scan_empty)
+                        } else {
+                            context.resources.getQuantityString(
+                                R.plurals.modloader_ide_scan_done,
+                                index.modelCount,
+                                index.modelCount,
+                                index.ideFileCount
+                            )
+                        }
+                    )
+                }
+            }
+        }
     }
 
     fun checkLoaderConnection() {
@@ -1365,27 +1559,43 @@ class ImgToolViewModel : ViewModel() {
     fun substituteLoaderEntry(context: Context) {
         val state = _uiState.value
         if (state.loaderBusy) return
-        val archive = state.archive ?: return
-        val entry = state.loaderSelectedEntry ?: run {
-            _uiState.update { it.copy(loaderFeedback = "Pilih dulu berkas model (.dff/.txd) dari arsip.") }
+        val entry = state.loaderSelectedEntry
+        val loose = state.loaderSelectedFile
+        if (entry == null && loose == null) {
+            _uiState.update {
+                it.copy(
+                    loaderFeedback = "Pilih dulu berkas model (.dff/.txd) dari arsip atau berkas lepas."
+                )
+            }
             return
         }
+        // The loose-file path deliberately does not require an open archive.
+        val archive = if (entry != null) state.archive ?: return else null
         val modelId = validLoaderModelId() ?: run {
             _uiState.update {
                 it.copy(loaderFeedback = "Isi Model ID yang valid (0–${LoaderClient.MAX_MODEL_ID}).")
             }
             return
         }
+        val displayName = state.loaderSelectedName() ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(loaderBusy = true, loaderFeedback = null) }
             val result = try {
                 val bytes = withContext(Dispatchers.IO) {
-                    val tmp = File.createTempFile("loader_", entry.cleanName, context.cacheDir)
-                    try {
-                        archive.extract(entry, tmp)
-                        tmp.readBytes()
-                    } finally {
-                        tmp.delete()
+                    when {
+                        loose != null -> readLoaderLooseBytes(context, loose)
+                        entry != null && archive != null -> {
+                            val tmp = File.createTempFile(
+                                "loader_", entry.cleanName, context.cacheDir
+                            )
+                            try {
+                                archive.extract(entry, tmp)
+                                tmp.readBytes()
+                            } finally {
+                                tmp.delete()
+                            }
+                        }
+                        else -> throw IOException("Tidak ada berkas model yang dipilih.")
                     }
                 }
                 LoaderClient.substitute(modelId, bytes)
@@ -1398,7 +1608,7 @@ class ImgToolViewModel : ViewModel() {
                         it.copy(
                             loaderBusy = false,
                             loaderConnected = true,
-                            loaderFeedback = "${entry.cleanName} terkirim sebagai model $modelId. " +
+                            loaderFeedback = "$displayName terkirim sebagai model $modelId. " +
                                 "Tekan Reload Model agar game memuat ulang modelnya.",
                             statusMessage = "Model $modelId dikirim ke game"
                         )
@@ -1415,6 +1625,39 @@ class ImgToolViewModel : ViewModel() {
                     }
                 }
             )
+        }
+    }
+
+    /**
+     * Reads a loose payload file at send time; restricted paths are staged
+     * into cacheDir through Shizuku first (same bridge as the file
+     * picker), so a file deleted or replaced after picking fails with a
+     * clear message instead of sending stale bytes.
+     */
+    private suspend fun readLoaderLooseBytes(context: Context, file: LoaderLooseFile): ByteArray {
+        var staged: File? = null
+        val local = if (file.isShizuku || ShizukuManager.isRestrictedPath(file.path)) {
+            val tmp = File(context.cacheDir, "loader_payload_" + file.name)
+            if (!ShizukuManager.copyToLocal(file.path, tmp)) {
+                throw IOException(
+                    context.getString(R.string.modloader_file_missing, file.name)
+                )
+            }
+            staged = tmp
+            tmp
+        } else {
+            File(file.path)
+        }
+        try {
+            if (!local.isFile) {
+                throw IOException(context.getString(R.string.modloader_file_missing, file.name))
+            }
+            if (local.length() > LoaderClient.MAX_PAYLOAD_BYTES) {
+                throw IOException("Berkas model terlalu besar (maksimum 512 MB).")
+            }
+            return local.readBytes()
+        } finally {
+            staged?.delete()
         }
     }
 
@@ -1451,5 +1694,42 @@ class ImgToolViewModel : ViewModel() {
                 }
             )
         }
+    }
+}
+
+/**
+ * Computes the Model ID auto-fill for a payload [fileName] against the IDE
+ * index: the field text to apply (null = leave the field untouched) and
+ * the hint to show. Shared by archive entries and loose files — only the
+ * name matters. .dff names resolve through the model map; .txd names only
+ * fill when exactly one model uses that TXD. Without an index nothing
+ * changes.
+ */
+internal fun autoFillModelIdForName(
+    fileName: String,
+    index: IdeIndex?
+): Pair<String?, ModelIdHint?> {
+    if (index == null) return null to null
+    val dot = fileName.lastIndexOf('.')
+    val base = (if (dot > 0) fileName.substring(0, dot) else fileName).lowercase()
+    val ext = if (dot > 0) fileName.substring(dot + 1).lowercase() else ""
+    return when (ext) {
+        "dff" -> index.models[base]?.let { it.toString() to ModelIdHint.FromIndex }
+            ?: ("" to ModelIdHint.NotInIndex)
+
+        "txd" -> {
+            val candidates = index.txdToIds[base].orEmpty()
+            when {
+                candidates.size == 1 ->
+                    candidates[0].toString() to ModelIdHint.FromIndex
+
+                candidates.size > 1 ->
+                    null to ModelIdHint.TxdCandidates(candidates.size)
+
+                else -> "" to ModelIdHint.NotInIndex
+            }
+        }
+
+        else -> null to null
     }
 }

@@ -39,6 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.onlasdan.studio.R
 import com.onlasdan.studio.core.ImgEntry
 import com.onlasdan.studio.process.AppProcess
 import com.onlasdan.studio.process.DefaultProcessRepository
@@ -127,6 +129,7 @@ class MainActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         ProcessRepositoryLocator.init(this)
+        AppSettings.init(this)
 
         if (!AppIntegrity.checkIntegrity(this)) {
             isTampered = true
@@ -347,6 +350,8 @@ fun MainScreen(
     var selectedImgEntryForSheet by remember { mutableStateOf<ImgEntry?>(null) }
     var showMoreActionsSheet by rememberSaveable { mutableStateOf(false) }
     var showModloaderSheet by rememberSaveable { mutableStateOf(false) }
+    var showIdeFolderPicker by remember { mutableStateOf(false) }
+    var showLoaderFilePicker by remember { mutableStateOf(false) }
     var showQuickMenuSheet by rememberSaveable { mutableStateOf(false) }
     var showHistorySheet by rememberSaveable { mutableStateOf(false) }
     var showMultiTxdPicker by remember { mutableStateOf(false) }
@@ -628,6 +633,41 @@ fun MainScreen(
         )
     )
 
+    // Opens a texdb cache folder in the browser, staging it locally first when
+    // it lives behind Shizuku/Android-data. Shared by the folder picker and by
+    // folder entries in the home recents list.
+    val openTexdbFolder: (String, Boolean) -> Unit = { path, isShizuku ->
+        val openBrowser: (String, String?) -> Unit = { cacheDir, gameDir ->
+            val intent = Intent(context, TexdbBrowserActivity::class.java).apply {
+                putExtra(TexdbBrowserActivity.EXTRA_CACHE_DIR, cacheDir)
+                if (gameDir != null) {
+                    putExtra(TexdbBrowserActivity.EXTRA_GAME_DIR, gameDir)
+                }
+            }
+            context.startActivity(intent)
+        }
+        if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
+            // Stage the whole cache folder locally (browser reads via java.io.File).
+            // The original folder travels as EXTRA_GAME_DIR so edits made to the
+            // staged copy can be applied back from the browser's menu.
+            coroutineScope.launch {
+                Toast.makeText(context, "Menyalin folder cache via Shizuku…", Toast.LENGTH_SHORT).show()
+                val srcDir = path.trimEnd('/')
+                val destDir = File(context.cacheDir, "texdb_stage/" + File(srcDir).name)
+                destDir.deleteRecursively()
+                destDir.mkdirs()
+                val (code, _) = ShizukuManager.exec("cp -r \"$srcDir/.\" \"${destDir.absolutePath}/\"")
+                if (code == 0) {
+                    openBrowser(destDir.absolutePath, srcDir)
+                } else {
+                    Toast.makeText(context, "Gagal menyalin cache via Shizuku", Toast.LENGTH_LONG).show()
+                }
+            }
+        } else {
+            openBrowser(path.trimEnd('/'), null)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (activeDockTab) {
             "home" -> {
@@ -659,21 +699,25 @@ fun MainScreen(
                             }
                         },
                         onOpenRecent = { item ->
-                            WindowLauncher.open(
-                                context = context,
-                                filePath = item.path,
-                                fileType = item.type,
-                                isShizuku = item.isShizuku,
-                                onSingleWindowAction = {
-                                    if (item.type == LauncherFileType.IMG) {
-                                        viewModel.openArchiveFromPath(context, item.path, item.isShizuku)
-                                        activeDockTab = "archive"
-                                    } else {
-                                        viewModel.openStandaloneTxd(context, item.path, item.isShizuku)
-                                        activeDockTab = "txd"
+                            if (item.type == LauncherFileType.FOLDER) {
+                                openTexdbFolder(item.path, item.isShizuku)
+                            } else {
+                                WindowLauncher.open(
+                                    context = context,
+                                    filePath = item.path,
+                                    fileType = item.type,
+                                    isShizuku = item.isShizuku,
+                                    onSingleWindowAction = {
+                                        if (item.type == LauncherFileType.IMG) {
+                                            viewModel.openArchiveFromPath(context, item.path, item.isShizuku)
+                                            activeDockTab = "archive"
+                                        } else {
+                                            viewModel.openStandaloneTxd(context, item.path, item.isShizuku)
+                                            activeDockTab = "txd"
+                                        }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
                     )
 
@@ -719,6 +763,7 @@ fun MainScreen(
                         viewModel.setSearchQuery("")
                     },
                     activeProcess = activeArchiveProcess,
+                    isLoading = uiState.isLoading,
                     onProcessPillClick = {
                         activeArchiveProcess?.let { selectedProcessForDetail = it }
                     },
@@ -906,6 +951,9 @@ fun MainScreen(
     }
 
     // 2b. Sheet Modloader (IPC ke plugin di dalam game)
+    LaunchedEffect(showModloaderSheet) {
+        if (showModloaderSheet) viewModel.loadLoaderIdeIndex(context)
+    }
     if (showModloaderSheet) {
         ModloaderSheet(
             onDismissRequest = { showModloaderSheet = false },
@@ -915,15 +963,47 @@ fun MainScreen(
                     it.cleanName.endsWith(".txd", ignoreCase = true)
             },
             selectedEntry = uiState.loaderSelectedEntry,
+            selectedFile = uiState.loaderSelectedFile,
             modelIdText = uiState.loaderModelId,
+            modelIdHint = uiState.loaderModelIdHint,
+            ideModelCount = uiState.loaderIdeIndex?.modelCount,
+            ideBusy = uiState.loaderIdeBusy,
             connected = uiState.loaderConnected,
             busy = uiState.loaderBusy,
             feedback = uiState.loaderFeedback,
             onCheckConnection = { viewModel.checkLoaderConnection() },
             onSelectEntry = { viewModel.selectLoaderEntry(it) },
+            onPickFile = { showLoaderFilePicker = true },
             onModelIdChange = { viewModel.setLoaderModelId(it) },
+            onScanIde = { showIdeFolderPicker = true },
             onSubstitute = { viewModel.substituteLoaderEntry(context) },
             onReload = { viewModel.reloadLoaderModel() }
+        )
+    }
+
+    // 2b2. IDE index scan: pick the game's data folder (files/ or files/data/)
+    if (showIdeFolderPicker) {
+        FilePickerDialog(
+            title = "Pilih Folder Data Game (berisi berkas .ide)",
+            mode = PickerMode.PICK_FOLDER,
+            onDismissRequest = { showIdeFolderPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showIdeFolderPicker = false
+                viewModel.scanLoaderIdeIndex(context, path, isShizuku)
+            }
+        )
+    }
+
+    // 2b3. Modloader loose payload: pick a standalone .dff/.txd file
+    if (showLoaderFilePicker) {
+        FilePickerDialog(
+            title = stringResource(R.string.modloader_pick_file_title),
+            mode = PickerMode.PICK_FILE,
+            onDismissRequest = { showLoaderFilePicker = false },
+            onFileSelected = { path, isShizuku ->
+                showLoaderFilePicker = false
+                viewModel.selectLoaderFileFromPicker(context, path, isShizuku)
+            }
         )
     }
 
@@ -1079,35 +1159,15 @@ fun MainScreen(
             onDismissRequest = { showTexdbPicker = false },
             onFileSelected = { path, isShizuku ->
                 showTexdbPicker = false
-                val openBrowser: (String, String?) -> Unit = { cacheDir, gameDir ->
-                    val intent = Intent(context, TexdbBrowserActivity::class.java).apply {
-                        putExtra(TexdbBrowserActivity.EXTRA_CACHE_DIR, cacheDir)
-                        if (gameDir != null) {
-                            putExtra(TexdbBrowserActivity.EXTRA_GAME_DIR, gameDir)
-                        }
-                    }
-                    context.startActivity(intent)
+                coroutineScope.launch {
+                    AppSettings.addRecentFile(
+                        context,
+                        path.trimEnd('/'),
+                        LauncherFileType.FOLDER,
+                        isShizuku
+                    )
                 }
-                if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
-                    // Stage the whole cache folder locally (browser reads via java.io.File).
-                    // The original folder travels as EXTRA_GAME_DIR so edits made to the
-                    // staged copy can be applied back from the browser's menu.
-                    coroutineScope.launch {
-                        Toast.makeText(context, "Menyalin folder cache via Shizuku…", Toast.LENGTH_SHORT).show()
-                        val srcDir = path.trimEnd('/')
-                        val destDir = File(context.cacheDir, "texdb_stage/" + File(srcDir).name)
-                        destDir.deleteRecursively()
-                        destDir.mkdirs()
-                        val (code, _) = ShizukuManager.exec("cp -r \"$srcDir/.\" \"${destDir.absolutePath}/\"")
-                        if (code == 0) {
-                            openBrowser(destDir.absolutePath, srcDir)
-                        } else {
-                            Toast.makeText(context, "Gagal menyalin cache via Shizuku", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                } else {
-                    openBrowser(path.trimEnd('/'), null)
-                }
+                openTexdbFolder(path, isShizuku)
             }
         )
     }
@@ -1653,7 +1713,11 @@ private fun RecentFileRow(item: RecentFileItem, onClick: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = if (item.type == LauncherFileType.IMG) Icons.Outlined.Folder else Icons.Outlined.Palette,
+                    imageVector = when (item.type) {
+                        LauncherFileType.IMG -> Icons.Outlined.Folder
+                        LauncherFileType.TXD -> Icons.Outlined.Palette
+                        LauncherFileType.FOLDER -> Icons.Outlined.FolderOpen
+                    },
                     contentDescription = null,
                     tint = if (item.type == LauncherFileType.IMG) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(22.dp)
@@ -1677,6 +1741,20 @@ private fun RecentFileRow(item: RecentFileItem, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (item.type == LauncherFileType.FOLDER) {
+                AssistChip(
+                    onClick = {},
+                    shape = CircleShape,
+                    label = { Text("Folder", style = MaterialTheme.typography.labelSmall) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.height(24.dp)
                 )
             }
 

@@ -71,6 +71,7 @@ import java.io.File
 class TexdbBrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppSettings.init(this)
         val dirPath = intent.getStringExtra(EXTRA_CACHE_DIR)
         val gameDir = intent.getStringExtra(EXTRA_GAME_DIR)
         setContent {
@@ -240,24 +241,22 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
         if (cacheDirPath == null) return
         busyText = "Mengimpor ${images.size} tekstur…"
         scope.launch {
+            // Fast overwrite (TXD Tool) is folded into the import call
+            // itself: the engine writes a clean, defragmented layout and
+            // syncs once — no separate rebuild pass afterwards.
+            val fastOverwrite = options.fastOverwrite && options.conflict == 1
             val result = withContext(Dispatchers.IO) {
                 NativeCore.texdbImportImages(
                     cacheDirPath, images, options.format, options.conflict,
                     options.siblingModel, options.reduceTo, options.camnorm,
-                    options.hashCheck, options.correctCaps, options.useRle, options.genMips, options.mipFilter
+                    options.hashCheck, options.correctCaps, options.useRle, options.genMips, options.mipFilter,
+                    defragment = fastOverwrite
                 )
             }
-            // Fast overwrite (TXD Tool): after overwriting, the whole cache
-            // is rebuilt so entries land in a clean, defragmented layout.
             val rebuildNote = if (
-                result != null && result.startsWith("OK") &&
-                options.fastOverwrite && options.conflict == 1
+                result != null && result.startsWith("OK") && fastOverwrite
             ) {
-                busyText = "Membangun ulang cache…"
-                val rb = withContext(Dispatchers.IO) {
-                    NativeCore.texdbRebuildCache(cacheDirPath)
-                }
-                if (rb != null && rb.startsWith("OK")) " · cache dibangun ulang" else " · rebuild gagal"
+                " · cache dibangun ulang"
             } else {
                 ""
             }

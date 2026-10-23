@@ -82,6 +82,12 @@ class ImgArchive private constructor(
         private fun loadSnapshot(imgFile: File, dirFile: File?): Snapshot {
             val lines = NativeCore.imgList(imgFile.absolutePath, dirFile?.absolutePath)
                 ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+            return snapshotFromLines(lines, dirFile)
+        }
+
+        /** Parses the engine's listing wire format into a [Snapshot]. */
+        @Throws(IOException::class)
+        private fun snapshotFromLines(lines: Array<String>, dirFile: File?): Snapshot {
             if (lines.isEmpty()) throw IOException("Engine Rust mengembalikan daftar kosong")
             val header = lines[0].split('\t', limit = 5)
             if (header[0] == "ERROR") {
@@ -234,6 +240,8 @@ class ImgArchive private constructor(
     /**
      * Rebuilds the archive by repacking all active entries sequentially into a contiguous
      * layout without gaps, reclaiming all dead space from deleted or replaced entries.
+     * The engine returns the post-rebuild listing with the same call, so the
+     * snapshot is replaced from it directly — no second archive open.
      * The Rust engine reports no per-entry progress, so the listener fires at start and end.
      */
     @Synchronized
@@ -241,8 +249,11 @@ class ImgArchive private constructor(
     fun rebuild(progressListener: ((current: Int, total: Int) -> Unit)? = null) {
         AppIntegrity.verifyOrThrow()
         progressListener?.invoke(0, entryCount)
-        requireOk(NativeCore.imgRebuild(imgFile.absolutePath, dirFile?.absolutePath))
-        refresh()
+        val lines = NativeCore.imgRebuild(imgFile.absolutePath, dirFile?.absolutePath)
+            ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+        val snap = snapshotFromLines(lines, dirFile)
+        entriesList = ArrayList(snap.entries)
+        totalDataSize = snap.totalDataSize
         progressListener?.invoke(entryCount, entryCount)
     }
 }

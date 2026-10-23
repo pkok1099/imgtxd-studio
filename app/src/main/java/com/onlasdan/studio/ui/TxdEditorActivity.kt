@@ -42,6 +42,7 @@ import com.onlasdan.studio.ui.components.SheetTitle
 import com.onlasdan.studio.ui.theme.ImgToolTheme
 import com.onlasdan.studio.util.ActiveSessionManager
 import com.onlasdan.studio.util.AppIntegrity
+import com.onlasdan.studio.util.AppSettings
 import com.onlasdan.studio.util.ParentArchiveInfo
 import com.onlasdan.studio.util.ShizukuManager
 import com.onlasdan.studio.util.WindowLauncher
@@ -79,6 +80,7 @@ class TxdEditorActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         ProcessRepositoryLocator.init(this)
+        AppSettings.init(this)
 
         if (!AppIntegrity.checkIntegrity(this)) {
             isTampered = true

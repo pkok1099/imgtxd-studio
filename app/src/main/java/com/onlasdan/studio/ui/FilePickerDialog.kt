@@ -26,13 +26,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.onlasdan.studio.R
 import com.onlasdan.studio.ui.theme.SemanticColors
+import com.onlasdan.studio.util.AppSettings
 import com.onlasdan.studio.util.ShizukuFileItem
 import com.onlasdan.studio.util.ShizukuManager
+import com.onlasdan.studio.util.StorageHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -102,14 +110,39 @@ fun FilePickerDialog(
     onMultipleFilesSelected: (paths: List<String>, isShizuku: Boolean) -> Unit = { _, _ -> }
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     val defaultRoot = Environment.getExternalStorageDirectory()?.absolutePath ?: "/storage/emulated/0"
+    val isFolderPicker = mode == PickerMode.PICK_FOLDER ||
+        mode == PickerMode.SELECT_FOLDER ||
+        mode == PickerMode.SELECT_FOLDER_OR_IMG
 
-    var currentPath by remember { mutableStateOf(initialPath ?: defaultRoot) }
+    var currentPath by remember {
+        mutableStateOf(initialPath ?: AppSettings.pickerStartDir(isFolderPicker, defaultRoot))
+    }
     var fileItems by remember { mutableStateOf<List<UnifiedFileItem>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var shizukuGranted by remember { mutableStateOf(ShizukuManager.hasPermission()) }
+    var allFilesAccess by remember { mutableStateOf(StorageHelper.hasManageStoragePermission()) }
+    var needsStorageAccess by remember { mutableStateOf(false) }
+
+    // Refresh the All Files Access state when the user returns from Settings.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                allFilesAccess = StorageHelper.hasManageStoragePermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Remember the last visited folder per picker context (file vs folder).
+    LaunchedEffect(currentPath) {
+        AppSettings.setLastDir(context, isFolderPicker, currentPath)
+    }
     var selectedPaths by remember { mutableStateOf(emptySet<String>()) }
     val isMultiSelectMode = mode == PickerMode.PICK_MULTIPLE_IMAGES || mode == PickerMode.PICK_MULTIPLE_TXD
 
@@ -185,6 +218,7 @@ fun FilePickerDialog(
                 val isRestricted = ShizukuManager.isRestrictedPath(path)
 
                 if (isRestricted) {
+                    needsStorageAccess = false
                     if (ShizukuManager.hasPermission()) {
                         val shizukuFiles = ShizukuManager.listFiles(path)
                         items.addAll(shizukuFiles.map {
@@ -201,30 +235,50 @@ fun FilePickerDialog(
                     }
                 } else {
                     val dir = File(path)
-                    val files = withContext(Dispatchers.IO) {
-                        dir.listFiles()?.toList() ?: emptyList()
+                    // null means the File API could not read the directory at
+                    // all (no All Files Access on shared storage) — distinct
+                    // from a genuinely empty directory.
+                    val listed = withContext(Dispatchers.IO) {
+                        dir.listFiles()?.toList()
                     }
-                    if (files.isEmpty() && ShizukuManager.hasPermission()) {
-                        val shizukuFiles = ShizukuManager.listFiles(path)
-                        items.addAll(shizukuFiles.map {
-                            UnifiedFileItem(
-                                name = it.name,
-                                path = it.path,
-                                isDirectory = it.isDirectory,
-                                size = it.size,
-                                isShizuku = true
-                            )
-                        })
-                    } else {
-                        items.addAll(files.map {
-                            UnifiedFileItem(
-                                name = it.name,
-                                path = it.absolutePath,
-                                isDirectory = it.isDirectory,
-                                size = if (it.isDirectory) 0 else it.length(),
-                                isShizuku = false
-                            )
-                        })
+                    when {
+                        listed != null && listed.isNotEmpty() -> {
+                            needsStorageAccess = false
+                            items.addAll(listed.map {
+                                UnifiedFileItem(
+                                    name = it.name,
+                                    path = it.absolutePath,
+                                    isDirectory = it.isDirectory,
+                                    size = if (it.isDirectory) 0 else it.length(),
+                                    isShizuku = false
+                                )
+                            })
+                        }
+                        ShizukuManager.hasPermission() -> {
+                            needsStorageAccess = false
+                            val shizukuFiles = ShizukuManager.listFiles(path)
+                            items.addAll(shizukuFiles.map {
+                                UnifiedFileItem(
+                                    name = it.name,
+                                    path = it.path,
+                                    isDirectory = it.isDirectory,
+                                    size = it.size,
+                                    isShizuku = true
+                                )
+                            })
+                        }
+                        listed == null && !allFilesAccess -> {
+                            // Offer the All Files Access grant in place instead
+                            // of a misleading "empty directory" state.
+                            needsStorageAccess = true
+                        }
+                        listed == null -> {
+                            errorMessage = "Tidak dapat membaca direktori ini."
+                        }
+                        else -> {
+                            // Genuinely empty directory.
+                            needsStorageAccess = false
+                        }
                     }
                 }
 
@@ -278,7 +332,7 @@ fun FilePickerDialog(
         }
     }
 
-    LaunchedEffect(currentPath, shizukuGranted) {
+    LaunchedEffect(currentPath, shizukuGranted, allFilesAccess) {
         loadDirectory(currentPath)
     }
 
@@ -502,6 +556,60 @@ fun FilePickerDialog(
                                 ) {
                                     Text("Izinkan")
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // All Files Access banner: direct File access to shared
+                // folders (Download, mod workspaces) is impossible without it.
+                if (needsStorageAccess && !allFilesAccess) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Lock,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.picker_all_files_title),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    text = stringResource(R.string.picker_all_files_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    context.startActivity(StorageHelper.getManageStorageIntent(context))
+                                },
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError
+                                ),
+                                modifier = Modifier.padding(start = 8.dp)
+                            ) {
+                                Text(stringResource(R.string.grant_permission))
                             }
                         }
                     }

@@ -21,9 +21,11 @@ class WindowModeTest {
     fun testLauncherFileType() {
         val img = LauncherFileType.IMG
         val txd = LauncherFileType.TXD
+        val folder = LauncherFileType.FOLDER
         assertNotNull(img)
         assertNotNull(txd)
-        assertEquals(2, LauncherFileType.values().size)
+        assertNotNull(folder)
+        assertEquals(3, LauncherFileType.values().size)
     }
 
     @Test

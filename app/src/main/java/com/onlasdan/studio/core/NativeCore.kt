@@ -23,7 +23,7 @@ object NativeCore {
         dir: String, names: Array<String>, pngs: Array<ByteArray>,
         format: Int, conflict: Int, siblingModel: String, reduceTo: Int,
         camnorm: Boolean, hashCheck: Boolean, correctCaps: Boolean,
-        useRle: Boolean, genMips: Boolean, mipFilter: Int
+        useRle: Boolean, genMips: Boolean, mipFilter: Int, defrag: Boolean
     ): String?
     private external fun nativeTexdbRebuildCache(dir: String): String?
     private external fun nativeTexdbTexturePixels(dir: String, index: Int): IntArray?
@@ -42,7 +42,7 @@ object NativeCore {
     private external fun nativeImgReplace(path: String, dir: String?, index: Int, filePath: String): String?
     private external fun nativeImgDelete(path: String, dir: String?, indices: IntArray): String?
     private external fun nativeImgRename(path: String, dir: String?, index: Int, newName: String): String?
-    private external fun nativeImgRebuild(path: String, dir: String?): String?
+    private external fun nativeImgRebuild(path: String, dir: String?): Array<String>?
     private external fun nativeTxdList(path: String): Array<String>?
     private external fun nativeTxdTexturePixels(path: String, index: Int): IntArray?
     private external fun nativeTxdReplaceTextures(
@@ -63,6 +63,8 @@ object NativeCore {
     private external fun nativeGameAudit(path: String): String?
     private external fun nativeDffRenameTexture(path: String, oldName: String, newName: String): String?
     private external fun nativeDataLinesPlan(fileText: String, pastedText: String): String?
+    private external fun nativeIdeScanDir(root: String): Array<String>?
+    private external fun nativeIdeScanPaths(paths: Array<String>): Array<String>?
     fun version(): String? = if (isAvailable) {
         try {
             nativeVersion()
@@ -99,7 +101,10 @@ object NativeCore {
      * wizard semantics). format: 0 compressed+alpha, 1 compressed no-alpha,
      * 2 uncompressed+alpha, 3 uncompressed no-alpha, 4 uncompressed 32bpp,
      * 5 uncompressed low-memory. conflict: 0 just add, 1 overwrite,
-     * 2 create sibling. Returns the engine's "OK ..."/"ERROR ..." line.
+     * 2 create sibling. When [defragment] is set (TXD Tool "fast
+     * overwrite"), the engine writes the result in a clean defragmented
+     * layout inside the same call — no separate rebuild pass is needed.
+     * Returns the engine's "OK ..."/"ERROR ..." line.
      */
     fun texdbImportImages(
         dir: String,
@@ -113,7 +118,8 @@ object NativeCore {
         correctCaps: Boolean,
         useRle: Boolean,
         genMips: Boolean,
-        mipFilter: Int = 1
+        mipFilter: Int = 1,
+        defragment: Boolean = false
     ): String? = if (isAvailable) {
         try {
             nativeTexdbImportImages(
@@ -121,7 +127,8 @@ object NativeCore {
                 images.map { it.first }.toTypedArray(),
                 images.map { it.second }.toTypedArray(),
                 format, conflict, siblingModel, reduceTo,
-                camnorm, hashCheck, correctCaps, useRle, genMips, mipFilter
+                camnorm, hashCheck, correctCaps, useRle, genMips, mipFilter,
+                defragment
             )
         } catch (_: Throwable) {
             null
@@ -308,7 +315,12 @@ object NativeCore {
         null
     }
 
-    fun imgRebuild(path: String, dir: String?): String? = if (isAvailable) {
+    /**
+     * Rebuilds the archive and returns the post-rebuild listing in the same
+     * wire format as [imgList] (single "ERROR\t<message>" element on failure),
+     * so callers refresh their snapshot without a second archive open.
+     */
+    fun imgRebuild(path: String, dir: String?): Array<String>? = if (isAvailable) {
         try {
             nativeImgRebuild(path, dir)
         } catch (_: Throwable) {
@@ -488,6 +500,62 @@ object NativeCore {
         }
     } else {
         null
+    }
+
+    /** Result of an IDE definition scan (see `rust-core/src/ide.rs`). */
+    data class IdeScanResult(
+        /** Model name (lowercase) -> streaming model id; duplicates keep the first id. */
+        val models: Map<String, Int>,
+        /** Txd name (lowercase) -> candidate model ids sharing that TXD. */
+        val txdToIds: Map<String, List<Int>>,
+        /** How many .ide files were read. */
+        val filesRead: Int
+    )
+
+    /** Scans a folder recursively for .ide files and builds the name -> id index. */
+    fun ideScanDir(root: String): IdeScanResult? = if (isAvailable) {
+        try {
+            parseIdeScanWire(nativeIdeScanDir(root))
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /** Builds the IDE index from an explicit list of .ide files, in order. */
+    fun ideScanPaths(paths: List<String>): IdeScanResult? = if (isAvailable) {
+        try {
+            parseIdeScanWire(nativeIdeScanPaths(paths.toTypedArray()))
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /**
+     * Parses the wire lines of `ide::wire_lines`: header
+     * "OK\t<modelCount>\t<txdNameCount>\t<filesRead>", then "M\t<name>\t<id>"
+     * and "T\t<txdName>\t<id,id,...>" lines. A single "ERROR\t<message>"
+     * element (or anything malformed) yields null.
+     */
+    internal fun parseIdeScanWire(lines: Array<String>?): IdeScanResult? {
+        if (lines.isNullOrEmpty()) return null
+        val header = lines[0].split('\t')
+        if (header.size < 4 || header[0] != "OK") return null
+        val models = LinkedHashMap<String, Int>()
+        val txdToIds = LinkedHashMap<String, List<Int>>()
+        for (i in 1 until lines.size) {
+            val parts = lines[i].split('\t')
+            if (parts.size < 3) continue
+            when (parts[0]) {
+                "M" -> parts[2].toIntOrNull()?.let { models[parts[1]] = it }
+                "T" -> txdToIds[parts[1]] =
+                    parts[2].split(',').mapNotNull { it.toIntOrNull() }
+            }
+        }
+        return IdeScanResult(models, txdToIds, header[3].toIntOrNull() ?: 0)
     }
 
 }

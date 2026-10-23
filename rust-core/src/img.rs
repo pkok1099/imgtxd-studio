@@ -134,11 +134,20 @@ impl ImgArchive {
             ));
         }
         if is_ver2_file(img_file) {
-            let data = std::fs::read(img_file)?;
-            if data.len() < 8 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "VER2 header truncated"));
-            }
-            let count = u32::from_le_bytes(data[4..8].try_into().unwrap());
+            // Directory-only read: header (8 B) + count * 32 B of entries.
+            // Payloads are read lazily by extract/rebuild, never here — the
+            // whole-file read this replaces cost ~1 s on a 283 MB archive.
+            let mut f = File::open(img_file)?;
+            let file_len = f.metadata()?.len();
+            let mut header = [0u8; 8];
+            f.read_exact(&mut header).map_err(|e| {
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    io::Error::new(io::ErrorKind::InvalidData, "VER2 header truncated")
+                } else {
+                    e
+                }
+            })?;
+            let count = u32::from_le_bytes(header[4..8].try_into().unwrap());
             if count > MAX_VER2_ENTRIES {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -146,10 +155,18 @@ impl ImgArchive {
                 ));
             }
             let need = 8 + count as usize * ENTRY_SIZE;
-            if data.len() < need {
+            if file_len < need as u64 {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "VER2 directory truncated"));
             }
-            let entries = parse_entries(&data[8..need], count as usize);
+            let mut dir_buf = vec![0u8; count as usize * ENTRY_SIZE];
+            f.read_exact(&mut dir_buf).map_err(|e| {
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    io::Error::new(io::ErrorKind::InvalidData, "VER2 directory truncated")
+                } else {
+                    e
+                }
+            })?;
+            let entries = parse_entries(&dir_buf, count as usize);
             Ok(Self {
                 img_file: img_file.to_path_buf(),
                 dir_file: None,

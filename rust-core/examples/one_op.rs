@@ -13,6 +13,7 @@ fn opts(conflict: ConflictPolicy) -> ImportOptions {
         use_rle: true,
         generate_mipmaps: true,
         mip_filter: 1,
+        defragment: false,
     }
 }
 

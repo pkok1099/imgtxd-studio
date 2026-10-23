@@ -114,10 +114,21 @@ class JobEngineImpl(
         val lockHandle = SafeFileWriter.acquireLock(request.targetPath)
 
         return try {
-            val archive = ImgArchive.open(targetFile)
-            val version = archive.version
-            val dirFile = archive.dirFile
-            val total = archive.entryCount
+            com.onlasdan.studio.util.AppIntegrity.verifyOrThrow()
+            // The rebuild call returns the post-rebuild listing header
+            // (version / entry count / resolved .dir path), so this chain no
+            // longer opens the archive separately just to read them.
+            val lines = com.onlasdan.studio.core.NativeCore.imgRebuild(
+                targetFile.absolutePath, null
+            ) ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+            val header = lines.firstOrNull()?.split('\t', limit = 5)
+                ?: throw IOException("Engine Rust mengembalikan daftar kosong")
+            if (header[0] == "ERROR") {
+                throw IOException(header.getOrNull(1) ?: "Rebuild gagal")
+            }
+            val version = if (header.getOrNull(1) == "VER1") ImgVersion.VER1 else ImgVersion.VER2
+            val total = header.getOrNull(2)?.toIntOrNull() ?: 0
+            val dirFile = header.getOrNull(4)?.takeIf { it.isNotEmpty() }?.let { File(it) }
 
             CheckpointManager.createCheckpoint(request.id, "REBUILD", request.targetPath, total)
             onProgress(
@@ -132,16 +143,6 @@ class JobEngineImpl(
             )
 
             if (isCancelled(request.id)) throw CancellationException("Dibatalkan oleh pengguna")
-
-            val result = com.onlasdan.studio.core.NativeCore.imgRebuild(
-                targetFile.absolutePath, dirFile?.absolutePath
-            )
-            when {
-                result == null ->
-                    throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
-                result.startsWith("ERROR ") ->
-                    throw IOException(result.removePrefix("ERROR "))
-            }
 
             // Sinkronisasi Shizuku jika path tujuan disediakan
             if (request.isShizuku && shizukuBridge != null) {

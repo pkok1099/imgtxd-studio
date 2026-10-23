@@ -11,6 +11,8 @@
     <string name="storage_permission_title">All Files Access Needed</string>
     <string name="storage_permission_desc">ImgTxd Studio requires access to modify game archives located in storage.</string>
     <string name="grant_permission">Grant Access</string>
+    <string name="picker_all_files_title">All Files Access Not Granted</string>
+    <string name="picker_all_files_desc">Folder ini tidak dapat dibaca tanpa izin. Aktifkan All Files Access agar folder umum seperti Download dan folder rakitan mod dapat diakses langsung tanpa Shizuku.</string>
 
     <!-- Modloader (in-game plugin IPC) -->
     <string name="modloader_title">Modloader</string>
@@ -21,7 +23,12 @@
     <string name="modloader_status_disconnected">Game not detected</string>
     <string name="modloader_status_unknown">Not checked yet</string>
     <string name="modloader_plugin_hint">Plugin di dalam game (koneksi TCP lokal)</string>
-    <string name="modloader_no_archive">Tidak ada arsip IMG yang terbuka. Buka arsip IMG untuk memilih berkas model.</string>
+    <string name="modloader_no_archive">Tidak ada arsip IMG yang terbuka. Pemilih arsip tidak tersedia — berkas lepas tetap bisa dipilih.</string>
+    <string name="modloader_choose_file">Choose File</string>
+    <string name="modloader_file_source">Berkas lepas • %1$s</string>
+    <string name="modloader_pick_file_title">Pilih Berkas Model .dff / .txd</string>
+    <string name="modloader_file_wrong_type">Hanya berkas .dff atau .txd yang bisa dikirim ke game.</string>
+    <string name="modloader_file_missing">Berkas tidak ditemukan atau tidak dapat dibaca: %1$s</string>
     <string name="modloader_no_models">Arsip ini tidak berisi berkas .dff atau .txd.</string>
     <string name="modloader_pick_entry_title">Pilih berkas model</string>
     <string name="modloader_search_entry">Cari berkas model</string>
@@ -31,4 +38,23 @@
     <string name="modloader_model_id_help">ID streaming model di dalam game (0–26315). Isi model dengan ID ini akan diganti oleh berkas terpilih.</string>
     <string name="modloader_substitute">Substitute</string>
     <string name="modloader_reload">Reload Model</string>
+    <string name="modloader_ide_scan">Scan Game IDE</string>
+    <string name="modloader_ide_rescan">Rescan</string>
+    <plurals name="modloader_ide_status">
+        <item quantity="one">IDE index: %1$d model</item>
+        <item quantity="other">IDE index: %1$d models</item>
+    </plurals>
+    <string name="modloader_ide_none">Belum ada indeks IDE. Pindai folder data game agar Model ID terisi otomatis dari nama berkas.</string>
+    <string name="modloader_ide_hint_from_index">from IDE index</string>
+    <plurals name="modloader_ide_hint_candidates">
+        <item quantity="one">%1$d kandidat cocok di indeks IDE — isi Model ID secara manual.</item>
+        <item quantity="other">%1$d kandidat cocok di indeks IDE — isi Model ID secara manual.</item>
+    </plurals>
+    <string name="modloader_ide_hint_not_found">Tidak ditemukan di indeks IDE.</string>
+    <plurals name="modloader_ide_scan_done">
+        <item quantity="one">Indeks IDE dibuat: %1$d model dari %2$d berkas .ide.</item>
+        <item quantity="other">Indeks IDE dibuat: %1$d model dari %2$d berkas .ide.</item>
+    </plurals>
+    <string name="modloader_ide_scan_empty">Tidak ditemukan berkas .ide di folder itu.</string>
+    <string name="modloader_ide_scan_failed">Gagal memindai folder data game.</string>
 </resources>

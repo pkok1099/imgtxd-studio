@@ -50,6 +50,8 @@ object AppSettings {
     private val KEY_WINDOW_MODE = stringPreferencesKey("window_mode")
     private val KEY_TXD_VIEW_MODE = stringPreferencesKey("txd_view_mode")
     private val KEY_RECENT_FILES = stringPreferencesKey("recent_files_json")
+    private val KEY_LAST_FILE_DIR = stringPreferencesKey("picker_last_file_dir")
+    private val KEY_LAST_FOLDER_DIR = stringPreferencesKey("picker_last_folder_dir")
 
     @Volatile
     var cachedWindowMode: WindowMode = WindowMode.PER_FEATURE
@@ -57,6 +59,14 @@ object AppSettings {
 
     @Volatile
     var cachedTxdViewMode: TxdViewMode = TxdViewMode.SMALL
+        private set
+
+    @Volatile
+    var cachedLastFileDir: String? = null
+        private set
+
+    @Volatile
+    var cachedLastFolderDir: String? = null
         private set
 
     private var isInitialized = false
@@ -74,6 +84,52 @@ object AppSettings {
                 cachedTxdViewMode = mode
             }
         }
+        CoroutineScope(Dispatchers.IO).launch {
+            getLastDirFlow(context, folderPicker = false).collect { dir ->
+                cachedLastFileDir = dir
+            }
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            getLastDirFlow(context, folderPicker = true).collect { dir ->
+                cachedLastFolderDir = dir
+            }
+        }
+    }
+
+    // --- Last visited picker directory (per picker context) ---
+
+    fun getLastDirFlow(context: Context, folderPicker: Boolean): Flow<String?> {
+        val key = if (folderPicker) KEY_LAST_FOLDER_DIR else KEY_LAST_FILE_DIR
+        return context.appDataStore.data.map { preferences -> preferences[key] }
+    }
+
+    suspend fun setLastDir(context: Context, folderPicker: Boolean, path: String) {
+        if (folderPicker) cachedLastFolderDir = path else cachedLastFileDir = path
+        val key = if (folderPicker) KEY_LAST_FOLDER_DIR else KEY_LAST_FILE_DIR
+        context.appDataStore.edit { preferences ->
+            preferences[key] = path
+        }
+    }
+
+    /**
+     * Start directory for the file picker: the folder the user visited last in
+     * the same picker context, validated so a deleted/moved folder falls back
+     * to its nearest existing ancestor (or [fallback] when nothing survives).
+     * Shizuku-restricted paths cannot be stat'ed with java.io.File, so they are
+     * trusted as-is (the picker surfaces an error if they are really gone).
+     */
+    fun pickerStartDir(folderPicker: Boolean, fallback: String): String {
+        val remembered = (if (folderPicker) cachedLastFolderDir else cachedLastFileDir)
+            ?.trimEnd('/')
+            ?.takeIf { it.isNotBlank() }
+            ?: return fallback
+        if (ShizukuManager.isRestrictedPath(remembered)) return remembered
+        var candidate: String? = remembered
+        while (!candidate.isNullOrBlank() && candidate != "/") {
+            if (File(candidate).isDirectory) return candidate
+            candidate = File(candidate).parent
+        }
+        return fallback
     }
 
     fun getWindowModeFlow(context: Context): Flow<WindowMode> {

@@ -10,6 +10,7 @@ pub mod audit;
 pub mod datalines;
 pub mod dff;
 pub mod codec;
+pub mod ide;
 pub mod img;
 pub mod mipmap;
 pub mod texdb;
@@ -124,6 +125,7 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbImpor
     use_rle: jboolean,
     gen_mips: jboolean,
     mip_filter: jint,
+    defrag: jboolean,
 ) -> jstring {
     let dir_path = jstring_to_string(&mut env, &dir);
     let cache_name = std::path::Path::new(&dir_path)
@@ -153,6 +155,7 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbImpor
         use_rle: use_rle != 0,
         generate_mipmaps: gen_mips != 0,
         mip_filter,
+        defragment: defrag != 0,
     };
     let result = texdb::import_textures(std::path::Path::new(&dir_path), &cache_name, &images, &opts);
     report_string(&mut env, result)
@@ -446,6 +449,35 @@ fn img_entry_at<'a>(
         .ok_or_else(|| "Indeks entri di luar jangkauan".to_string())
 }
 
+/// The listing wire format shared by nativeImgList and nativeImgRebuild:
+/// element 0 is "OK\t<VER1|VER2>\t<count>\t<totalDataSize>\t<resolvedDirPath|>"
+/// and each following element is "<offsetSectors>\t<sizeSectors>\t<cleanName>".
+fn img_listing_lines(archive: &img::ImgArchive) -> Vec<String> {
+    let version = match archive.version {
+        img::ImgVersion::Ver1 => "VER1",
+        img::ImgVersion::Ver2 => "VER2",
+    };
+    let dir_path = archive
+        .dir_file
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut v = vec![format!(
+        "OK\t{version}\t{}\t{}\t{dir_path}",
+        archive.entries.len(),
+        archive.total_data_size()
+    )];
+    for e in &archive.entries {
+        v.push(format!(
+            "{}\t{}\t{}",
+            e.offset_sectors,
+            e.size_sectors,
+            e.clean_name()
+        ));
+    }
+    v
+}
+
 /// Whether the file starts with the VER2 magic.
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeImgIsVer2(
@@ -475,51 +507,10 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeImgList(
     let path_str = jstring_to_string(&mut env, &path);
     let dir_opt = opt_jstring_to_string(&mut env, &dir);
     let items: Vec<String> = match img_open_archive(&path_str, &dir_opt) {
-        Ok(archive) => {
-            let version = match archive.version {
-                img::ImgVersion::Ver1 => "VER1",
-                img::ImgVersion::Ver2 => "VER2",
-            };
-            let dir_path = archive
-                .dir_file
-                .as_ref()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let mut v = vec![format!(
-                "OK\t{version}\t{}\t{}\t{dir_path}",
-                archive.entries.len(),
-                archive.total_data_size()
-            )];
-            for e in &archive.entries {
-                v.push(format!(
-                    "{}\t{}\t{}",
-                    e.offset_sectors,
-                    e.size_sectors,
-                    e.clean_name()
-                ));
-            }
-            v
-        }
+        Ok(archive) => img_listing_lines(&archive),
         Err(e) => vec![format!("ERROR\t{e}")],
     };
-    let string_class = match env.find_class("java/lang/String") {
-        Ok(c) => c,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    let array = match env.new_object_array(items.len() as jint, string_class, JObject::null()) {
-        Ok(a) => a,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    for (i, item) in items.iter().enumerate() {
-        let s = match env.new_string(item) {
-            Ok(s) => s,
-            Err(_) => return std::ptr::null_mut(),
-        };
-        if env.set_object_array_element(&array, i as jint, s).is_err() {
-            return std::ptr::null_mut();
-        }
-    }
-    array.into_raw()
+    string_array(&mut env, &items)
 }
 
 /// Creates a fresh empty archive (version 1 or 2) at the path.
@@ -664,21 +655,26 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeImgRename(
     report_string(&mut env, result)
 }
 
-/// Rebuilds (repacks) the archive in place.
+/// Rebuilds (repacks) the archive in place and returns the post-rebuild
+/// listing (same wire format as nativeImgList) so callers can refresh their
+/// snapshot from this single open — no separate list call. On failure a
+/// single "ERROR\t<message>" element is returned.
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeImgRebuild(
     mut env: JNIEnv,
     _class: JClass,
     path: JString,
     dir: JString,
-) -> jstring {
+) -> jobjectArray {
     let path_str = jstring_to_string(&mut env, &path);
     let dir_opt = opt_jstring_to_string(&mut env, &dir);
-    let result = img_op(&path_str, &dir_opt, |archive| {
-        archive.rebuild()?;
-        Ok(format!("rebuild selesai; {} entri", archive.entries.len()))
-    });
-    report_string(&mut env, result)
+    let items: Vec<String> = (|| -> Result<Vec<String>, String> {
+        let mut archive = img_open_archive(&path_str, &dir_opt)?;
+        archive.rebuild().map_err(|e| e.to_string())?;
+        Ok(img_listing_lines(&archive))
+    })()
+    .unwrap_or_else(|e| vec![format!("ERROR\t{e}")]);
+    string_array(&mut env, &items)
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,6 +998,46 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeAudioCompu
         Err(e) => vec![format!("ERROR\t{e}")],
     };
     string_array(&mut env, &items)
+}
+
+/// IDE definition index scan of one folder (recursive): wire lines of
+/// `ide::wire_lines` (header + `M`/`T` lines), or a single
+/// `ERROR\t<message>` element.
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeIdeScanDir(
+    mut env: JNIEnv,
+    _class: JClass,
+    root: JString,
+) -> jobjectArray {
+    let root_str = jstring_to_string(&mut env, &root);
+    let items = match ide::scan_dir(std::path::Path::new(&root_str)) {
+        Ok(index) => ide::wire_lines(&index),
+        Err(e) => vec![format!("ERROR\t{e}")],
+    };
+    string_array(&mut env, &items)
+}
+
+/// IDE definition index over an explicit list of .ide files, parsed in the
+/// given order (duplicate model names keep the first id seen).
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeIdeScanPaths(
+    mut env: JNIEnv,
+    _class: JClass,
+    paths: JObjectArray,
+) -> jobjectArray {
+    let count = env.get_array_length(&paths).unwrap_or(0);
+    let mut files: Vec<std::path::PathBuf> = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let Ok(obj) = env.get_object_array_element(&paths, i) else {
+            continue;
+        };
+        files.push(std::path::PathBuf::from(jstring_to_string(
+            &mut env,
+            &JString::from(obj),
+        )));
+    }
+    let index = ide::parse_files(&files);
+    string_array(&mut env, &ide::wire_lines(&index))
 }
 
 /// Data-line merge plan for mod data files (handling.cfg / vehicles.ide /
