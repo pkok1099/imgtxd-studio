@@ -160,8 +160,98 @@ fn clean_name(raw: &str) -> String {
     }
 }
 
-/// Parses a whole TXD file (port of `TxdParser.parse`).
-pub fn parse(data: &[u8]) -> Result<TxdFile, String> {
+/// Parses one TEXTURE_NATIVE entry (the native chunk header is already
+/// consumed; `r` is positioned at the inner struct chunk). Shared verbatim
+/// by `parse` and the targeted single-texture scan `decode_entry_pixels_at`.
+fn parse_native_entry(
+    r: &mut Reader,
+    slot_index: usize,
+    native_size: i32,
+) -> Result<TxdTexture, String> {
+    let data_len = r.buf.len();
+    let native_start = r.pos;
+    let native_end = (native_start + native_size.max(0) as usize).min(data_len);
+
+    let _inner_id = r.i32();
+    let inner_size = r.i32();
+    let _inner_version = r.i32();
+    let inner_end = r.pos + inner_size.max(0) as usize;
+
+    let platform_id = r.i32() as u32;
+    let filter_flags = r.i32() as u32;
+    let name = clean_name(&latin1(&r.bytes(32)));
+    let mask_name = clean_name(&latin1(&r.bytes(32)));
+    let raster_format = r.i32() as u32;
+    let d3d_format = r.i32() as u32;
+    let width = r.u16() as usize;
+    let height = r.u16() as usize;
+    let depth = r.u8() as u32;
+    let mipmap_count = r.u8() as usize;
+    let _raster_type = r.u8();
+    let _compression = r.u8();
+
+    let has_palette = raster_format & FORMAT_PAL8 != 0 || depth == 8;
+    let palette = if has_palette && r.pos + 1024 <= data_len {
+        Some(r.bytes(1024))
+    } else {
+        None
+    };
+
+    let data_size = r.i32();
+    if data_size < 0 {
+        return Err("Format TXD rusak: ukuran data tekstur negatif".to_string());
+    }
+    let mut raw_pixels = vec![0u8; data_size as usize];
+    let to_read = (data_size as usize).min(r.remaining());
+    raw_pixels[..to_read].copy_from_slice(&r.bytes(to_read));
+
+    let mut mip_levels = Vec::new();
+    let mut level_index = 1;
+    while level_index < mipmap_count && r.pos + 4 <= inner_end && r.pos + 4 <= data_len {
+        let level_size = r.i32();
+        if level_size < 0
+            || r.pos + level_size as usize > inner_end
+            || r.pos + level_size as usize > data_len
+        {
+            break;
+        }
+        mip_levels.push(r.bytes(level_size as usize));
+        level_index += 1;
+    }
+
+    if r.pos < inner_end {
+        r.seek(inner_end);
+    }
+    if r.pos < native_end {
+        if r.remaining() >= 12 {
+            let _ext_id = r.i32();
+            let ext_size = r.i32();
+            let _ext_ver = r.i32();
+            let next = (r.pos as i64 + ext_size as i64).min(native_end as i64);
+            r.seek(next.max(0) as usize);
+        } else {
+            r.seek(native_end);
+        }
+    }
+
+    Ok(TxdTexture {
+        name: if name.is_empty() { format!("texture_{slot_index}") } else { name },
+        mask_name,
+        width,
+        height,
+        depth,
+        raster_format,
+        d3d_format,
+        filter_flags,
+        platform_id,
+        raw_pixels,
+        palette,
+        mipmap_count: mipmap_count.max(1),
+        mip_levels,
+    })
+}
+
+fn parse_header(data: &[u8]) -> Result<(Reader<'_>, usize, u32), String> {
     let mut r = Reader { buf: data, pos: 0 };
     if r.remaining() < 12 {
         return Err("Format TXD rusak: ukuran file terlalu kecil".to_string());
@@ -186,7 +276,12 @@ pub fn parse(data: &[u8]) -> Result<TxdFile, String> {
     if remaining_struct > 0 {
         r.seek(r.pos + remaining_struct as usize);
     }
+    Ok((r, count, rw_version))
+}
 
+/// Parses a whole TXD file (port of `TxdParser.parse`).
+pub fn parse(data: &[u8]) -> Result<TxdFile, String> {
+    let (mut r, count, rw_version) = parse_header(data)?;
     let mut entries = Vec::with_capacity(count);
     for i in 0..count {
         if r.remaining() < 12 {
@@ -200,88 +295,43 @@ pub fn parse(data: &[u8]) -> Result<TxdFile, String> {
             r.seek(next.max(0) as usize);
             continue;
         }
-        let native_start = r.pos;
-        let native_end = (native_start + native_size.max(0) as usize).min(data.len());
-
-        let _inner_id = r.i32();
-        let inner_size = r.i32();
-        let _inner_version = r.i32();
-        let inner_end = r.pos + inner_size.max(0) as usize;
-
-        let platform_id = r.i32() as u32;
-        let filter_flags = r.i32() as u32;
-        let name = clean_name(&latin1(&r.bytes(32)));
-        let mask_name = clean_name(&latin1(&r.bytes(32)));
-        let raster_format = r.i32() as u32;
-        let d3d_format = r.i32() as u32;
-        let width = r.u16() as usize;
-        let height = r.u16() as usize;
-        let depth = r.u8() as u32;
-        let mipmap_count = r.u8() as usize;
-        let _raster_type = r.u8();
-        let _compression = r.u8();
-
-        let has_palette = raster_format & FORMAT_PAL8 != 0 || depth == 8;
-        let palette = if has_palette && r.pos + 1024 <= data.len() {
-            Some(r.bytes(1024))
-        } else {
-            None
-        };
-
-        let data_size = r.i32();
-        if data_size < 0 {
-            return Err("Format TXD rusak: ukuran data tekstur negatif".to_string());
-        }
-        let mut raw_pixels = vec![0u8; data_size as usize];
-        let to_read = (data_size as usize).min(r.remaining());
-        raw_pixels[..to_read].copy_from_slice(&r.bytes(to_read));
-
-        let mut mip_levels = Vec::new();
-        let mut level_index = 1;
-        while level_index < mipmap_count && r.pos + 4 <= inner_end && r.pos + 4 <= data.len() {
-            let level_size = r.i32();
-            if level_size < 0
-                || r.pos + level_size as usize > inner_end
-                || r.pos + level_size as usize > data.len()
-            {
-                break;
-            }
-            mip_levels.push(r.bytes(level_size as usize));
-            level_index += 1;
-        }
-
-        if r.pos < inner_end {
-            r.seek(inner_end);
-        }
-        if r.pos < native_end {
-            if r.remaining() >= 12 {
-                let _ext_id = r.i32();
-                let ext_size = r.i32();
-                let _ext_ver = r.i32();
-                let next = (r.pos as i64 + ext_size as i64).min(native_end as i64);
-                r.seek(next.max(0) as usize);
-            } else {
-                r.seek(native_end);
-            }
-        }
-
-        entries.push(TxdTexture {
-            name: if name.is_empty() { format!("texture_{i}") } else { name },
-            mask_name,
-            width,
-            height,
-            depth,
-            raster_format,
-            d3d_format,
-            filter_flags,
-            platform_id,
-            raw_pixels,
-            palette,
-            mipmap_count: mipmap_count.max(1),
-            mip_levels,
-        });
+        entries.push(parse_native_entry(&mut r, i, native_size)?);
     }
     Ok(TxdFile { textures: entries, rw_version })
+}
+
+/// Targeted single-texture scan: walks only the chunk headers and copies
+/// just texture `index`'s payload, instead of materializing every entry's
+/// pixel data like `parse` does. Identical results to
+/// `parse(path)?.textures.get(index)` + `decode_pixels` for well-formed
+/// files, at a fraction of the cost on large dictionaries.
+pub fn decode_entry_pixels_at(path: &std::path::Path, index: usize) -> Option<Vec<u32>> {
+    let data = std::fs::read(path).ok()?;
+    let (mut r, count, _rw_version) = parse_header(&data).ok()?;
+    let mut produced = 0usize;
+    while produced < count {
+        if r.remaining() < 12 {
+            break;
+        }
+        let native_id = r.i32() as u32;
+        let native_size = r.i32();
+        let _native_version = r.i32();
+        if native_id != CHUNK_TEXTURE_NATIVE {
+            let next = (r.pos as i64 + native_size as i64).min(data.len() as i64);
+            r.seek(next.max(0) as usize);
+            continue;
+        }
+        if produced == index {
+            let entry = parse_native_entry(&mut r, produced, native_size).ok()?;
+            return decode_pixels(&entry);
+        }
+        produced += 1;
+        // Not the requested texture: skip its whole native chunk (the same
+        // position `parse_native_entry` would land on after walking it).
+        let next = (r.pos as i64 + native_size as i64).min(data.len() as i64);
+        r.seek(next.max(0) as usize);
+    }
+    None
 }
 
 pub fn parse_file(path: &std::path::Path) -> Result<TxdFile, String> {
@@ -380,16 +430,58 @@ pub fn build_to_bytes(entries: &[TxdTexture], rw_version: u32) -> Vec<u8> {
 
 /// DXT3 decode (explicit 4-bit alpha + DXT1 color), port of the Kotlin decoder.
 pub fn decode_dxt3(data: &[u8], width: usize, height: usize) -> Vec<u32> {
-    use crate::codec::dxt::{interpolate_color, rgb565_to_argb};
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let mut pixels = vec![0u32; width * height];
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
-    let mut offset = 0usize;
+    // Large textures: decode block-row bands on worker threads (deterministic,
+    // identical output; threshold 16384 blocks = 512x512, decode work per
+    // block is small).
+    if blocks_x * blocks_y < 16384 {
+        decode_dxt3_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
+        return pixels;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    let rows_per_band = blocks_y.div_ceil(workers).max(4);
+    std::thread::scope(|s| {
+        let mut rest: &mut [u32] = &mut pixels;
+        let mut by_start = 0usize;
+        while by_start < blocks_y {
+            let by_end = (by_start + rows_per_band).min(blocks_y);
+            let y0 = (by_start * 4).min(height);
+            let y1 = (by_end * 4).min(height);
+            let (cur, tail) = rest.split_at_mut((y1 - y0) * width);
+            rest = tail;
+            s.spawn(move || {
+                decode_dxt3_band(data, width, height, blocks_x, by_start, by_end, cur);
+            });
+            by_start = by_end;
+        }
+    });
+    pixels
+}
+
+/// Decodes block-rows [by_start, by_end) into `pixels` (pixel rows from y0).
+fn decode_dxt3_band(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    blocks_x: usize,
+    by_start: usize,
+    by_end: usize,
+    pixels: &mut [u32],
+) {
+    use crate::codec::dxt::{interpolate_color, rgb565_to_argb};
+    let y0 = (by_start * 4).min(height);
+    let band_y = y0 * width;
+    let mut offset = by_start * blocks_x * 16;
     let mut palette = [0u32; 4];
-    for by in 0..blocks_y {
+    for by in by_start..by_end {
         for bx in 0..blocks_x {
             if offset + 16 > data.len() {
-                break;
+                return;
             }
             let alpha_offset = offset;
             let color_offset = offset + 8;
@@ -423,13 +515,12 @@ pub fn decode_dxt3(data: &[u8], width: usize, height: usize) -> Vec<u32> {
                     let alpha = (a4 as u32 * 255) / 15;
                     let code = ((lookup >> (pixel_idx * 2)) & 0x03) as usize;
                     let rgb = palette[code] & 0x00FF_FFFF;
-                    pixels[y * width + x] = (alpha << 24) | rgb;
+                    pixels[(y * width + x) - band_y] = (alpha << 24) | rgb;
                 }
             }
             offset += 16;
         }
     }
-    pixels
 }
 
 fn decode_paletted8(entry: &TxdTexture) -> Vec<u32> {
@@ -456,13 +547,13 @@ fn decode_paletted8(entry: &TxdTexture) -> Vec<u32> {
 fn decode_rgba32(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
     let mut pixels = vec![0u32; width * height];
     let limit = pixels.len().min(raw.len() / 4);
-    for i in 0..limit {
+    for (i, out) in pixels[..limit].iter_mut().enumerate() {
         let p = i * 4;
         let b = raw[p] as u32;
         let g = raw[p + 1] as u32;
         let r = raw[p + 2] as u32;
         let a = raw[p + 3] as u32;
-        pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        *out = (a << 24) | (r << 16) | (g << 8) | b;
     }
     pixels
 }
@@ -470,12 +561,12 @@ fn decode_rgba32(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
 fn decode_rgb24(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
     let mut pixels = vec![0u32; width * height];
     let limit = pixels.len().min(raw.len() / 3);
-    for i in 0..limit {
+    for (i, out) in pixels[..limit].iter_mut().enumerate() {
         let p = i * 3;
         let b = raw[p] as u32;
         let g = raw[p + 1] as u32;
         let r = raw[p + 2] as u32;
-        pixels[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        *out = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
     pixels
 }
@@ -483,13 +574,13 @@ fn decode_rgb24(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
 fn decode_rgb565(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
     let mut pixels = vec![0u32; width * height];
     let limit = pixels.len().min(raw.len() / 2);
-    for i in 0..limit {
+    for (i, out) in pixels[..limit].iter_mut().enumerate() {
         let p = i * 2;
         let c = (raw[p] as u32) | ((raw[p + 1] as u32) << 8);
         let r = (((c >> 11) & 0x1F) * 255 + 15) / 31;
         let g = (((c >> 5) & 0x3F) * 255 + 31) / 63;
         let b = ((c & 0x1F) * 255 + 15) / 31;
-        pixels[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        *out = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
     pixels
 }
@@ -497,14 +588,14 @@ fn decode_rgb565(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
 fn decode_rgba1555(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
     let mut pixels = vec![0u32; width * height];
     let limit = pixels.len().min(raw.len() / 2);
-    for i in 0..limit {
+    for (i, out) in pixels[..limit].iter_mut().enumerate() {
         let p = i * 2;
         let c = (raw[p] as u32) | ((raw[p + 1] as u32) << 8);
         let a = if c & 0x8000 != 0 { 255 } else { 0 };
         let r = (((c >> 10) & 0x1F) * 255 + 15) / 31;
         let g = (((c >> 5) & 0x1F) * 255 + 15) / 31;
         let b = ((c & 0x1F) * 255 + 15) / 31;
-        pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        *out = (a << 24) | (r << 16) | (g << 8) | b;
     }
     pixels
 }
@@ -512,14 +603,14 @@ fn decode_rgba1555(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
 fn decode_rgba4444(raw: &[u8], width: usize, height: usize) -> Vec<u32> {
     let mut pixels = vec![0u32; width * height];
     let limit = pixels.len().min(raw.len() / 2);
-    for i in 0..limit {
+    for (i, out) in pixels[..limit].iter_mut().enumerate() {
         let p = i * 2;
         let c = (raw[p] as u32) | ((raw[p + 1] as u32) << 8);
         let a = ((c >> 12) & 0x0F) * 17;
         let r = ((c >> 8) & 0x0F) * 17;
         let g = ((c >> 4) & 0x0F) * 17;
         let b = (c & 0x0F) * 17;
-        pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        *out = (a << 24) | (r << 16) | (g << 8) | b;
     }
     pixels
 }
@@ -693,18 +784,22 @@ pub fn reduce_to_fit(
     (resample(src, sw, sh, nw, nh, MipFilter::Bilinear), nw, nh)
 }
 
-/// Full mip chain below the source (ports of `generateChain`).
+/// Full mip chain below the source (ports of `generateChain`). Each level
+/// is produced from the previous one without an extra per-level clone.
 pub fn generate_chain(
     src: &[u32], sw: usize, sh: usize, filter: MipFilter,
 ) -> Vec<(Vec<u32>, usize, usize)> {
-    let mut levels = Vec::new();
-    let (mut cur, mut cw, mut ch) = (src.to_vec(), sw, sh);
-    while cw > 1 || ch > 1 {
-        let (next, nw, nh) = downscale_half(&cur, cw, ch, filter);
-        levels.push((next.clone(), nw, nh));
-        cur = next;
-        cw = nw;
-        ch = nh;
+    let mut levels: Vec<(Vec<u32>, usize, usize)> = Vec::new();
+    loop {
+        let (cur, cw, ch) = match levels.last() {
+            Some((px, w, h)) => (px.as_slice(), *w, *h),
+            None => (src, sw, sh),
+        };
+        if cw == 1 && ch == 1 {
+            break;
+        }
+        let (next, nw, nh) = downscale_half(cur, cw, ch, filter);
+        levels.push((next, nw, nh));
     }
     levels
 }

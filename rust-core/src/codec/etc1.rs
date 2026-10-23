@@ -63,6 +63,11 @@ fn decode_block(b: &[u8; 8], out: &mut [u32; 16]) {
     }
     let t1 = ((b[3] >> 5) & 7) as usize;
     let t2 = ((b[3] >> 2) & 7) as usize;
+    // Precompute the four packed output colors per subblock (same math as the
+    // per-pixel form: clamp255(base + modifier), same packing). Pixels then do
+    // one table lookup instead of 3 clamps + packing each.
+    let pal_a = packed_palette(c1, t1);
+    let pal_b = packed_palette(c2, t2);
     let msb = ((b[4] as u16) << 8) | b[5] as u16;
     let lsb = ((b[6] as u16) << 8) | b[7] as u16;
     for x in 0..4 {
@@ -70,28 +75,83 @@ fn decode_block(b: &[u8; 8], out: &mut [u32; 16]) {
             let k = x * 4 + y;
             let idx = ((((msb >> (15 - k)) & 1) << 1) | ((lsb >> (15 - k)) & 1)) as usize;
             let first = if flip { y < 2 } else { x < 2 };
-            let (base, t) = if first { (c1, t1) } else { (c2, t2) };
-            let (small, big) = MODIFIERS[t];
-            let m = [-big, -small, small, big][idx];
-            let r = clamp255(base.0 as i32 + m);
-            let g = clamp255(base.1 as i32 + m);
-            let bl = clamp255(base.2 as i32 + m);
-            out[y * 4 + x] = 0xFF00_0000 | (r << 16) | (g << 8) | bl;
+            let pal = if first { &pal_a } else { &pal_b };
+            out[y * 4 + x] = pal[idx];
         }
     }
 }
 
+/// The four packed ARGB outputs of one subblock: modifier table `t` applied to
+/// `base`, clamped and packed exactly as the per-pixel decoder did.
+#[inline]
+fn packed_palette(base: (u32, u32, u32), t: usize) -> [u32; 4] {
+    let (small, big) = MODIFIERS[t];
+    let mut pal = [0u32; 4];
+    for (i, &m) in [-big, -small, small, big].iter().enumerate() {
+        let r = clamp255(base.0 as i32 + m);
+        let g = clamp255(base.1 as i32 + m);
+        let bl = clamp255(base.2 as i32 + m);
+        pal[i] = 0xFF00_0000 | (r << 16) | (g << 8) | bl;
+    }
+    pal
+}
+
 /// Decodes ETC1 block data to ARGB pixels (alpha = 255).
+/// Large textures split into horizontal block-row bands decoded on worker
+/// threads (deterministic: every band writes a disjoint row range; identical
+/// output to the serial path). Decode work per block is small, so the
+/// parallel threshold (16384 blocks = 512x512) sits well above the encoder's.
 pub fn decode_etc1(data: &[u8], width: usize, height: usize) -> Vec<u32> {
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let mut pixels = vec![0u32; width * height];
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    if blocks_x * blocks_y < 16384 {
+        decode_etc1_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
+        return pixels;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    // At least 4 block-rows per band so per-thread work stays >> spawn cost.
+    let rows_per_band = blocks_y.div_ceil(workers).max(4);
+    std::thread::scope(|s| {
+        let mut rest: &mut [u32] = &mut pixels;
+        let mut by_start = 0usize;
+        while by_start < blocks_y {
+            let by_end = (by_start + rows_per_band).min(blocks_y);
+            let y0 = (by_start * 4).min(height);
+            let y1 = (by_end * 4).min(height);
+            let (cur, tail) = rest.split_at_mut((y1 - y0) * width);
+            rest = tail;
+            s.spawn(move || {
+                decode_etc1_band(data, width, height, blocks_x, by_start, by_end, cur);
+            });
+            by_start = by_end;
+        }
+    });
+    pixels
+}
+
+/// Decodes block-rows [by_start, by_end) into `pixels`, which covers pixel
+/// rows starting at `y0` (= min(by_start * 4, height)). Indexing into `data`
+/// stays absolute; only pixel writes are band-relative.
+fn decode_etc1_band(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    blocks_x: usize,
+    by_start: usize,
+    by_end: usize,
+    pixels: &mut [u32],
+) {
+    let y0 = (by_start * 4).min(height);
     let mut block = [0u32; 16];
-    for by in 0..blocks_y {
+    for by in by_start..by_end {
         for bx in 0..blocks_x {
             let off = (by * blocks_x + bx) * 8;
             if off + 8 > data.len() {
-                return pixels;
+                return;
             }
             let mut b = [0u8; 8];
             b.copy_from_slice(&data[off..off + 8]);
@@ -100,61 +160,126 @@ pub fn decode_etc1(data: &[u8], width: usize, height: usize) -> Vec<u32> {
                 for px in 0..4 {
                     let (x, y) = (bx * 4 + px, by * 4 + py);
                     if x < width && y < height {
-                        pixels[y * width + x] = block[py * 4 + px];
+                        pixels[(y - y0) * width + x] = block[py * 4 + px];
                     }
                 }
             }
         }
     }
-    pixels
 }
 
-/// Encodes one subblock (8 pixels): quantizes the mean color to 4 bits per
-/// channel, then picks the modifier table minimizing squared error.
-fn encode_subblock(px: &[(u32, u32, u32)]) -> (u32, u32, u32, usize, [u8; 8]) {
-    let n = px.len() as u32;
+/// One subblock encode result: quantized base color (4 bits per channel),
+/// chosen modifier table, and per-pixel level indices in gather order.
+struct SubblockEnc {
+    base4: (u32, u32, u32),
+    table: u32,
+    indices: [u8; 8],
+}
+
+/// Best flip candidate for one macroblock: score, flip bit, both subblock
+/// encodings and their packed per-pixel modifiers.
+struct FlipBest {
+    score: u64,
+    flip: u8,
+    ea: SubblockEnc,
+    eb: SubblockEnc,
+    pa: [(u8, u8); 8],
+    pb: [(u8, u8); 8],
+}
+
+/// One block split into two 8-pixel halves (subblocks) for a given
+/// orientation; each pixel slot keeps its source (x, y) so index bits can be
+/// packed back to absolute positions.
+struct Halves {
+    a: [(u32, u32, u32); 8],
+    b: [(u32, u32, u32); 8],
+    pa: [(u8, u8); 8],
+    pb: [(u8, u8); 8],
+}
+
+/// Encodes one subblock (exactly 8 pixels): quantizes the mean color to 4
+/// bits per channel, then picks the modifier table minimizing squared error.
+///
+/// Per-pixel error math is i32 against pre-clamped level colors: for a fixed
+/// base color each level's `clamp(base + m)` is a constant, so the clamp is
+/// hoisted out of the pixel loop (12 clamps per table instead of 96). Values
+/// fit i32 (max per pixel 3*255^2 = 195075; sum over 8 pixels < 2^32). The
+/// pixel-outer / level-inner structure keeps all state in registers —
+/// measured faster than a level-outer "SIMD-friendly" layout on both x86_64
+/// and typical aarch64 pipelines. Selection order and tie-breaks (strict `<`,
+/// first level/table wins) match the original i64 version, so output is
+/// bit-identical.
+fn encode_subblock(px: &[(u32, u32, u32); 8]) -> SubblockEnc {
     let mean = (
-        px.iter().map(|p| p.0).sum::<u32>() / n,
-        px.iter().map(|p| p.1).sum::<u32>() / n,
-        px.iter().map(|p| p.2).sum::<u32>() / n,
+        px.iter().map(|p| p.0).sum::<u32>() >> 3,
+        px.iter().map(|p| p.1).sum::<u32>() >> 3,
+        px.iter().map(|p| p.2).sum::<u32>() >> 3,
     );
     let base4 = (mean.0 >> 4, mean.1 >> 4, mean.2 >> 4);
-    let base = (expand4(base4.0), expand4(base4.1), expand4(base4.2));
-    let mut best: (u64, usize, [u8; 8]) = (u64::MAX, 0, [0; 8]);
+    let base = (
+        expand4(base4.0) as i32,
+        expand4(base4.1) as i32,
+        expand4(base4.2) as i32,
+    );
+    let mut best_err = u32::MAX;
+    let mut best_t = 0u32;
+    let mut best_indices = [0u8; 8];
     for (t, &(small, big)) in MODIFIERS.iter().enumerate() {
         let levels = [-big, -small, small, big];
-        let mut err = 0u64;
+        let mut lc = [(0i32, 0i32, 0i32); 4];
+        for (li, &m) in levels.iter().enumerate() {
+            lc[li] = (
+                (base.0 + m).clamp(0, 255),
+                (base.1 + m).clamp(0, 255),
+                (base.2 + m).clamp(0, 255),
+            );
+        }
+        let mut err = 0u32;
         let mut indices = [0u8; 8];
         for (i, &p) in px.iter().enumerate() {
-            // Pick the modifier minimizing total channel error for this pixel.
-            let mut best_m = (i64::MAX, 0usize);
-            for (li, &m) in levels.iter().enumerate() {
-                let mut e = 0i64;
-                for (pc, bc) in [p.0, p.1, p.2].iter().zip([base.0, base.1, base.2].iter()) {
-                    let d = *pc as i64 - (*bc as i64 + m as i64).clamp(0, 255);
-                    e += d * d;
-                }
-                if e < best_m.0 {
-                    best_m = (e, li);
+            let (pr, pg, pb) = (p.0 as i32, p.1 as i32, p.2 as i32);
+            let mut best_e = i32::MAX;
+            let mut best_li = 0usize;
+            for (li, &(lr, lg, lb)) in lc.iter().enumerate() {
+                let dr = pr - lr;
+                let dg = pg - lg;
+                let db = pb - lb;
+                let e = dr * dr + dg * dg + db * db;
+                if e < best_e {
+                    best_e = e;
+                    best_li = li;
                 }
             }
-            indices[i] = best_m.1 as u8;
-            err += best_m.0 as u64;
+            indices[i] = best_li as u8;
+            err += best_e as u32;
         }
-        if err < best.0 {
-            best = (err, t, indices);
+        if err < best_err {
+            best_err = err;
+            best_t = t as u32;
+            best_indices = indices;
         }
     }
-    (base4.0, base4.1, base4.2, best.1, best.2)
+    SubblockEnc {
+        base4,
+        table: best_t,
+        indices: best_indices,
+    }
 }
 
-/// Encodes ARGB pixels to ETC1 (individual mode; alpha ignored).
-pub fn encode_etc1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
-    let mut out = vec![0u8; blocks_x * blocks_y * 8];
+/// Encodes a horizontal band of block-rows `[by_start, by_end)` into
+/// `out[0..(by_end - by_start) * blocks_x * 8]`. Pure function of the shared
+/// pixel buffer, so bands are safe to encode concurrently on disjoint slices.
+fn encode_band(
+    pixels: &[u32],
+    width: usize,
+    height: usize,
+    blocks_x: usize,
+    by_start: usize,
+    by_end: usize,
+    out: &mut [u8],
+) {
     let mut o = 0usize;
-    for by in 0..blocks_y {
+    for by in by_start..by_end {
         for bx in 0..blocks_x {
             // Gather the block's pixels (edge-clamped), as (r,g,b).
             let mut block = [(0u32, 0u32, 0u32); 16];
@@ -166,98 +291,87 @@ pub fn encode_etc1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
                     block[py * 4 + px] = ((p >> 16) & 0xFF, (p >> 8) & 0xFF, p & 0xFF);
                 }
             }
-            // Try both splits; score by the subblock encoder's chosen error:
-            // cheap proxy = variance across each half. We fully encode both
-            // orientations and keep the better by summed error proxy:
-            // subblock A/B pixel sets per orientation.
-            let halves = |flip: bool| -> ([(u32, u32, u32); 8], [(u32, u32, u32); 8]) {
-                let mut a = [(0, 0, 0); 8];
-                let mut bset = [(0, 0, 0); 8];
-                let (mut ia, mut ib) = (0, 0);
-                for py in 0..4 {
-                    for px in 0..4 {
+            // Split into two 8-pixel halves per orientation; each slot keeps
+            // its source (x, y) so index bits can be packed directly.
+            let halves = |flip: bool| -> Halves {
+                let (mut a, mut bset) = ([(0, 0, 0); 8], [(0, 0, 0); 8]);
+                let (mut pa, mut pb) = ([(0u8, 0u8); 8], [(0u8, 0u8); 8]);
+                let (mut ia, mut ib) = (0usize, 0usize);
+                for py in 0..4u8 {
+                    for px in 0..4u8 {
                         let first = if flip { py < 2 } else { px < 2 };
                         if first {
-                            a[ia] = block[py * 4 + px];
+                            a[ia] = block[py as usize * 4 + px as usize];
+                            pa[ia] = (px, py);
                             ia += 1;
                         } else {
-                            bset[ib] = block[py * 4 + px];
+                            bset[ib] = block[py as usize * 4 + px as usize];
+                            pb[ib] = (px, py);
                             ib += 1;
                         }
                     }
                 }
-                (a, bset)
+                Halves { a, b: bset, pa, pb }
             };
-            let mut best: Option<(u64, bool, (u32, u32, u32, usize, [u8; 8]), (u32, u32, u32, usize, [u8; 8]))> = None;
+            // Variance proxy preserved verbatim from the original encoder so
+            // the flip choice (and thus the encoded bytes) stays identical.
+            let var = |set: &[(u32, u32, u32); 8]| -> u64 {
+                let m = (
+                    set.iter().map(|p| p.0).sum::<u32>() / 8,
+                    set.iter().map(|p| p.1).sum::<u32>() / 8,
+                    set.iter().map(|p| p.2).sum::<u32>() / 8,
+                );
+                set.iter()
+                    .map(|p| {
+                        ((p.0 as i64 - m.0 as i64).pow(2)
+                            + (p.1 as i64 - m.1 as i64).pow(2)
+                            + (p.2 as i64 - m.2 as i64).pow(2)) as u64
+                    })
+                    .sum()
+            };
+            let mut best: Option<FlipBest> = None;
             for flip in [false, true] {
-                let (a, bset) = halves(flip);
-                let ea = encode_subblock(&a);
-                let eb = encode_subblock(&bset);
-                // Error proxy: 0 means perfect fit is unknowable cheaply; use
-                // spread of each half as the tie-breaker instead: recompute
-                // actual error by decoding indices mentally is overkill —
-                // use sum of |pixel - clamped(base+mod)| via encode result is
-                // not returned; fall back to total variance of halves.
-                let var = |set: &[(u32, u32, u32); 8]| -> u64 {
-                    let m = (
-                        set.iter().map(|p| p.0).sum::<u32>() / 8,
-                        set.iter().map(|p| p.1).sum::<u32>() / 8,
-                        set.iter().map(|p| p.2).sum::<u32>() / 8,
-                    );
-                    set.iter()
-                        .map(|p| {
-                            ((p.0 as i64 - m.0 as i64).pow(2)
-                                + (p.1 as i64 - m.1 as i64).pow(2)
-                                + (p.2 as i64 - m.2 as i64).pow(2)) as u64
-                        })
-                        .sum()
-                };
-                let score = var(&a) + var(&bset);
-                let better = best.as_ref().map(|(s, _, _, _)| score < *s).unwrap_or(true);
+                let h = halves(flip);
+                let ea = encode_subblock(&h.a);
+                let eb = encode_subblock(&h.b);
+                let score = var(&h.a) + var(&h.b);
+                let better = best.as_ref().is_none_or(|b| score < b.score);
                 if better {
-                    best = Some((score, flip, ea, eb));
+                    best = Some(FlipBest {
+                        score,
+                        flip: flip as u8,
+                        ea,
+                        eb,
+                        pa: h.pa,
+                        pb: h.pb,
+                    });
                 }
             }
-            let (_, flip, ea, eb) = best.unwrap();
-            out[o] = (((ea.0 << 4) | eb.0) & 0xFF) as u8;
-            out[o + 1] = (((ea.1 << 4) | eb.1) & 0xFF) as u8;
-            out[o + 2] = (((ea.2 << 4) | eb.2) & 0xFF) as u8;
-            out[o + 3] = (((ea.3 as u8) << 5) | ((eb.3 as u8) << 2) | if flip { 1 } else { 0 }) & 0xFF;
-            // Pixel indices are derived per pixel position (bit k = x*4 + y),
-            // scoring each pixel against its own subblock's base + table.
+            let FlipBest { flip, ea, eb, pa, pb, .. } = best.unwrap();
+            out[o] = (((ea.base4.0 << 4) | eb.base4.0) & 0xFF) as u8;
+            out[o + 1] = (((ea.base4.1 << 4) | eb.base4.1) & 0xFF) as u8;
+            out[o + 2] = (((ea.base4.2 << 4) | eb.base4.2) & 0xFF) as u8;
+            out[o + 3] = ((ea.table as u8) << 5) | ((eb.table as u8) << 2) | flip;
+            // Pack pixel index bits straight from the winning subblock
+            // encodings: for a fixed base color + table this equals the old
+            // per-pixel re-search (same math, same tie-break), bit k = x*4+y.
             let (mut msb, mut lsb) = (0u16, 0u16);
-            for x in 0..4 {
-                for y in 0..4 {
-                    let p = block[y * 4 + x];
-                    let first = if flip { y < 2 } else { x < 2 };
-                    let (base4, t) = if first {
-                        ((ea.0, ea.1, ea.2), ea.3)
-                    } else {
-                        ((eb.0, eb.1, eb.2), eb.3)
-                    };
-                    let base = (expand4(base4.0), expand4(base4.1), expand4(base4.2));
-                    let (small, big) = MODIFIERS[t];
-                    let levels = [-big, -small, small, big];
-                    let mut best_i = 0usize;
-                    let mut best_e = i64::MAX;
-                    for (li, &m) in levels.iter().enumerate() {
-                        let mut e = 0i64;
-                        for (pc, bc) in [p.0, p.1, p.2].iter().zip([base.0, base.1, base.2].iter()) {
-                            let d = *pc as i64 - (*bc as i64 + m as i64).clamp(0, 255);
-                            e += d * d;
-                        }
-                        if e < best_e {
-                            best_e = e;
-                            best_i = li;
-                        }
-                    }
-                    let k = x * 4 + y;
-                    if best_i & 2 != 0 {
-                        msb |= 1 << (15 - k);
-                    }
-                    if best_i & 1 != 0 {
-                        lsb |= 1 << (15 - k);
-                    }
+            for (&idx, &(x, y)) in ea.indices.iter().zip(pa.iter()) {
+                let k = x as usize * 4 + y as usize;
+                if idx & 2 != 0 {
+                    msb |= 1 << (15 - k);
+                }
+                if idx & 1 != 0 {
+                    lsb |= 1 << (15 - k);
+                }
+            }
+            for (&idx, &(x, y)) in eb.indices.iter().zip(pb.iter()) {
+                let k = x as usize * 4 + y as usize;
+                if idx & 2 != 0 {
+                    msb |= 1 << (15 - k);
+                }
+                if idx & 1 != 0 {
+                    lsb |= 1 << (15 - k);
                 }
             }
             out[o + 4] = ((msb >> 8) & 0xFF) as u8;
@@ -267,6 +381,43 @@ pub fn encode_etc1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
             o += 8;
         }
     }
+}
+
+/// Encodes ARGB pixels to ETC1 (individual mode; alpha ignored).
+///
+/// The per-pixel level search runs exactly once per subblock inside
+/// `encode_subblock`; the winning orientation's indices are reused directly
+/// for bit packing (the old encoder re-ran the whole search a second time).
+/// Blocks are independent, so large images are split into horizontal block-row
+/// bands encoded on worker threads (deterministic: every band writes a
+/// disjoint, contiguous slice; results are identical to the serial path).
+/// The flip choice still uses the original variance proxy and all tie-breaks
+/// are preserved, so encoded output is bit-identical to the previous version.
+pub fn encode_etc1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
+    let mut out = vec![0u8; blocks_x * blocks_y * 8];
+    // Small textures: thread spawn overhead dominates, encode inline.
+    if blocks_x * blocks_y < 1024 {
+        encode_band(pixels, width, height, blocks_x, 0, blocks_y, &mut out);
+        return out;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    // At least 4 block-rows per band so per-thread work stays >> spawn cost.
+    let rows_per_band = blocks_y.div_ceil(workers).max(4);
+    let chunk = rows_per_band * blocks_x * 8;
+    std::thread::scope(|s| {
+        for (band, chunk_out) in out.chunks_mut(chunk).enumerate() {
+            let by_start = band * rows_per_band;
+            let by_end = (by_start + rows_per_band).min(blocks_y);
+            s.spawn(move || {
+                encode_band(pixels, width, height, blocks_x, by_start, by_end, chunk_out);
+            });
+        }
+    });
     out
 }
 

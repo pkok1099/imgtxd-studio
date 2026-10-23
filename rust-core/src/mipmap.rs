@@ -40,67 +40,42 @@ impl PixelImage {
         assert_eq!(pixels.len(), width * height, "pixel count mismatch");
         Self { pixels, width, height }
     }
-
-    #[inline]
-    fn at(&self, x: usize, y: usize) -> u32 {
-        self.pixels[y * self.width + x]
-    }
 }
 
 fn pack(a: u32, r: u32, g: u32, b: u32) -> u32 {
     ((a & 0xFF) << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
 }
 
-fn sample_nearest(src: &PixelImage, x: usize, y: usize, dst_w: usize, dst_h: usize) -> u32 {
-    let sx = (((2 * x + 1) * src.width) / (2 * dst_w)).min(src.width - 1);
-    let sy = (((2 * y + 1) * src.height) / (2 * dst_h)).min(src.height - 1);
-    src.at(sx, sy)
+/// Precomputed per-output-column source positions (identical math to
+/// sampling inline, hoisted out of the row loop).
+fn nearest_axis(dst: usize, src_len: usize) -> Vec<usize> {
+    (0..dst)
+        .map(|i| (((2 * i + 1) * src_len) / (2 * dst)).min(src_len - 1))
+        .collect()
 }
 
-fn sample_box(src: &PixelImage, x: usize, y: usize, dst_w: usize, dst_h: usize) -> u32 {
-    let x0 = (x * src.width) / dst_w;
-    let x1 = ((x0 + 1).max(((x + 1) * src.width) / dst_w)).min(src.width);
-    let y0 = (y * src.height) / dst_h;
-    let y1 = ((y0 + 1).max(((y + 1) * src.height) / dst_h)).min(src.height);
-    let (mut sa, mut sr, mut sg, mut sb, mut count) = (0u32, 0u32, 0u32, 0u32, 0u32);
-    for sy in y0..y1 {
-        for sx in x0..x1 {
-            let p = src.at(sx, sy);
-            sa += (p >> 24) & 0xFF;
-            sr += (p >> 16) & 0xFF;
-            sg += (p >> 8) & 0xFF;
-            sb += p & 0xFF;
-            count += 1;
-        }
-    }
-    pack(sa / count, sr / count, sg / count, sb / count)
+/// Precomputed per-output-column source ranges for BOX.
+fn box_axis(dst: usize, src_len: usize) -> Vec<(usize, usize)> {
+    (0..dst)
+        .map(|i| {
+            let s0 = (i * src_len) / dst;
+            let s1 = ((s0 + 1).max(((i + 1) * src_len) / dst)).min(src_len);
+            (s0, s1)
+        })
+        .collect()
 }
 
-fn sample_bilinear(src: &PixelImage, x: usize, y: usize, dst_w: usize, dst_h: usize) -> u32 {
-    let gx = (x as f64 + 0.5) * src.width as f64 / dst_w as f64 - 0.5;
-    let gy = (y as f64 + 0.5) * src.height as f64 / dst_h as f64 - 0.5;
-    let x0 = (gx.floor() as i64).clamp(0, src.width as i64 - 1) as usize;
-    let y0 = (gy.floor() as i64).clamp(0, src.height as i64 - 1) as usize;
-    let x1 = (x0 + 1).min(src.width - 1);
-    let y1 = (y0 + 1).min(src.height - 1);
-    let fx = (gx - x0 as f64).clamp(0.0, 1.0);
-    let fy = (gy - y0 as f64).clamp(0.0, 1.0);
-
-    let c00 = src.at(x0, y0);
-    let c10 = src.at(x1, y0);
-    let c01 = src.at(x0, y1);
-    let c11 = src.at(x1, y1);
-
-    let mix = |shift: u32| -> u32 {
-        let v00 = ((c00 >> shift) & 0xFF) as f64;
-        let v10 = ((c10 >> shift) & 0xFF) as f64;
-        let v01 = ((c01 >> shift) & 0xFF) as f64;
-        let v11 = ((c11 >> shift) & 0xFF) as f64;
-        let top = v00 + (v10 - v00) * fx;
-        let bottom = v01 + (v11 - v01) * fx;
-        ((top + (bottom - top) * fy) as i64).clamp(0, 255) as u32
-    };
-    pack(mix(24), mix(16), mix(8), mix(0))
+/// Bilinear interpolation positions per output index: (i0, i1, frac).
+fn bilinear_axis(dst: usize, src_len: usize) -> Vec<(usize, usize, f64)> {
+    (0..dst)
+        .map(|i| {
+            let g = (i as f64 + 0.5) * src_len as f64 / dst as f64 - 0.5;
+            let i0 = (g.floor() as i64).clamp(0, src_len as i64 - 1) as usize;
+            let i1 = (i0 + 1).min(src_len - 1);
+            let f = (g - i0 as f64).clamp(0.0, 1.0);
+            (i0, i1, f)
+        })
+        .collect()
 }
 
 fn kernel_cubic(t: f64) -> f64 {
@@ -140,75 +115,251 @@ fn kernel_lanczos4(t: f64) -> f64 {
     }
 }
 
-/// Generic kernel resampling: the kernel widens with the downscale ratio
-/// (anti-aliasing). Weights are normalized per output pixel; edges clamp.
-fn sample_kernel(
-    src: &PixelImage,
-    x: usize,
-    y: usize,
+/// One tap of a precomputed resampling weight axis: source position
+/// (already clamped) and its kernel weight.
+struct Tap {
+    pos: usize,
+    w: f64,
+}
+
+/// Precomputed kernel weights per output index for one axis. The taps
+/// reproduce `sample_kernel`'s window exactly: gx = (i + 0.5) * scale - 0.5,
+/// taps from floor(gx) - r ..= floor(gx) + r with r = ceil(radius * scale),
+/// weight = kernel((t - gx) / scale), zero weights dropped (they contribute
+/// nothing to the weighted sums), positions clamped to the source edge.
+fn kernel_axis(dst: usize, src_len: usize, radius: f64, kernel: fn(f64) -> f64) -> Vec<Vec<Tap>> {
+    let scale = src_len as f64 / dst as f64;
+    let r = (radius * scale).ceil() as i64;
+    let last = src_len as i64 - 1;
+    (0..dst)
+        .map(|i| {
+            let g = (i as f64 + 0.5) * scale - 0.5;
+            let mut taps = Vec::new();
+            for t in (g as i64 - r)..=(g as i64 + r) {
+                let w = kernel((t as f64 - g) / scale);
+                if w != 0.0 {
+                    taps.push(Tap { pos: t.clamp(0, last) as usize, w });
+                }
+            }
+            taps
+        })
+        .collect()
+}
+
+/// Shared per-call context handed to the per-row band workers.
+struct RowCtx<'a> {
+    px: &'a [u32],
+    sw: usize,
     dst_w: usize,
     dst_h: usize,
-    kernel: fn(f64) -> f64,
-    radius: f64,
-) -> u32 {
-    let scale_x = src.width as f64 / dst_w as f64;
-    let scale_y = src.height as f64 / dst_h as f64;
-    let gx = (x as f64 + 0.5) * scale_x - 0.5;
-    let gy = (y as f64 + 0.5) * scale_y - 0.5;
-    let rx = (radius * scale_x).ceil() as i64;
-    let ry = (radius * scale_y).ceil() as i64;
-    let (mut sa, mut sr, mut sg, mut sb, mut sw) = (0.0f64, 0.0, 0.0, 0.0, 0.0);
-    for iy in (gy as i64 - ry)..=(gy as i64 + ry) {
-        let wy = kernel((iy as f64 - gy) / scale_y);
-        if wy == 0.0 {
-            continue;
+}
+
+/// Runs the row-band closure over all output rows — inline for small outputs
+/// (thread spawn overhead dominates) or on scoped worker threads writing
+/// disjoint row bands (deterministic: per-pixel math is unchanged, so the
+/// result is identical to the serial path).
+fn dispatch_rows(
+    out: &mut [u32],
+    dst_w: usize,
+    dst_h: usize,
+    f: &(impl Fn(usize, usize, &mut [u32]) + Sync),
+) {
+    // Below ~256x256 total output pixels, spawning threads costs more than it saves.
+    if dst_w * dst_h < 65536 {
+        f(0, dst_h, out);
+        return;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    // At least 4 rows per band so per-thread work stays >> spawn cost.
+    let rows_per_band = dst_h.div_ceil(workers).max(4);
+    let chunk = rows_per_band * dst_w;
+    std::thread::scope(|s| {
+        for (band, chunk_out) in out.chunks_mut(chunk).enumerate() {
+            let y0 = band * rows_per_band;
+            let y1 = (y0 + rows_per_band).min(dst_h);
+            s.spawn(move || f(y0, y1, chunk_out));
         }
-        let cy = iy.clamp(0, src.height as i64 - 1) as usize;
-        for ix in (gx as i64 - rx)..=(gx as i64 + rx) {
-            let wx = kernel((ix as f64 - gx) / scale_x);
-            if wx == 0.0 {
+    });
+}
+
+/// BOX rows [y0, y1) into band-local `out` (slice row 0 = output row y0).
+fn box_rows(
+    ctx: &RowCtx,
+    xs: &[(usize, usize)],
+    ys: &[(usize, usize)],
+    y0: usize,
+    y1: usize,
+    out: &mut [u32],
+) {
+    let (px, sw, dst_w) = (ctx.px, ctx.sw, ctx.dst_w);
+    for (ry, y) in (y0..y1).enumerate() {
+        let (y0b, y1b) = ys[y];
+        let orow = &mut out[ry * dst_w..(ry + 1) * dst_w];
+        for (x, or) in orow.iter_mut().enumerate() {
+            let (x0, x1) = xs[x];
+            let (mut sa, mut sr, mut sg, mut sb, mut count) =
+                (0u32, 0u32, 0u32, 0u32, 0u32);
+            for srow in y0b..y1b {
+                let base = srow * sw;
+                for sx in x0..x1 {
+                    let p = px[base + sx];
+                    sa += (p >> 24) & 0xFF;
+                    sr += (p >> 16) & 0xFF;
+                    sg += (p >> 8) & 0xFF;
+                    sb += p & 0xFF;
+                    count += 1;
+                }
+            }
+            *or = pack(sa / count, sr / count, sg / count, sb / count);
+        }
+    }
+}
+
+/// Bilinear rows [y0, y1) into band-local `out`.
+fn bilinear_rows(
+    ctx: &RowCtx,
+    xs: &[(usize, usize, f64)],
+    ys: &[(usize, usize, f64)],
+    y0: usize,
+    y1: usize,
+    out: &mut [u32],
+) {
+    let (px, sw, dst_w) = (ctx.px, ctx.sw, ctx.dst_w);
+    for (ry, y) in (y0..y1).enumerate() {
+        let (y0b, y1b, fy) = ys[y];
+        let r0 = y0b * sw;
+        let r1 = y1b * sw;
+        let orow = &mut out[ry * dst_w..(ry + 1) * dst_w];
+        for (x, or) in orow.iter_mut().enumerate() {
+            let (x0, x1, fx) = xs[x];
+            let c00 = px[r0 + x0];
+            let c10 = px[r0 + x1];
+            let c01 = px[r1 + x0];
+            let c11 = px[r1 + x1];
+            let mix = |shift: u32| -> u32 {
+                let v00 = ((c00 >> shift) & 0xFF) as f64;
+                let v10 = ((c10 >> shift) & 0xFF) as f64;
+                let v01 = ((c01 >> shift) & 0xFF) as f64;
+                let v11 = ((c11 >> shift) & 0xFF) as f64;
+                let top = v00 + (v10 - v00) * fx;
+                let bottom = v01 + (v11 - v01) * fx;
+                ((top + (bottom - top) * fy) as i64).clamp(0, 255) as u32
+            };
+            *or = pack(mix(24), mix(16), mix(8), mix(0));
+        }
+    }
+}
+
+/// Kernel-filter rows [y0, y1) into band-local `out`.
+fn kernel_rows(
+    ctx: &RowCtx,
+    src: &PixelImage,
+    txs: &[Vec<Tap>],
+    tys: &[Vec<Tap>],
+    y0: usize,
+    y1: usize,
+    out: &mut [u32],
+) {
+    let (px, sw, dst_w) = (ctx.px, ctx.sw, ctx.dst_w);
+    for (ry, y) in (y0..y1).enumerate() {
+        let tys_row = &tys[y];
+        let orow = &mut out[ry * dst_w..(ry + 1) * dst_w];
+        for (x, or) in orow.iter_mut().enumerate() {
+            let (mut sa, mut sr, mut sg, mut sb, mut sw_sum) =
+                (0.0f64, 0.0, 0.0, 0.0, 0.0);
+            for ty in tys_row {
+                let row = ty.pos * sw;
+                let wy = ty.w;
+                for tx in &txs[x] {
+                    let w = wy * tx.w;
+                    let p = px[row + tx.pos];
+                    sa += ((p >> 24) & 0xFF) as f64 * w;
+                    sr += ((p >> 16) & 0xFF) as f64 * w;
+                    sg += ((p >> 8) & 0xFF) as f64 * w;
+                    sb += (p & 0xFF) as f64 * w;
+                    sw_sum += w;
+                }
+            }
+            if sw_sum == 0.0 {
+                *or = px[ty_fallback(src, x, y, dst_w, ctx.dst_h)];
                 continue;
             }
-            let cx = ix.clamp(0, src.width as i64 - 1) as usize;
-            let w = wx * wy;
-            let p = src.at(cx, cy);
-            sa += ((p >> 24) & 0xFF) as f64 * w;
-            sr += ((p >> 16) & 0xFF) as f64 * w;
-            sg += ((p >> 8) & 0xFF) as f64 * w;
-            sb += (p & 0xFF) as f64 * w;
-            sw += w;
+            let norm = |v: f64| -> u32 { (v / sw_sum).round().clamp(0.0, 255.0) as u32 };
+            *or = pack(norm(sa), norm(sr), norm(sg), norm(sb));
         }
     }
-    if sw == 0.0 {
-        return src.at(
-            (gx as i64).clamp(0, src.width as i64 - 1) as usize,
-            (gy as i64).clamp(0, src.height as i64 - 1) as usize,
-        );
-    }
-    let norm = |v: f64| -> u32 { (v / sw).round().clamp(0.0, 255.0) as u32 };
-    pack(norm(sa), norm(sr), norm(sg), norm(sb))
 }
 
 /// Resamples `src` to exactly `dst_w` x `dst_h` using `filter`.
+///
+/// All filters precompute their per-axis sampling state once per call and
+/// keep the per-pixel math identical to the per-pixel sampling versions
+/// they replace (same tap windows, same weight products, same summation
+/// order), so outputs are unchanged — the kernels are simply no longer
+/// re-evaluated (sin/exp/div) for every output pixel. Large outputs are
+/// split into horizontal row bands processed on worker threads.
 pub fn resample(src: &PixelImage, dst_w: usize, dst_h: usize, filter: MipFilter) -> PixelImage {
     assert!(dst_w > 0 && dst_h > 0, "invalid target dimensions");
     if src.width == dst_w && src.height == dst_h {
         return src.clone();
     }
+    let sw = src.width;
+    let px = &src.pixels;
     let mut out = vec![0u32; dst_w * dst_h];
-    for y in 0..dst_h {
-        for x in 0..dst_w {
-            out[y * dst_w + x] = match filter {
-                MipFilter::Nearest => sample_nearest(src, x, y, dst_w, dst_h),
-                MipFilter::Box => sample_box(src, x, y, dst_w, dst_h),
-                MipFilter::Bilinear => sample_bilinear(src, x, y, dst_w, dst_h),
-                MipFilter::Cubic => sample_kernel(src, x, y, dst_w, dst_h, kernel_cubic, 2.0),
-                MipFilter::Gaussian => sample_kernel(src, x, y, dst_w, dst_h, kernel_gaussian, 2.0),
-                MipFilter::Lanczos4 => sample_kernel(src, x, y, dst_w, dst_h, kernel_lanczos4, 4.0),
+    let ctx = RowCtx { px, sw, dst_w, dst_h };
+    match filter {
+        MipFilter::Nearest => {
+            let xs = nearest_axis(dst_w, sw);
+            let ys = nearest_axis(dst_h, src.height);
+            for y in 0..dst_h {
+                let sy = ys[y] * sw;
+                for x in 0..dst_w {
+                    out[y * dst_w + x] = px[sy + xs[x]];
+                }
+            }
+        }
+        MipFilter::Box => {
+            let xs = box_axis(dst_w, sw);
+            let ys = box_axis(dst_h, src.height);
+            dispatch_rows(&mut out, dst_w, dst_h, &|y0, y1, oband| {
+                box_rows(&ctx, &xs, &ys, y0, y1, oband);
+            });
+        }
+        MipFilter::Bilinear => {
+            let xs = bilinear_axis(dst_w, sw);
+            let ys = bilinear_axis(dst_h, src.height);
+            dispatch_rows(&mut out, dst_w, dst_h, &|y0, y1, oband| {
+                bilinear_rows(&ctx, &xs, &ys, y0, y1, oband);
+            });
+        }
+        filter => {
+            let (kernel, radius) = match filter {
+                MipFilter::Cubic => (kernel_cubic as fn(f64) -> f64, 2.0),
+                MipFilter::Gaussian => (kernel_gaussian as fn(f64) -> f64, 2.0),
+                _ => (kernel_lanczos4 as fn(f64) -> f64, 4.0),
             };
+            let txs = kernel_axis(dst_w, sw, radius, kernel);
+            let tys = kernel_axis(dst_h, src.height, radius, kernel);
+            dispatch_rows(&mut out, dst_w, dst_h, &|y0, y1, oband| {
+                kernel_rows(&ctx, src, &txs, &tys, y0, y1, oband);
+            });
         }
     }
     PixelImage { pixels: out, width: dst_w, height: dst_h }
+}
+
+/// Weightless-window fallback (identical to `sample_kernel`'s sw == 0 path).
+fn ty_fallback(src: &PixelImage, x: usize, y: usize, dst_w: usize, dst_h: usize) -> usize {
+    let scale_x = src.width as f64 / dst_w as f64;
+    let scale_y = src.height as f64 / dst_h as f64;
+    let gx = (x as f64 + 0.5) * scale_x - 0.5;
+    let gy = (y as f64 + 0.5) * scale_y - 0.5;
+    let cx = (gx as i64).clamp(0, src.width as i64 - 1) as usize;
+    let cy = (gy as i64).clamp(0, src.height as i64 - 1) as usize;
+    cy * src.width + cx
 }
 
 /// One halving step; odd sizes round down with a 1px floor.
@@ -217,12 +368,17 @@ pub fn downscale_half(src: &PixelImage, filter: MipFilter) -> PixelImage {
 }
 
 /// Full mip chain below `src` (level 1, 2, ...) down to 1x1. Empty for 1x1.
+/// Each level is produced directly from the previous one — no per-level
+/// buffer clone.
 pub fn generate_chain(src: &PixelImage, filter: MipFilter) -> Vec<PixelImage> {
     let mut levels = Vec::new();
-    let mut current = src.clone();
-    while current.width > 1 || current.height > 1 {
-        current = downscale_half(&current, filter);
-        levels.push(current.clone());
+    loop {
+        let current = levels.last().unwrap_or(src);
+        if current.width == 1 && current.height == 1 {
+            break;
+        }
+        let next = downscale_half(current, filter);
+        levels.push(next);
     }
     levels
 }

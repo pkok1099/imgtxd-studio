@@ -1,0 +1,55 @@
+=== resample A/B checksums ===
+nearest   1024->512              fnv1a=467a84df563d529d
+nearest   odd1001x733->333x244   fnv1a=8a3159a4b9882abe
+nearest   up256->512             fnv1a=0b7a3678f2e89c85
+nearest   640x480->320x240       fnv1a=10026b1aa4b5f7b8
+nearest   8->4                   fnv1a=9d8e83aa44cded98
+nearest   5x3->2x1               fnv1a=324e8cc8e37b1c29
+box       1024->512              fnv1a=57985b191ef513f7
+box       odd1001x733->333x244   fnv1a=afc3eff79b42c72e
+box       up256->512             fnv1a=0b7a3678f2e89c85
+box       640x480->320x240       fnv1a=f841c414a87ec0c0
+box       8->4                   fnv1a=23214153f99856c1
+box       5x3->2x1               fnv1a=ea884e8a3ce0b539
+bilinear  1024->512              fnv1a=57985b191ef513f7
+bilinear  odd1001x733->333x244   fnv1a=d7c66e68427d9bb5
+bilinear  up256->512             fnv1a=81d8f50ce63a200b
+bilinear  640x480->320x240       fnv1a=f841c414a87ec0c0
+bilinear  8->4                   fnv1a=23214153f99856c1
+bilinear  5x3->2x1               fnv1a=2e875c306b9d5562
+cubic     1024->512              fnv1a=38dabef241d3ff04
+cubic     odd1001x733->333x244   fnv1a=4dc1bda18bef9810
+cubic     up256->512             fnv1a=5480aaeffb0abbf4
+cubic     640x480->320x240       fnv1a=b7f3438c0fb03a03
+cubic     8->4                   fnv1a=71d3d71a1e08147b
+cubic     5x3->2x1               fnv1a=7215ed4c08902d6c
+gaussian  1024->512              fnv1a=883bdcf852ce0124
+gaussian  odd1001x733->333x244   fnv1a=90a9fc9b0fd882a8
+gaussian  up256->512             fnv1a=42c8838536cff76a
+gaussian  640x480->320x240       fnv1a=87e37772fe5d44c2
+gaussian  8->4                   fnv1a=04bea47ad83daf59
+gaussian  5x3->2x1               fnv1a=c51566b600821b17
+lanczos4  1024->512              fnv1a=06b9f5c28282fba9
+lanczos4  odd1001x733->333x244   fnv1a=0f7cd48d2339197d
+lanczos4  up256->512             fnv1a=b3c401e30e518389
+lanczos4  640x480->320x240       fnv1a=feda1067d92edfe3
+lanczos4  8->4                   fnv1a=18fbbd27e01ab335
+lanczos4  5x3->2x1               fnv1a=9e3996bd68261441
+nearest   grad300x200->150x100    fnv1a=284c11209008d18d
+box       grad300x200->150x100    fnv1a=9d815a479f96d9e9
+bilinear  grad300x200->150x100    fnv1a=9d815a479f96d9e9
+cubic     grad300x200->150x100    fnv1a=f06e7edb0b59c7db
+gaussian  grad300x200->150x100    fnv1a=9b22c73f225fb9d4
+lanczos4  grad300x200->150x100    fnv1a=e62f799e6fc8bc7e
+=== encode_dxt A/B checksums ===
+grad1024   dxt1=6f5841e985328333 dxt5=083e21cf6f69320b
+noise512   dxt1=36f573be6f22a3f1 dxt5=b1c83a3abd92ae49
+alpha512   dxt1=931e1413a312a8ad dxt5=3126cfeeceeb2707
+quant192   dxt1=334d84d759ebb88d dxt5=c75ff8cd558f4815
+solid64    dxt1=cd45efa217784725 dxt5=b543783c758f0125
+odd5x3     dxt1=38aef2077100713e dxt5=eb9549285f2238ae
+odd7x9     dxt1=b66bfc373e82bdcb dxt5=36c869d011ade0b0
+=== encode_etc1 regression ===
+grad512    fnv1a=7d43f5970a649726
+noise256   fnv1a=fe5fa34d0c23535d
+done

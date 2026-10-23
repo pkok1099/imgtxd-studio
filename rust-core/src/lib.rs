@@ -138,7 +138,7 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbImpor
         let Ok(name_obj) = env.get_object_array_element(&names, i) else { continue };
         let name = jstring_to_string(&mut env, &JString::from(name_obj));
         let Ok(png_obj) = env.get_object_array_element(&pngs, i) else { continue };
-        let bytes = env.convert_byte_array(&JByteArray::from(png_obj)).unwrap_or_default();
+        let bytes = env.convert_byte_array(JByteArray::from(png_obj)).unwrap_or_default();
         if !bytes.is_empty() {
             images.push((name, bytes));
         }
@@ -226,11 +226,8 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbCheck
             .lines()
             .filter_map(|l| {
                 let l = l.trim();
-                if l.starts_with('"') {
-                    l[1..].find('"').map(|e| l[1..1 + e].to_lowercase())
-                } else {
-                    None
-                }
+                l.strip_prefix('"')
+                    .and_then(|rest| rest.find('"').map(|e| rest[..e].to_lowercase()))
             })
             .collect();
         let bytes = std::fs::read(&dff).map_err(|e| e.to_string())?;
@@ -436,10 +433,10 @@ fn img_op(
     f(&mut archive).map_err(|e| e.to_string())
 }
 
-fn img_entry_at<'a>(
-    archive: &'a img::ImgArchive,
+fn img_entry_at(
+    archive: &img::ImgArchive,
     index: jint,
-) -> Result<&'a img::ImgEntry, String> {
+) -> Result<&img::ImgEntry, String> {
     if index < 0 {
         return Err("Indeks entri negatif".to_string());
     }
@@ -758,7 +755,9 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdList(
     string_array(&mut env, &items)
 }
 
-/// Decoded level-0 ARGB pixels of one TXD texture.
+/// Decoded level-0 ARGB pixels of one TXD texture. Uses the targeted
+/// single-texture scan (chunk headers + only the requested entry's payload)
+/// and falls back to the full parse for anything it cannot handle.
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdTexturePixels(
     mut env: JNIEnv,
@@ -768,7 +767,14 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdTexture
 ) -> jintArray {
     let path_str = jstring_to_string(&mut env, &path);
     let pixels = (|| -> Option<Vec<u32>> {
-        let txd_file = txd::parse_file(std::path::Path::new(&path_str)).ok()?;
+        if index < 0 {
+            return None;
+        }
+        let path = std::path::Path::new(&path_str);
+        if let Some(px) = txd::decode_entry_pixels_at(path, index as usize) {
+            return Some(px);
+        }
+        let txd_file = txd::parse_file(path).ok()?;
         let entry = txd_file.textures.get(index as usize)?;
         txd::decode_pixels(entry)
     })();

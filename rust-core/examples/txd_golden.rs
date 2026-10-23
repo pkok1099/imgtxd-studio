@@ -124,16 +124,14 @@ fn manual(
 
 fn main() {
     let golden_path = PathBuf::from(std::env::args().nth(1).expect("golden_sample.txd path"));
-    let mut entries: Vec<TxdTexture> = Vec::new();
-
-    entries.push(create_entry(
+    let mut entries: Vec<TxdTexture> = vec![create_entry(
         "alpha_opaque",
         &pattern(16, 16, 0),
         16,
         16,
         None,
         &ImportOptions { generate_mipmaps: true, mip_filter: MipFilter::Box, max_dimension: None },
-    ));
+    )];
     entries.push(create_entry(
         "smooth_alpha",
         &pattern(16, 16, 1),

@@ -37,17 +37,62 @@ fn read_u32le(data: &[u8], off: usize) -> u32 {
 }
 
 /// Decodes a DXT1 color block sequence into ARGB pixels.
+/// Dimensions aligned to 4 (the overwhelming majority of game textures)
+/// take a bounds-check-free path. Large textures are split into horizontal
+/// block-row bands decoded on worker threads (deterministic: disjoint row
+/// ranges, identical output to the serial path; threshold 16384 blocks =
+/// 512x512 because decode work per block is small).
 pub fn decode_dxt1(data: &[u8], width: usize, height: usize) -> Vec<u32> {
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let mut pixels = vec![0u32; width * height];
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
-    let mut offset = 0usize;
-    let mut palette = [0u32; 4];
+    if blocks_x * blocks_y < 16384 {
+        decode_dxt1_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
+        return pixels;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    let rows_per_band = blocks_y.div_ceil(workers).max(4);
+    std::thread::scope(|s| {
+        let mut rest: &mut [u32] = &mut pixels;
+        let mut by_start = 0usize;
+        while by_start < blocks_y {
+            let by_end = (by_start + rows_per_band).min(blocks_y);
+            let y0 = (by_start * 4).min(height);
+            let y1 = (by_end * 4).min(height);
+            let (cur, tail) = rest.split_at_mut((y1 - y0) * width);
+            rest = tail;
+            s.spawn(move || {
+                decode_dxt1_band(data, width, height, blocks_x, by_start, by_end, cur);
+            });
+            by_start = by_end;
+        }
+    });
+    pixels
+}
 
-    for by in 0..blocks_y {
+/// Decodes block-rows [by_start, by_end) into `pixels` (pixel rows from y0).
+fn decode_dxt1_band(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    blocks_x: usize,
+    by_start: usize,
+    by_end: usize,
+    pixels: &mut [u32],
+) {
+    let y0 = (by_start * 4).min(height);
+    let band_y = y0 * width; // pixel offset of the band's first row
+    let mut offset = by_start * blocks_x * 8;
+    let mut palette = [0u32; 4];
+    let aligned = width.is_multiple_of(4) && height.is_multiple_of(4);
+
+    for by in by_start..by_end {
         for bx in 0..blocks_x {
             if offset + 8 > data.len() {
-                break;
+                return;
             }
             let c0 = read_u16le(data, offset);
             let c1 = read_u16le(data, offset + 2);
@@ -61,40 +106,94 @@ pub fn decode_dxt1(data: &[u8], width: usize, height: usize) -> Vec<u32> {
                 palette[3] = 0x0000_0000;
             }
             let lookup = read_u32le(data, offset + 4);
-            for py in 0..4 {
-                let y = by * 4 + py;
-                if y >= height {
-                    continue;
+            if aligned {
+                let base = by * width * 4 + bx * 4 - band_y;
+                for py in 0..4 {
+                    let shift = py * 8;
+                    let row = base + py * width;
+                    pixels[row] = palette[((lookup >> shift) & 0x03) as usize];
+                    pixels[row + 1] = palette[((lookup >> (shift + 2)) & 0x03) as usize];
+                    pixels[row + 2] = palette[((lookup >> (shift + 4)) & 0x03) as usize];
+                    pixels[row + 3] = palette[((lookup >> (shift + 6)) & 0x03) as usize];
                 }
-                for px in 0..4 {
-                    let x = bx * 4 + px;
-                    if x >= width {
+            } else {
+                for py in 0..4 {
+                    let y = by * 4 + py;
+                    if y >= height {
                         continue;
                     }
-                    let shift = (py * 4 + px) * 2;
-                    let code = ((lookup >> shift) & 0x03) as usize;
-                    pixels[y * width + x] = palette[code];
+                    for px in 0..4 {
+                        let x = bx * 4 + px;
+                        if x >= width {
+                            continue;
+                        }
+                        let shift = (py * 4 + px) * 2;
+                        let code = ((lookup >> shift) & 0x03) as usize;
+                        pixels[(y * width + x) - band_y] = palette[code];
+                    }
                 }
             }
             offset += 8;
         }
     }
-    pixels
 }
 
 /// Decodes a DXT5 block sequence (interpolated alpha + DXT1 color) into ARGB pixels.
+/// Aligned dimensions take a bounds-check-free path (see decode_dxt1).
+/// Large textures are split into horizontal block-row bands decoded on worker
+/// threads (deterministic, identical output; threshold 16384 blocks).
 pub fn decode_dxt5(data: &[u8], width: usize, height: usize) -> Vec<u32> {
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let mut pixels = vec![0u32; width * height];
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
-    let mut offset = 0usize;
+    if blocks_x * blocks_y < 16384 {
+        decode_dxt5_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
+        return pixels;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    let rows_per_band = blocks_y.div_ceil(workers).max(4);
+    std::thread::scope(|s| {
+        let mut rest: &mut [u32] = &mut pixels;
+        let mut by_start = 0usize;
+        while by_start < blocks_y {
+            let by_end = (by_start + rows_per_band).min(blocks_y);
+            let y0 = (by_start * 4).min(height);
+            let y1 = (by_end * 4).min(height);
+            let (cur, tail) = rest.split_at_mut((y1 - y0) * width);
+            rest = tail;
+            s.spawn(move || {
+                decode_dxt5_band(data, width, height, blocks_x, by_start, by_end, cur);
+            });
+            by_start = by_end;
+        }
+    });
+    pixels
+}
+
+/// Decodes block-rows [by_start, by_end) into `pixels` (pixel rows from y0).
+fn decode_dxt5_band(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    blocks_x: usize,
+    by_start: usize,
+    by_end: usize,
+    pixels: &mut [u32],
+) {
+    let y0 = (by_start * 4).min(height);
+    let band_y = y0 * width;
+    let mut offset = by_start * blocks_x * 16;
     let mut alpha_palette = [0u32; 8];
     let mut color_palette = [0u32; 4];
+    let aligned = width.is_multiple_of(4) && height.is_multiple_of(4);
 
-    for by in 0..blocks_y {
+    for by in by_start..by_end {
         for bx in 0..blocks_x {
             if offset + 16 > data.len() {
-                break;
+                return;
             }
             let a0 = data[offset] as u32;
             let a1 = data[offset + 1] as u32;
@@ -127,28 +226,42 @@ pub fn decode_dxt5(data: &[u8], width: usize, height: usize) -> Vec<u32> {
             color_palette[3] = interpolate_color(color_palette[0], color_palette[1], 1, 2, 3);
             let color_lookup = read_u32le(data, co + 4);
 
-            for py in 0..4 {
-                let y = by * 4 + py;
-                if y >= height {
-                    continue;
+            if aligned {
+                let base = by * width * 4 + bx * 4 - band_y;
+                for py in 0..4 {
+                    let row = base + py * width;
+                    for px in 0..4 {
+                        let idx = py * 4 + px;
+                        let a_code = ((alpha_lookup >> (idx * 3)) & 0x07) as usize;
+                        let alpha = alpha_palette[a_code];
+                        let c_code = ((color_lookup >> (idx * 2)) & 0x03) as usize;
+                        let rgb = color_palette[c_code] & 0x00FF_FFFF;
+                        pixels[row + px] = (alpha << 24) | rgb;
+                    }
                 }
-                for px in 0..4 {
-                    let x = bx * 4 + px;
-                    if x >= width {
+            } else {
+                for py in 0..4 {
+                    let y = by * 4 + py;
+                    if y >= height {
                         continue;
                     }
-                    let idx = py * 4 + px;
-                    let a_code = ((alpha_lookup >> (idx * 3)) & 0x07) as usize;
-                    let alpha = alpha_palette[a_code];
-                    let c_code = ((color_lookup >> (idx * 2)) & 0x03) as usize;
-                    let rgb = color_palette[c_code] & 0x00FF_FFFF;
-                    pixels[y * width + x] = (alpha << 24) | rgb;
+                    for px in 0..4 {
+                        let x = bx * 4 + px;
+                        if x >= width {
+                            continue;
+                        }
+                        let idx = py * 4 + px;
+                        let a_code = ((alpha_lookup >> (idx * 3)) & 0x07) as usize;
+                        let alpha = alpha_palette[a_code];
+                        let c_code = ((color_lookup >> (idx * 2)) & 0x03) as usize;
+                        let rgb = color_palette[c_code] & 0x00FF_FFFF;
+                        pixels[(y * width + x) - band_y] = (alpha << 24) | rgb;
+                    }
                 }
             }
             offset += 16;
         }
     }
-    pixels
 }
 
 fn find_closest_palette_index(pixel: u32, palette: &[u32], count: usize) -> u32 {
@@ -157,10 +270,10 @@ fn find_closest_palette_index(pixel: u32, palette: &[u32], count: usize) -> u32 
     let pb = (pixel & 0xFF) as i32;
     let mut best_index = 0u32;
     let mut best_dist = i32::MAX;
-    for i in 0..count {
-        let dr = pr - ((palette[i] >> 16) & 0xFF) as i32;
-        let dg = pg - ((palette[i] >> 8) & 0xFF) as i32;
-        let db = pb - (palette[i] & 0xFF) as i32;
+    for (i, &pal) in palette[..count].iter().enumerate() {
+        let dr = pr - ((pal >> 16) & 0xFF) as i32;
+        let dg = pg - ((pal >> 8) & 0xFF) as i32;
+        let db = pb - (pal & 0xFF) as i32;
         let dist = dr * dr + dg * dg + db * db;
         if dist < best_dist {
             best_dist = dist;
@@ -174,14 +287,53 @@ fn find_closest_palette_index(pixel: u32, palette: &[u32], count: usize) -> u32 
 }
 
 /// Encodes ARGB pixels to DXT1 (min/max endpoint fit, same algorithm as Kotlin).
+///
+/// Blocks are independent, so large images are split into horizontal block-row
+/// bands encoded on worker threads (deterministic: every band writes a
+/// disjoint, contiguous slice; results are identical to the serial path).
 pub fn encode_dxt1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let mut out = vec![0u8; blocks_x * blocks_y * 8];
+    // Small textures: thread spawn overhead dominates, encode inline.
+    if blocks_x * blocks_y < 1024 {
+        encode_dxt1_band(pixels, width, height, blocks_x, 0, blocks_y, &mut out);
+        return out;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    // At least 4 block-rows per band so per-thread work stays >> spawn cost.
+    let rows_per_band = blocks_y.div_ceil(workers).max(4);
+    let chunk = rows_per_band * blocks_x * 8;
+    std::thread::scope(|s| {
+        for (band, chunk_out) in out.chunks_mut(chunk).enumerate() {
+            let by_start = band * rows_per_band;
+            let by_end = (by_start + rows_per_band).min(blocks_y);
+            s.spawn(move || {
+                encode_dxt1_band(pixels, width, height, blocks_x, by_start, by_end, chunk_out);
+            });
+        }
+    });
+    out
+}
+
+/// Encodes a horizontal band of block-rows [by_start, by_end) into `out`
+/// (band-local byte offset starts at 0; the slice is exactly the band's size).
+fn encode_dxt1_band(
+    pixels: &[u32],
+    width: usize,
+    height: usize,
+    blocks_x: usize,
+    by_start: usize,
+    by_end: usize,
+    out: &mut [u8],
+) {
     let mut out_offset = 0usize;
     let mut block_pixels = [0u32; 16];
 
-    for by in 0..blocks_y {
+    for by in by_start..by_end {
         for bx in 0..blocks_x {
             let (mut min_r, mut min_g, mut min_b) = (255u32, 255u32, 255u32);
             let (mut max_r, mut max_g, mut max_b) = (0u32, 0u32, 0u32);
@@ -235,8 +387,7 @@ pub fn encode_dxt1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
             }
 
             let mut lookup: u32 = 0;
-            for i in 0..16 {
-                let p = block_pixels[i];
+            for (i, &p) in block_pixels.iter().enumerate() {
                 let a = (p >> 24) & 0xFF;
                 let best = if has_alpha && a < 128 {
                     3
@@ -252,7 +403,6 @@ pub fn encode_dxt1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
             out_offset += 8;
         }
     }
-    out
 }
 
 /// Opaque color block (DXT5 semantics: always the 4-color palette).
@@ -295,13 +445,48 @@ fn encode_color_block_opaque(block: &[u32; 16]) -> [u8; 8] {
 
 /// Encodes ARGB pixels to DXT5: interpolated alpha block (a0 > a1 mode,
 /// palette mirrored from the decoder) + an opaque 4-color block.
+///
+/// Band-parallel over block-rows exactly like `encode_dxt1` (deterministic).
 pub fn encode_dxt5(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
     let mut out = vec![0u8; blocks_x * blocks_y * 16];
+    // Small textures: thread spawn overhead dominates, encode inline.
+    if blocks_x * blocks_y < 1024 {
+        encode_dxt5_band(pixels, width, height, blocks_x, 0, blocks_y, &mut out);
+        return out;
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    let rows_per_band = blocks_y.div_ceil(workers).max(4);
+    let chunk = rows_per_band * blocks_x * 16;
+    std::thread::scope(|s| {
+        for (band, chunk_out) in out.chunks_mut(chunk).enumerate() {
+            let by_start = band * rows_per_band;
+            let by_end = (by_start + rows_per_band).min(blocks_y);
+            s.spawn(move || {
+                encode_dxt5_band(pixels, width, height, blocks_x, by_start, by_end, chunk_out);
+            });
+        }
+    });
+    out
+}
+
+/// Encodes a horizontal band of block-rows [by_start, by_end) into `out`.
+fn encode_dxt5_band(
+    pixels: &[u32],
+    width: usize,
+    height: usize,
+    blocks_x: usize,
+    by_start: usize,
+    by_end: usize,
+    out: &mut [u8],
+) {
     let mut block_pixels = [0u32; 16];
     let mut o = 0usize;
-    for by in 0..blocks_y {
+    for by in by_start..by_end {
         for bx in 0..blocks_x {
             let mut a_max = 0u32;
             let mut a_min = 255u32;
@@ -353,7 +538,6 @@ pub fn encode_dxt5(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
             o += 16;
         }
     }
-    out
 }
 
 #[cfg(test)]

@@ -42,7 +42,7 @@ fn main() {
         let tmb = std::fs::read(dir.join(format!("{name}.{v}.tmb"))).unwrap_or_default();
         let tmb_count = count_tmb(&tmb);
         let ok_toc = toc_count == txt_count;
-        let ok_tmb = tmb_count.map_or(false, |c| c + alias_count == txt_count);
+        let ok_tmb = tmb_count.is_some_and(|c| c + alias_count == txt_count);
         println!("family {v}: toc={toc_count} (==txt {txt_count}: {ok_toc}) tmb={tmb_count:?} (+alias {alias_count} == txt: {ok_tmb})");
         if !ok_toc || !ok_tmb { bad += 1; }
     }
@@ -53,7 +53,7 @@ fn main() {
             if families.iter().any(|x| x == v) { continue; }
             let tmb = std::fs::read(e.path()).unwrap_or_default();
             let tmb_count = count_tmb(&tmb);
-            let ok = tmb_count.map_or(false, |c| c + alias_count == txt_count);
+            let ok = tmb_count.is_some_and(|c| c + alias_count == txt_count);
             println!("tmb-only {v}: tmb={tmb_count:?} (+alias {alias_count} == txt {txt_count}: {ok})");
             if !ok { bad += 1; }
         }

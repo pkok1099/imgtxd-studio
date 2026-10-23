@@ -25,11 +25,13 @@ fn opts(conflict: ConflictPolicy) -> ImportOptions {
     }
 }
 
+type Case<'a> = (&'a str, Box<dyn Fn(&Path) -> String + 'a>);
+
 fn main() {
     let src = PathBuf::from(std::env::args().nth(1).expect("src dir"));
     let png = std::fs::read(std::env::args().nth(2).expect("png path")).unwrap();
     let work = PathBuf::from("/tmp/txd_bisect");
-    let cases: Vec<(&str, Box<dyn Fn(&Path) -> String>)> = vec![
+    let cases: Vec<Case<'_>> = vec![
         ("import_add", Box::new(|d: &Path| {
             let jobs = vec![("zz_new_texture".to_string(), png.clone())];
             import_textures(d, "txd", &jobs, &opts(ConflictPolicy::JustAdd))

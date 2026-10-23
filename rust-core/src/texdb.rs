@@ -61,8 +61,8 @@ impl TexEncoding {
     /// Decompressed size of one mip level.
     pub fn level_size(&self, width: usize, height: usize) -> Option<usize> {
         match self {
-            Self::Dxt1 | Self::Etc1 => Some(((width + 3) / 4) * ((height + 3) / 4) * 8),
-            Self::Dxt5 => Some(((width + 3) / 4) * ((height + 3) / 4) * 16),
+            Self::Dxt1 | Self::Etc1 => Some(width.div_ceil(4) * height.div_ceil(4) * 8),
+            Self::Dxt5 => Some(width.div_ceil(4) * height.div_ceil(4) * 16),
             Self::Rgb565 | Self::Rgba4444 => Some(width * height * 2),
             Self::Rgba32 => Some(width * height * 4),
             Self::Unknown(_) => None,
@@ -128,7 +128,7 @@ pub fn rle_decode(payload: &[u8], seg: usize, indicator: u8) -> Option<Vec<u8>> 
 /// that would start with the indicator byte is emitted as a count-1 repeat
 /// group so it can never be misread.
 pub fn rle_encode(data: &[u8], seg: usize, indicator: u8) -> Vec<u8> {
-    assert!(seg > 0 && data.len() % seg == 0);
+    assert!(seg > 0 && data.len().is_multiple_of(seg));
     let units = data.len() / seg;
     let mut out = Vec::new();
     let mut u = 0usize;
@@ -204,7 +204,7 @@ pub fn build_listing(
     }
     let raw: Vec<u8> = levels.iter().flat_map(|l| l.iter().copied()).collect();
     let seg = encoding.segment_size()?;
-    let (payload, indicator): (Vec<u8>, u32) = if use_rle && raw.len() % seg == 0 {
+    let (payload, indicator): (Vec<u8>, u32) = if use_rle && raw.len().is_multiple_of(seg) {
         let encoded = rle_encode(&raw, seg, 0xFF);
         if encoded.len() < raw.len() {
             (encoded, 0xFF)
@@ -521,15 +521,23 @@ impl TexdbCache {
 
     /// Decompressed GPU data for a manifest index (expected-size prefix),
     /// or `None` for affiliates / unknown encodings / corrupt streams.
+    /// The uncompressed path borrows the .dat buffer directly (single copy
+    /// into the result instead of payload + result).
     pub fn decode_raw(&self, index: usize) -> Option<Vec<u8>> {
         let listing = self.listings.get(index)?.as_ref()?;
         let expected = listing.expected_size()?;
         let payload = &self.dat[listing.payload_range()];
-        let decoded = if listing.rle_indicator == 0 {
-            payload.to_vec()
-        } else {
-            rle_decode(payload, listing.encoding.segment_size()?, (listing.rle_indicator & 0xFF) as u8)?
-        };
+        if listing.rle_indicator == 0 {
+            if payload.len() < expected {
+                return None;
+            }
+            return Some(payload[..expected].to_vec());
+        }
+        let decoded = rle_decode(
+            payload,
+            listing.encoding.segment_size()?,
+            (listing.rle_indicator & 0xFF) as u8,
+        )?;
         if decoded.len() < expected {
             return None;
         }
@@ -538,51 +546,33 @@ impl TexdbCache {
 
     /// Level-0 pixels as ARGB u32 for encodings with a pixel decoder
     /// (DXT1/DXT5 via the codec module, RGB565, RGBA4444, RGBA32).
+    /// Decodes straight from the borrowed .dat span when the payload is
+    /// stored raw (no intermediate copy of the whole texture).
     pub fn decode_pixels(&self, index: usize) -> Option<Vec<u32>> {
         let listing = self.listings.get(index)?.as_ref()?;
-        let raw = self.decode_raw(index)?;
+        let expected = listing.expected_size()?;
+        let payload = &self.dat[listing.payload_range()];
+        let decoded_storage;
+        let raw: &[u8] = if listing.rle_indicator == 0 {
+            if payload.len() < expected {
+                return None;
+            }
+            &payload[..expected]
+        } else {
+            decoded_storage = rle_decode(
+                payload,
+                listing.encoding.segment_size()?,
+                (listing.rle_indicator & 0xFF) as u8,
+            )?;
+            if decoded_storage.len() < expected {
+                return None;
+            }
+            &decoded_storage[..expected]
+        };
         let (w, h) = (listing.width, listing.height);
-        let level0 = listing.encoding.level_size(w, h)?;
-        let data = &raw[..level0.min(raw.len())];
-        match listing.encoding {
-            TexEncoding::Dxt1 => Some(crate::codec::dxt::decode_dxt1(data, w, h)),
-            TexEncoding::Dxt5 => Some(crate::codec::dxt::decode_dxt5(data, w, h)),
-            TexEncoding::Rgb565 => Some(
-                data.chunks_exact(2)
-                    .map(|c| {
-                        let v = u16::from_le_bytes([c[0], c[1]]) as u32;
-                        let r = (((v >> 11) & 0x1F) * 255 + 15) / 31;
-                        let g = (((v >> 5) & 0x3F) * 255 + 31) / 63;
-                        let b = ((v & 0x1F) * 255 + 15) / 31;
-                        0xFF00_0000 | (r << 16) | (g << 8) | b
-                    })
-                    .collect(),
-            ),
-            TexEncoding::Rgba4444 => Some(
-                data.chunks_exact(2)
-                    .map(|c| {
-                        let v = u16::from_le_bytes([c[0], c[1]]) as u32;
-                        let r = ((v >> 12) & 0xF) * 17;
-                        let g = ((v >> 8) & 0xF) * 17;
-                        let b = ((v >> 4) & 0xF) * 17;
-                        let a = (v & 0xF) * 17;
-                        (a << 24) | (r << 16) | (g << 8) | b
-                    })
-                    .collect(),
-            ),
-            TexEncoding::Etc1 => Some(crate::codec::etc1::decode_etc1(data, w, h)),
-            TexEncoding::Rgba32 => Some(
-                data.chunks_exact(4)
-                    .map(|c| {
-                        ((c[3] as u32) << 24)
-                            | ((c[0] as u32) << 16)
-                            | ((c[1] as u32) << 8)
-                            | c[2] as u32
-                    })
-                    .collect(),
-            ),
-            _ => None,
-        }
+        let level0_size = listing.encoding.level_size(w, h)?;
+        let level0 = &raw[..level0_size.min(raw.len())];
+        pixels_for_encoding(listing.encoding, level0, w, h)
     }
 }
 
@@ -733,8 +723,9 @@ impl ImportReport {
     }
 }
 
-fn import_manifest_line(
-    name: &str,
+/// All fields needed to render one manifest listing line.
+struct ManifestTex<'a> {
+    name: &'a str,
     width: usize,
     height: usize,
     png_crc: u32,
@@ -743,18 +734,20 @@ fn import_manifest_line(
     has_alpha: bool,
     camnorm: bool,
     sibling: bool,
-) -> String {
+}
+
+fn import_manifest_line(t: &ManifestTex<'_>) -> String {
     format!(
         "\"{}\" width={} height={} png={:08x} img={:08x}{}{}{}{}streammode=1",
-        name,
-        width,
-        height,
-        png_crc,
-        img_crc,
-        if matches!(encoding, TexEncoding::Dxt1 | TexEncoding::Dxt5) { " format=7" } else { "" },
-        if has_alpha { " alphamode=2" } else { "" },
-        if camnorm { " camnorm=1" } else { "" },
-        if sibling { " hassibling=1" } else { "" },
+        t.name,
+        t.width,
+        t.height,
+        t.png_crc,
+        t.img_crc,
+        if matches!(t.encoding, TexEncoding::Dxt1 | TexEncoding::Dxt5) { " format=7" } else { "" },
+        if t.has_alpha { " alphamode=2" } else { "" },
+        if t.camnorm { " camnorm=1" } else { "" },
+        if t.sibling { " hassibling=1" } else { "" },
     )
 }
 
@@ -883,7 +876,7 @@ fn apply_write(
         for (s, off) in slots.iter().zip(offsets.iter()) {
             new_listings.push(match s {
                 FinalSlot::NoData => None,
-                FinalSlot::Unchanged(oi) => old.listings.get(*oi).and_then(|l| l.clone()),
+                FinalSlot::Unchanged(oi) => old.listings.get(*oi).and_then(|l| *l),
                 FinalSlot::New(b) => listing_from_bytes(b, *off as usize),
             });
         }
@@ -1081,17 +1074,17 @@ pub fn import_textures(
             continue;
         };
         let is_sibling = opts.conflict == ConflictPolicy::CreateSibling;
-        let line = import_manifest_line(
-            &name,
-            levels[0].width,
-            levels[0].height,
-            crc32_ieee(png_bytes),
-            crc32_ieee(&encoded[0]),
+        let line = import_manifest_line(&ManifestTex {
+            name: &name,
+            width: levels[0].width,
+            height: levels[0].height,
+            png_crc: crc32_ieee(png_bytes),
+            img_crc: crc32_ieee(&encoded[0]),
             encoding,
             has_alpha,
-            opts.camnorm,
-            is_sibling,
-        );
+            camnorm: opts.camnorm,
+            sibling: is_sibling,
+        });
         match opts.conflict {
             ConflictPolicy::Overwrite => {
                 if let Some(i) = twin {
@@ -1227,8 +1220,30 @@ pub fn decode_pixels_at(
 ) -> Option<(usize, usize, u16, Vec<u32>)> {
     use std::io::{Read, Seek, SeekFrom};
     let text = std::fs::read_to_string(dir.join(format!("{cache_name}.txt"))).ok()?;
-    let manifest = parse_manifest(&text);
-    if index >= manifest.len() || manifest[index].affiliate.is_some() {
+    // Targeted manifest scan instead of a full parse: this helper is the
+    // per-texture view path, and a 12k-entry manifest costs ~10 ms to parse
+    // (name + line + props String allocations) against ~1 ms for a line
+    // walk. The walk replicates parse_manifest's exact entry rule (trimmed
+    // line starts with '"' and has a closing quote) and the exact affiliate
+    // rule (a token whose key, after quote-trimming, is `affiliate`);
+    // nothing else in a manifest line affects this function's behavior.
+    let mut count = 0usize;
+    let mut affiliate = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.starts_with('"') {
+            continue;
+        }
+        let Some(end) = line[1..].find('"') else { continue };
+        if count == index {
+            affiliate = quote_tokens(&line[1 + end + 1..])
+                .iter()
+                .filter_map(|t| t.split_once('='))
+                .any(|(k, _)| k.trim_matches('"') == "affiliate");
+        }
+        count += 1;
+    }
+    if index >= count || affiliate {
         return None;
     }
     let mut variants: Vec<String> = Vec::new();
@@ -1246,17 +1261,15 @@ pub fn decode_pixels_at(
     for variant in variants {
         let dat_path = dir.join(format!("{cache_name}.{variant}.dat"));
         let toc_bytes = std::fs::read(dir.join(format!("{cache_name}.{variant}.toc"))).ok()?;
-        if toc_bytes.len() < 4 || (toc_bytes.len() - 4) / 4 < manifest.len() {
+        if toc_bytes.len() < 4 || (toc_bytes.len() - 4) / 4 < count {
             continue;
         }
         let dat_len = std::fs::metadata(&dat_path).ok()?.len() as usize;
         if u32::from_le_bytes(toc_bytes[0..4].try_into().ok()?) as usize != dat_len {
             continue;
         }
-        let offsets: Vec<i64> = (0..manifest.len())
-            .map(|i| i32::from_le_bytes(toc_bytes[4 + i * 4..8 + i * 4].try_into().unwrap()) as i64)
-            .collect();
-        let off = offsets[index];
+        let off =
+            i32::from_le_bytes(toc_bytes[4 + index * 4..8 + index * 4].try_into().ok()?) as i64;
         if off < 0 {
             return None;
         }
@@ -1290,47 +1303,26 @@ pub fn decode_pixels_at(
         };
         let expected = listing.expected_size()?;
         let payload = &span[16..];
-        let decoded = if listing.rle_indicator == 0 {
-            payload.to_vec()
+        let decoded_storage;
+        let raw: &[u8] = if listing.rle_indicator == 0 {
+            if payload.len() < expected {
+                return None;
+            }
+            &payload[..expected]
         } else {
-            rle_decode(payload, listing.encoding.segment_size()?, (listing.rle_indicator & 0xFF) as u8)?
+            decoded_storage = rle_decode(
+                payload,
+                listing.encoding.segment_size()?,
+                (listing.rle_indicator & 0xFF) as u8,
+            )?;
+            if decoded_storage.len() < expected {
+                return None;
+            }
+            &decoded_storage[..expected]
         };
-        if decoded.len() < expected {
-            return None;
-        }
-        let raw = &decoded[..expected];
-        let level0 = &raw[..listing.encoding.level_size(listing.width, listing.height)?];
-        let pixels: Vec<u32> = match listing.encoding {
-            TexEncoding::Dxt1 => crate::codec::dxt::decode_dxt1(level0, listing.width, listing.height),
-            TexEncoding::Dxt5 => crate::codec::dxt::decode_dxt5(level0, listing.width, listing.height),
-            TexEncoding::Rgb565 => level0
-                .chunks_exact(2)
-                .map(|c| {
-                    let v = u16::from_le_bytes([c[0], c[1]]) as u32;
-                    let r = (((v >> 11) & 0x1F) * 255 + 15) / 31;
-                    let g = (((v >> 5) & 0x3F) * 255 + 31) / 63;
-                    let b = ((v & 0x1F) * 255 + 15) / 31;
-                    0xFF00_0000 | (r << 16) | (g << 8) | b
-                })
-                .collect(),
-            TexEncoding::Etc1 => crate::codec::etc1::decode_etc1(level0, listing.width, listing.height),
-            TexEncoding::Rgba4444 => level0
-                .chunks_exact(2)
-                .map(|c| {
-                    let v = u16::from_le_bytes([c[0], c[1]]) as u32;
-                    let r = ((v >> 12) & 0xF) * 17;
-                    let g = ((v >> 8) & 0xF) * 17;
-                    let b = ((v >> 4) & 0xF) * 17;
-                    let a = (v & 0xF) * 17;
-                    (a << 24) | (r << 16) | (g << 8) | b
-                })
-                .collect(),
-            TexEncoding::Rgba32 => level0
-                .chunks_exact(4)
-                .map(|c| ((c[3] as u32) << 24) | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32)
-                .collect(),
-            _ => return None,
-        };
+        let level0_size = listing.encoding.level_size(listing.width, listing.height)?;
+        let level0 = &raw[..level0_size.min(raw.len())];
+        let pixels = pixels_for_encoding(listing.encoding, level0, listing.width, listing.height)?;
         return Some((listing.width, listing.height, listing.encoding_raw, pixels));
     }
     None
@@ -1570,7 +1562,7 @@ fn sync_after_write(
         .map(|(i, e)| (e.name.clone(), i))
         .collect();
     let unchanged = |new_i: usize, name: &str| -> bool {
-        old_index.get(name).map_or(false, |&oi| {
+        old_index.get(name).is_some_and(|&oi| {
             old.manifest[oi].affiliate.is_none() && old.raw_listing(oi) == new.raw_listing(new_i)
         })
     };
@@ -1643,8 +1635,8 @@ fn sync_after_write(
                 failed = true;
                 break;
             };
-            let full_chain = new.listings[ni].as_ref().map_or(false, |l| l.full_chain);
-            let use_rle = new.listings[ni].as_ref().map_or(true, |l| l.rle_indicator != 0);
+            let full_chain = new.listings[ni].as_ref().is_some_and(|l| l.full_chain);
+            let use_rle = new.listings[ni].as_ref().is_none_or(|l| l.rle_indicator != 0);
             match encode_listing_from_pixels(
                 &entry.name,
                 &px,
@@ -1778,7 +1770,7 @@ fn sync_after_write(
         // The .tmb is small and most records are reused byte-for-byte, so
         // after a no-op or single-texture edit the regenerated content is
         // often identical to what's on disk — only write when it differs.
-        let already = std::fs::read(&path).map_or(false, |cur| cur == out);
+        let already = std::fs::read(&path).is_ok_and(|cur| cur == out);
         if already || std::fs::write(&path, &out).is_ok() {
             notes.push(format!("tmb_sync={t}"));
         }
@@ -2044,17 +2036,17 @@ pub fn repack_cache(
             kept += 1;
             continue;
         };
-        let line = import_manifest_line(
-            &entry.name,
-            levels[0].0,
-            levels[0].1,
-            crc32_ieee(&encoded[0]),
-            crc32_ieee(&encoded[0]),
+        let line = import_manifest_line(&ManifestTex {
+            name: &entry.name,
+            width: levels[0].0,
+            height: levels[0].1,
+            png_crc: crc32_ieee(&encoded[0]),
+            img_crc: crc32_ieee(&encoded[0]),
             encoding,
-            has_alpha && target != 1,
-            entry.line.contains("camnorm=1"),
-            entry.line.contains("hassibling=1"),
-        );
+            has_alpha: has_alpha && target != 1,
+            camnorm: entry.line.contains("camnorm=1"),
+            sibling: entry.line.contains("hassibling=1"),
+        });
         edit.entries[i] = Some((line, Some(EditListing::Bytes(listing))));
         converted += 1;
     }
@@ -2488,6 +2480,61 @@ mod tests {
         assert_eq!(TexEncoding::Dxt5.raw_size(32, 32, true), Some(1392));
         assert_eq!(TexEncoding::Dxt1.raw_size(1024, 1024, false), Some(524288));
     }
+
+    #[test]
+    fn decode_pixels_at_targeted_scan_matches_full_parse() {
+        // The targeted scan in decode_pixels_at must agree with the full
+        // parse path (TexdbCache::load + decode_pixels) for every index,
+        // including affiliates, out-of-bounds, indented entries, non-entry
+        // lines (cat=) and a quote line without a closing quote.
+        let beta_level0: Vec<u8> = (0..8u8).collect();
+        let listing_beta =
+            build_listing("beta", TexEncoding::Dxt1, 4, 4, &[&beta_level0], true).unwrap();
+        let gamma_level0: Vec<u8> = (100..108u8).collect();
+        let listing_gamma =
+            build_listing("gamma", TexEncoding::Dxt1, 4, 4, &[&gamma_level0], true).unwrap();
+        let (dat, toc) = rebuild_dat_toc(&[Some(&listing_beta), None, Some(&listing_gamma)]);
+        let dir = std::env::temp_dir().join(format!("texdb-at-scan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("beta.txt"),
+            concat!(
+                "cat=0 name=Default defaultformat=2\n",
+                "\"beta\" width=4 height=4\n",
+                "\"beta_lod\" width=4 height=4 affiliate=\"beta\"\n",
+                "\"unclosed no closing quote\n",
+                "  \"gamma\" width=4 height=4\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("beta.etc.dat"), &dat).unwrap();
+        std::fs::write(dir.join("beta.etc.toc"), &toc).unwrap();
+
+        let cache = TexdbCache::load(&dir, "beta").unwrap();
+        assert_eq!(cache.manifest.len(), 3, "manifest entries: beta, beta_lod, gamma");
+        let enc0 = cache.listings[0].as_ref().unwrap().encoding_raw;
+        let enc2 = cache.listings[2].as_ref().unwrap().encoding_raw;
+
+        for i in 0..6usize {
+            let via_at = decode_pixels_at(&dir, "beta", i);
+            let via_cache = cache.decode_pixels(i).map(|px| (cache.manifest[i].width, cache.manifest[i].height, px));
+            match (via_at, via_cache) {
+                (None, None) => {}
+                (Some((w, h, enc, px)), Some((cw, ch, cpx))) => {
+                    assert_eq!((w, h, enc), (cw, ch, if i == 0 { enc0 } else { enc2 }));
+                    assert_eq!(px, cpx, "pixels differ at index {i}");
+                }
+                (a, b) => panic!("index {i}: decode_pixels_at={a:?} vs cache={}", b.is_some()),
+            }
+        }
+        // Explicit edge expectations.
+        assert!(decode_pixels_at(&dir, "beta", 1).is_none(), "affiliate");
+        assert!(decode_pixels_at(&dir, "beta", 3).is_none(), "out of bounds");
+        let (w, h, _, px) = decode_pixels_at(&dir, "beta", 2).unwrap();
+        assert_eq!((w, h), (4, 4));
+        assert_ne!(px, cache.decode_pixels(0).unwrap(), "gamma decodes its own pixels");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2618,6 +2665,8 @@ impl TexdbCache {
 }
 
 /// Full description of the cache in `dir` for UI listing.
+/// Metadata-only: reads the manifest, the .toc, and 16-byte listing headers
+/// via seeks — the (potentially hundreds of MB) .dat payload is never loaded.
 pub fn describe_cache(dir: &std::path::Path) -> Result<CacheDescription, String> {
     let name = resolve_cache_name(dir)?;
     let text = std::fs::read_to_string(dir.join(format!("{name}.txt")))
@@ -2641,43 +2690,42 @@ pub fn describe_cache(dir: &std::path::Path) -> Result<CacheDescription, String>
         return Err(format!("Tidak ada berkas .toc di {}", dir.display()));
     }
 
-    let cache = TexdbCache::load(dir, &name).map_err(|_| {
+    let mut manifest = parse_manifest(&text);
+    inherit_affiliate_dims(&mut manifest);
+    let mut active: Option<(String, VariantMeta)> = None;
+    for v in &toc_variants {
+        if let Some(meta) = load_variant_meta(dir, &name, v, &manifest) {
+            active = Some((v.clone(), meta));
+            break;
+        }
+    }
+    let (variant, meta) = active.ok_or_else(|| {
         format!(
             "Tidak ada varian cache yang valid di {} (uji: ukuran .dat & jumlah entri)",
             dir.display()
         )
     })?;
 
-    let mut textures = Vec::with_capacity(cache.manifest.len());
-    for (i, entry) in cache.manifest.iter().enumerate() {
-        let (offset, size, hash, mips) = match cache.span_for(i) {
-            Some((start, end)) => {
-                let l = cache
-                    .listings
-                    .get(i)
-                    .and_then(|x| x.as_ref())
-                    .or_else(|| {
-                        entry.affiliate.as_ref().and_then(|t| {
-                            cache
-                                .manifest
-                                .iter()
-                                .position(|e| {
-                                    e.affiliate.is_none() && e.name.eq_ignore_ascii_case(t)
-                                })
-                                .and_then(|j| cache.listings.get(j).and_then(|x| x.as_ref()))
-                        })
-                    });
-                match l {
-                    Some(l) => (
-                        start,
-                        end - start,
-                        (l.hash as u32) | ((l.encoding_raw as u32) << 16),
-                        l.full_chain,
-                    ),
-                    None => (start, end - start, 0, false),
-                }
+    // Listing lookup for an index, with affiliate resolution to its target's
+    // listing (same semantics as the previous full-load implementation).
+    let listing_at = |j: usize| -> Option<&Listing> { meta.listings.get(j).and_then(|x| x.as_ref()) };
+    let mut textures = Vec::with_capacity(manifest.len());
+    for (i, entry) in manifest.iter().enumerate() {
+        let direct = listing_at(i);
+        let resolved = direct.or_else(|| {
+            entry.affiliate.as_ref().and_then(|t| {
+                manifest
+                    .iter()
+                    .position(|e| e.affiliate.is_none() && e.name.eq_ignore_ascii_case(t))
+                    .and_then(listing_at)
+            })
+        });
+        let (offset, size, hash, mips) = match (direct, resolved) {
+            (Some(l), _) | (None, Some(l)) => {
+                let (start, end) = (l.span_start, l.span_end);
+                (start, end - start, (l.hash as u32) | ((l.encoding_raw as u32) << 16), l.full_chain)
             }
-            None => (0, 0, 0, false),
+            (None, None) => (0, 0, 0, false),
         };
         let flags: Vec<(String, String)> = entry
             .props
@@ -2704,9 +2752,9 @@ pub fn describe_cache(dir: &std::path::Path) -> Result<CacheDescription, String>
     }
 
     Ok(CacheDescription {
-        dat_file_name: format!("{name}.{}.dat", cache.variant),
+        dat_file_name: format!("{name}.{variant}.dat"),
         name,
-        variant: cache.variant.clone(),
+        variant,
         variants: toc_variants,
         defaults,
         textures,
@@ -2715,16 +2763,63 @@ pub fn describe_cache(dir: &std::path::Path) -> Result<CacheDescription, String>
 
 /// Writes the raw .dat span of manifest `index` in the cache at `dir` to
 /// `dest` (affiliates resolve to their target, as the old loader did).
+/// Reads only the manifest, the .toc, and the target span — never the
+/// whole .dat.
 pub fn extract_raw_span(
     dir: &std::path::Path,
     index: usize,
     dest: &std::path::Path,
 ) -> Result<String, String> {
+    use std::io::{Read, Seek, SeekFrom};
     let name = resolve_cache_name(dir)?;
-    let cache = TexdbCache::load(dir, &name).map_err(|e| e.to_string())?;
-    let bytes = cache
-        .raw_span_bytes(index)
-        .ok_or_else(|| "Entri tidak punya data mentah".to_string())?;
+    let text = std::fs::read_to_string(dir.join(format!("{name}.txt")))
+        .map_err(|e| e.to_string())?;
+    let mut manifest = parse_manifest(&text);
+    inherit_affiliate_dims(&mut manifest);
+    if index >= manifest.len() {
+        return Err("Entri tidak punya data mentah".to_string());
+    }
+    let mut variants: Vec<String> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            if let Some(rest) = fname
+                .strip_prefix(&format!("{name}."))
+                .and_then(|r| r.strip_suffix(".toc"))
+            {
+                variants.push(rest.to_string());
+            }
+        }
+    }
+    variants.sort();
+    let mut found: Option<(String, usize, usize)> = None;
+    for v in &variants {
+        let Some(meta) = load_variant_meta(dir, &name, v, &manifest) else { continue };
+        // Resolve the span (affiliate-aware, same as span_for).
+        let resolved = meta.listings.get(index).and_then(|x| x.as_ref()).or_else(|| {
+            manifest[index].affiliate.as_ref().and_then(|t| {
+                manifest
+                    .iter()
+                    .position(|e| e.affiliate.is_none() && e.name.eq_ignore_ascii_case(t))
+                    .and_then(|j| meta.listings.get(j).and_then(|x| x.as_ref()))
+            })
+        });
+        if let Some(l) = resolved {
+            found = Some((v.clone(), l.span_start, l.span_end));
+            break;
+        }
+        // A loadable variant without a span for this entry means the entry
+        // has no data in this family (affiliate with missing target).
+        return Err("Entri tidak punya data mentah".to_string());
+    }
+    let Some((variant, start, end)) = found else {
+        return Err("Entri tidak punya data mentah".to_string());
+    };
+    let dat_path = dir.join(format!("{name}.{variant}.dat"));
+    let mut f = std::fs::File::open(&dat_path).map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(start as u64)).map_err(|e| e.to_string())?;
+    let mut bytes = vec![0u8; end - start];
+    f.read_exact(&mut bytes).map_err(|e| e.to_string())?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

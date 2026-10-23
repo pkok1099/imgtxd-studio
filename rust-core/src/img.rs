@@ -54,7 +54,7 @@ impl ImgEntry {
 }
 
 fn sectors_for(len: u64) -> u32 {
-    ((len + SECTOR_SIZE - 1) / SECTOR_SIZE) as u32
+    len.div_ceil(SECTOR_SIZE) as u32
 }
 
 fn encode_name(name: &str, out: &mut [u8; NAME_SIZE]) {
@@ -279,7 +279,7 @@ impl ImgArchive {
         f.seek(SeekFrom::Start(offset))?;
         f.read_exact(&mut data)?;
         let file_len = f.metadata()?.len();
-        let end = ((file_len + SECTOR_SIZE - 1) / SECTOR_SIZE) * SECTOR_SIZE;
+        let end = file_len.div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
         f.seek(SeekFrom::Start(end))?;
         f.write_all(&data)?;
         self.entries[idx].offset_sectors = (end / SECTOR_SIZE) as u32;
@@ -302,31 +302,56 @@ impl ImgArchive {
         let mut src = File::open(&self.img_file)?;
         src.seek(SeekFrom::Start(entry.offset_bytes()))?;
         let mut out = File::create(dest)?;
-        io::copy(&mut Read::by_ref(&mut src).take(entry.size_bytes()), &mut out)?;
+        // 1 MiB buffered copy: std::io::copy's internal 8 KiB buffer makes
+        // multi-megabyte entries syscall-bound.
+        let mut reader =
+            io::BufReader::with_capacity(1024 * 1024, Read::by_ref(&mut src).take(entry.size_bytes()));
+        io::copy(&mut reader, &mut out)?;
+        Ok(())
+    }
+
+    /// Copies up to `size` bytes src -> dst through a large scratch buffer
+    /// (same EOF-tolerant semantics as `io::copy(take(size))`).
+    fn copy_up_to(
+        src: &mut File,
+        dst: &mut File,
+        mut size: u64,
+        buf: &mut [u8],
+    ) -> io::Result<()> {
+        while size > 0 {
+            let want = (size as usize).min(buf.len());
+            let n = src.read(&mut buf[..want])?;
+            if n == 0 {
+                break;
+            }
+            dst.write_all(&buf[..n])?;
+            size -= n as u64;
+        }
         Ok(())
     }
 
     fn write_file_padded(f: &mut File, src_path: &Path, sectors: u32) -> io::Result<()> {
         let mut src = File::open(src_path)?;
-        let zero_sector = [0u8; SECTOR_SIZE as usize];
-        let mut buf = vec![0u8; SECTOR_SIZE as usize];
-        for _ in 0..sectors {
+        // Large read/write chunks (1 MiB) instead of one 2 KiB sector read
+        // per loop — order-of-magnitude fewer syscalls on multi-MB files.
+        const CHUNK: usize = 1024 * 1024;
+        let mut buf = vec![0u8; CHUNK];
+        let mut remaining = sectors as u64 * SECTOR_SIZE;
+        while remaining > 0 {
+            let want = (remaining as usize).min(CHUNK);
             let mut filled = 0usize;
-            while filled < buf.len() {
-                let n = src.read(&mut buf[filled..])?;
+            while filled < want {
+                let n = src.read(&mut buf[filled..want])?;
                 if n == 0 {
                     break;
                 }
                 filled += n;
             }
-            if filled == 0 {
-                f.write_all(&zero_sector)?;
-            } else {
-                if filled < buf.len() {
-                    buf[filled..].fill(0);
-                }
-                f.write_all(&buf)?;
+            if filled < want {
+                buf[filled..want].fill(0);
             }
+            f.write_all(&buf[..want])?;
+            remaining -= want as u64;
         }
         Ok(())
     }
@@ -401,7 +426,7 @@ impl ImgArchive {
             std::fs::remove_file(&tmp)?;
         }
         let header_sectors = if self.version == ImgVersion::Ver2 {
-            (self.ver2_header_size() + SECTOR_SIZE - 1) / SECTOR_SIZE
+            self.ver2_header_size().div_ceil(SECTOR_SIZE)
         } else {
             0
         };
@@ -414,11 +439,12 @@ impl ImgArchive {
                 let pad = header_sectors * SECTOR_SIZE - 4;
                 dst.write_all(&vec![0u8; pad as usize])?;
             }
+            let mut copy_buf = vec![0u8; 1024 * 1024];
             for i in 0..self.entries.len() {
                 let (off, size) = (self.entries[i].offset_bytes(), self.entries[i].size_bytes());
                 src.seek(SeekFrom::Start(off))?;
                 dst.seek(SeekFrom::Start(current_sector as u64 * SECTOR_SIZE))?;
-                io::copy(&mut Read::by_ref(&mut src).take(size), &mut dst)?;
+                Self::copy_up_to(&mut src, &mut dst, size, &mut copy_buf)?;
                 self.entries[i].offset_sectors = current_sector;
                 current_sector += self.entries[i].size_sectors;
             }
@@ -428,6 +454,76 @@ impl ImgArchive {
         self.write_dir()
     }
 }
+
+/// Structural health report for an archive (Indonesian): duplicate names,
+/// overlapping spans, entries past EOF, zero-size entries, reclaimable gaps.
+pub fn verify_archive(img_file: &Path, dir_file: Option<&Path>) -> String {
+    let archive = match ImgArchive::open(img_file, dir_file) {
+        Ok(a) => a,
+        Err(e) => return format!("Arsip tidak bisa dibuka: {e}"),
+    };
+    let file_len = std::fs::metadata(img_file).map(|m| m.len()).unwrap_or(0);
+    let mut out = String::new();
+    out.push_str(&format!("Berkas: {}\n", img_file.display()));
+    out.push_str(&format!(
+        "Versi: {:?} · {} entri · ukuran berkas {} byte\n",
+        archive.version,
+        archive.entries.len(),
+        file_len
+    ));
+    // Duplicates (case-insensitive)
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for e in &archive.entries {
+        *counts.entry(e.clean_name().to_lowercase()).or_default() += 1;
+    }
+    let dups: Vec<(&String, &usize)> = counts.iter().filter(|(_, c)| **c > 1).collect();
+    out.push_str(&format!("Nama duplikat: {}\n", dups.len()));
+    for (name, c) in dups.iter().take(10) {
+        out.push_str(&format!("  - {name} ×{c}\n"));
+    }
+    // Spans
+    let mut spans: Vec<(u64, u64, &str)> = archive
+        .entries
+        .iter()
+        .map(|e| (e.offset_bytes(), e.offset_bytes() + e.size_bytes(), e.clean_name()))
+        .collect();
+    spans.sort();
+    let zero = archive.entries.iter().filter(|e| e.size_bytes() == 0).count();
+    out.push_str(&format!("Entri ukuran nol: {zero}\n"));
+    let past_eof = spans.iter().filter(|(_, end, _)| *end > file_len).count();
+    out.push_str(&format!("Entri melewati akhir berkas: {past_eof}\n"));
+    let mut overlaps = 0usize;
+    let mut reclaimable: u64 = 0;
+    let mut cursor: Option<u64> = None;
+    for (start, end, _) in &spans {
+        if let Some(c) = cursor {
+            if *start < c {
+                overlaps += 1;
+            } else {
+                reclaimable += start - c;
+            }
+        }
+        cursor = Some(cursor.map(|c| c.max(*end)).unwrap_or(*end));
+    }
+    if let Some(c) = cursor {
+        if file_len > c {
+            reclaimable += file_len - c;
+        }
+    }
+    out.push_str(&format!("Rentang tumpang tindih: {overlaps}\n"));
+    out.push_str(&format!(
+        "Ruang bisa direklamasi (celah + ekor): {} byte (~{} KB)\n",
+        reclaimable,
+        reclaimable / 1024
+    ));
+    if dups.is_empty() && past_eof == 0 && overlaps == 0 {
+        out.push_str("Hasil: SEHAT — tidak ada masalah struktural.\n");
+    } else {
+        out.push_str("Hasil: ADA MASALAH — rebuild arsip biasanya memperbaiki tumpang tindih dan celah.\n");
+    }
+    out
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -592,72 +688,3 @@ mod tests {
     }
 }
 
-
-/// Structural health report for an archive (Indonesian): duplicate names,
-/// overlapping spans, entries past EOF, zero-size entries, reclaimable gaps.
-pub fn verify_archive(img_file: &Path, dir_file: Option<&Path>) -> String {
-    let archive = match ImgArchive::open(img_file, dir_file) {
-        Ok(a) => a,
-        Err(e) => return format!("Arsip tidak bisa dibuka: {e}"),
-    };
-    let file_len = std::fs::metadata(img_file).map(|m| m.len()).unwrap_or(0);
-    let mut out = String::new();
-    out.push_str(&format!("Berkas: {}\n", img_file.display()));
-    out.push_str(&format!(
-        "Versi: {:?} · {} entri · ukuran berkas {} byte\n",
-        archive.version,
-        archive.entries.len(),
-        file_len
-    ));
-    // Duplicates (case-insensitive)
-    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for e in &archive.entries {
-        *counts.entry(e.clean_name().to_lowercase()).or_default() += 1;
-    }
-    let dups: Vec<(&String, &usize)> = counts.iter().filter(|(_, c)| **c > 1).collect();
-    out.push_str(&format!("Nama duplikat: {}\n", dups.len()));
-    for (name, c) in dups.iter().take(10) {
-        out.push_str(&format!("  - {name} ×{c}\n"));
-    }
-    // Spans
-    let mut spans: Vec<(u64, u64, &str)> = archive
-        .entries
-        .iter()
-        .map(|e| (e.offset_bytes(), e.offset_bytes() + e.size_bytes(), e.clean_name()))
-        .collect();
-    spans.sort();
-    let zero = archive.entries.iter().filter(|e| e.size_bytes() == 0).count();
-    out.push_str(&format!("Entri ukuran nol: {zero}\n"));
-    let past_eof = spans.iter().filter(|(_, end, _)| *end > file_len).count();
-    out.push_str(&format!("Entri melewati akhir berkas: {past_eof}\n"));
-    let mut overlaps = 0usize;
-    let mut reclaimable: u64 = 0;
-    let mut cursor: Option<u64> = None;
-    for (start, end, _) in &spans {
-        if let Some(c) = cursor {
-            if *start < c {
-                overlaps += 1;
-            } else {
-                reclaimable += start - c;
-            }
-        }
-        cursor = Some(cursor.map(|c| c.max(*end)).unwrap_or(*end));
-    }
-    if let Some(c) = cursor {
-        if file_len > c {
-            reclaimable += file_len - c;
-        }
-    }
-    out.push_str(&format!("Rentang tumpang tindih: {overlaps}\n"));
-    out.push_str(&format!(
-        "Ruang bisa direklamasi (celah + ekor): {} byte (~{} KB)\n",
-        reclaimable,
-        reclaimable / 1024
-    ));
-    if dups.is_empty() && past_eof == 0 && overlaps == 0 {
-        out.push_str("Hasil: SEHAT — tidak ada masalah struktural.\n");
-    } else {
-        out.push_str("Hasil: ADA MASALAH — rebuild arsip biasanya memperbaiki tumpang tindih dan celah.\n");
-    }
-    out
-}

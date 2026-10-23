@@ -85,7 +85,7 @@ pub fn audit_game_folder(files_dir: &Path) -> Result<String, String> {
         // VER1 needs its .dir next to the .img.
         let dir_path = path.with_extension("dir");
         let dir_ref = if dir_path.exists() { Some(dir_path.as_path()) } else { None };
-        let archive = match ImgArchive::open(&path, dir_ref) {
+        let archive = match ImgArchive::open(path, dir_ref) {
             Ok(a) => a,
             Err(_) => continue,
         };

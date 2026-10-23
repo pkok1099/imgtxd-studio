@@ -5,9 +5,10 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-orange.svg?style=flat-square)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-purple?logo=kotlin&style=flat-square)](https://kotlinlang.org)
 [![Compose](https://img.shields.io/badge/Jetpack-Compose%20M3-brightgreen?logo=jetpackcompose&style=flat-square)](https://developer.android.com/jetpack/compose)
+[![Rust](https://img.shields.io/badge/Engine-Rust-dea584?logo=rust&style=flat-square)](https://www.rust-lang.org)
 
 > **Modern, high-performance, and open-source `.img` archive & `.txd` texture dictionary editor for Android (Android 12 – 16, API 31–36).**  
-> Direct alternative to legacy PC IMG Tool and TXD Tool on mobile, powered by **Jetpack Compose Material 3** and **Shizuku privileged storage access**.
+> Direct alternative to legacy PC IMG Tool and TXD Tool on mobile, powered by a **native Rust engine**, **Jetpack Compose Material 3**, and **Shizuku privileged storage access**.
 
 [⬇️ **Download Latest APK (v3.3.0)**](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.3.0) • [📦 All Releases](https://github.com/pkok1099/imgtxd-studio/releases) • [✨ Features](#-features) • [🎯 Supported Games](#-supported-games) • [🛠️ Build](#️-building-from-source)
 
@@ -28,6 +29,26 @@ Modding RenderWare games like **GTA San Andreas** on newer Android versions (And
 - 🎨 **RenderWare `.txd` Texture Studio:** View, replace, and export textures directly inside `.img` files or standalone `.txd` files (DXT1/3/5, ETC1, 16/24/32-bit).
 - ⚡ **Seamless `Android/data` Access via Shizuku:** No PC or root required to edit game textures or files directly.
 - 🪟 **Multi-Window Support:** Open `.img` and `.txd` simultaneously side-by-side or in floating windows.
+
+---
+
+## 🦀 Rust Engine
+
+Every byte of format work in ImgTxd Studio is done by a **native Rust core** (`rust-core/`, shipped as `libimgtxd_core.so` via JNI). Kotlin is UI-only — there is no Kotlin engine code left:
+
+- **IMG archives** — open, add, replace, extract, delete, rename, and rebuild VER1/VER2 archives.
+- **TXD dictionaries** — parse/build, DXT1/3/5 + ETC1 + paletted/16/24/32-bit decode, mipmap generation, and texture replace/create.
+- **Texture caches (texdb)** — SA/VC `.txt`/`.toc`/`.dat`/`.tmb` read, import, and rebuild. Every write re-synchronizes each variant's `.tmb`, so caches produced by the app stay valid in the original TXD Tool (verified with a checker replicating TXD Tool's own corruption rules).
+- **Audio index repair** — `.osw`/`.idx` consistency fixes.
+
+Correctness is pinned by **70 Rust unit tests** plus byte-exact golden checks: rebuilt archives and caches are hash-identical to reference outputs, and codec/resampler changes must reproduce identical FNV hashes before they ship.
+
+Measured on the development VM against the previous engine, on a real GTA SA Lite dataset (`gta3.img` — 283 MB, 13,557 entries; texdb cache — 12,445 textures):
+
+| Operation | Before | Rust engine | Result |
+|---|---|---|---|
+| Rebuild `gta3.img` | 36.3 s | **5.4 s** | ~6.7× faster, byte-identical output |
+| Open a texture for viewing | 24.1 ms | **2.9 ms** | ~8× faster (direct per-entry pixel decode, no full-dictionary parse) |
 
 ---
 
@@ -82,7 +103,7 @@ ImgTxd Studio supports games and engines utilizing RenderWare binary formats and
   - **Rebuild & Compact:** Repack active entries into a contiguous gap-free layout to reclaim dead storage space.
 
 - **Modern Android Architecture:**
-  - 100% Kotlin with Jetpack Compose & Material 3.
+  - Kotlin + Jetpack Compose & Material 3 for the UI, native Rust for the entire format engine.
   - True Edge-to-Edge display with full WindowInsets handling.
   - Frame-driven drawer animation (`withFrameNanos`) that remains smooth even when system animator duration scale is set to 0x.
   - Multi-layer anti-tampering and cryptographic signature verification.
