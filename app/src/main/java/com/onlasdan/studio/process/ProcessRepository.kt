@@ -16,11 +16,11 @@ data class AppProcess(
 )
 
 enum class ProcessType(val label: String) {
-    EXPORT_ALL("Ekspor Semua"),
-    EXPORT_SINGLE("Ekspor Berkas"),
-    REBUILD("Rebuild Arsip"),
-    ADD_ENTRY("Tambah Berkas"),
-    REPLACE_ENTRY("Ganti Berkas"),
+    EXPORT_ALL("Export All"),
+    EXPORT_SINGLE("Export Files"),
+    REBUILD("Rebuild Archive"),
+    ADD_ENTRY("Add Files"),
+    REPLACE_ENTRY("Replace File"),
     AUTO_REPLACE("Auto Replace"),
     SHIZUKU_SYNC("Sinkronisasi Shizuku")
 }

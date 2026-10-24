@@ -81,7 +81,7 @@ object SafeFileWriter {
         val raf = try {
             RandomAccessFile(lockFile, "rw")
         } catch (e: Exception) {
-            throw IllegalStateException("Berkas sedang diproses oleh operasi lain", e)
+            throw IllegalStateException("File is being processed by another operation", e)
         }
 
         val channel = raf.channel
@@ -90,17 +90,17 @@ object SafeFileWriter {
         } catch (e: OverlappingFileLockException) {
             try { channel.close() } catch (_: Throwable) {}
             try { raf.close() } catch (_: Throwable) {}
-            throw IllegalStateException("Berkas sedang diproses oleh operasi lain", e)
+            throw IllegalStateException("File is being processed by another operation", e)
         } catch (e: Exception) {
             try { channel.close() } catch (_: Throwable) {}
             try { raf.close() } catch (_: Throwable) {}
-            throw IllegalStateException("Berkas sedang diproses oleh operasi lain", e)
+            throw IllegalStateException("File is being processed by another operation", e)
         }
 
         if (lock == null) {
             try { channel.close() } catch (_: Throwable) {}
             try { raf.close() } catch (_: Throwable) {}
-            throw IllegalStateException("Berkas sedang diproses oleh operasi lain")
+            throw IllegalStateException("File is being processed by another operation")
         }
 
         return LockHandle(lockFile, raf, channel, lock)
@@ -143,11 +143,11 @@ object SafeFileWriter {
             try {
                 val result = block(tmpFile)
                 if (!tmpFile.exists()) {
-                    throw IOException("File sementara hasil penulisan tidak ditemukan: ${tmpFile.absolutePath}")
+                    throw IOException("Temp file not found after write: ${tmpFile.absolutePath}")
                 }
                 val moved = atomicReplace(tmpFile, targetFile)
                 if (!moved) {
-                    throw IOException("Gagal mengganti berkas target dengan berkas sementara secara atomik")
+                    throw IOException("Failed to atomically swap temp file over target")
                 }
                 completedSuccessfully = true
                 result
@@ -238,7 +238,7 @@ object SafeFileWriter {
 
                 while (transferred < totalBytes) {
                     if (isCancelled()) {
-                        throw CancellationException("Operasi dibatalkan saat penyalinan berkas")
+                        throw CancellationException("Operation cancelled during file copy")
                     }
                     val count = inChannel.transferTo(transferred, minOf(chunkSize, totalBytes - transferred), outChannel)
                     if (count <= 0) break
@@ -270,7 +270,7 @@ object SafeFileWriter {
 
             while (remaining > 0) {
                 if (isCancelled()) {
-                    throw CancellationException("Operasi dibatalkan saat ekstraksi entri")
+                    throw CancellationException("Operation cancelled during entry extraction")
                 }
                 buffer.clear()
                 val toRead = minOf(remaining, bufSize.toLong()).toInt()
@@ -300,7 +300,7 @@ object SafeFileWriter {
         var total = 0L
         while (true) {
             if (isCancelled()) {
-                throw CancellationException("Operasi dibatalkan saat streaming data")
+                throw CancellationException("Operation cancelled during data streaming")
             }
             val read = input.read(buffer)
             if (read == -1) break

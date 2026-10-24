@@ -64,7 +64,7 @@ fun TextureDetailBottomSheet(
                     )
                 } else {
                     Text(
-                        text = "Pratinjau tidak tersedia untuk format ini",
+                        text = "Preview not available for this format",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -117,7 +117,7 @@ fun TextureDetailBottomSheet(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "Ganti Tekstur",
+                        text = "Replace Texture",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )

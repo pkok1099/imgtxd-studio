@@ -91,7 +91,7 @@ object MemoryEvaluator {
      * Pesan rekomendasi fallback ketika terjadi OutOfMemoryError.
      */
     const val OOM_FALLBACK_SUGGESTION: String =
-        "Memori tidak mencukupi untuk menyelesaikan proses. Disarankan untuk beralih ke Mode Otomatis atau menurunkan alokasi memori di Pengaturan Proses Runtime."
+        "Not enough memory to finish the process. Try Auto Mode or lower the memory allocation in Runtime Process Settings."
 
     /**
      * Mengambil statistik memori perangkat saat ini melalui [ActivityManager].
@@ -230,7 +230,7 @@ object MemoryEvaluator {
         return if (isOutOfMemoryError(error)) {
             OOM_FALLBACK_SUGGESTION
         } else {
-            error.localizedMessage ?: error.message ?: "Terjadi kesalahan tidak terduga saat memproses tugas."
+            error.localizedMessage ?: error.message ?: "Unexpected error while running the task."
         }
     }
 

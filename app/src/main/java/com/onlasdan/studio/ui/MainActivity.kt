@@ -198,10 +198,10 @@ class MainActivity : ComponentActivity() {
                                 showUnsavedChangesPrompt = false
                                 pendingIntentToLoad = null
                             }) {
-                                SheetTitle("Perubahan Belum Disimpan")
+                                SheetTitle("Unsaved Changes")
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    "Arsip IMG saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan sebelum membuka file baru?",
+                                    "This IMG archive has unsaved changes. Save them before opening another file?",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -222,7 +222,7 @@ class MainActivity : ComponentActivity() {
                                     ),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("Simpan & Buka", fontWeight = FontWeight.SemiBold)
+                                    Text("Save & Open", fontWeight = FontWeight.SemiBold)
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedButton(
@@ -546,7 +546,7 @@ fun MainScreen(
         ContextualDockItem(
             id = "archive",
             icon = Icons.Outlined.FolderOpen,
-            contentDescription = "Arsip IMG",
+            contentDescription = "IMG Archive",
             showDotBadge = isImgOpen,
             onClick = {
                 if (isImgOpen) {
@@ -577,7 +577,7 @@ fun MainScreen(
         ContextualDockItem(
             id = "recent",
             icon = Icons.Outlined.History,
-            contentDescription = "Berkas terbaru",
+            contentDescription = "Recent files",
             onClick = {
                 coroutineScope.launch { homeListState.animateScrollToItem(2) }
             }
@@ -585,7 +585,7 @@ fun MainScreen(
         ContextualDockItem(
             id = "menu",
             icon = Icons.Outlined.MoreHoriz,
-            contentDescription = "Menu aplikasi & opsi",
+            contentDescription = "App menu & options",
             onClick = {
                 showQuickMenuSheet = true
             }
@@ -597,26 +597,26 @@ fun MainScreen(
         ContextualDockItem(
             id = "home",
             icon = Icons.Outlined.Home,
-            contentDescription = "Kembali ke Beranda",
+            contentDescription = "Back to Home",
             onClick = { activeDockTab = "home" }
         ),
         ContextualDockItem(
             id = "search",
             icon = Icons.Outlined.Search,
-            contentDescription = "Cari entri arsip",
+            contentDescription = "Search archive entries",
             isSelected = isSearchExpanded,
             onClick = { isSearchExpanded = !isSearchExpanded }
         ),
         ContextualDockItem(
             id = "add",
             icon = Icons.Outlined.Add,
-            contentDescription = "Tambah berkas ke arsip",
+            contentDescription = "Add files to archive",
             onClick = { showAddFilePicker = true }
         ),
         ContextualDockItem(
             id = "save",
             icon = Icons.Outlined.Save,
-            contentDescription = "Simpan arsip IMG",
+            contentDescription = "Save IMG archive",
             showDotBadge = uiState.hasUnsavedChanges,
             isEnabled = uiState.hasUnsavedChanges,
             onClick = { viewModel.rebuildArchive() }
@@ -634,19 +634,19 @@ fun MainScreen(
         ContextualDockItem(
             id = "export",
             icon = Icons.Outlined.FileDownload,
-            contentDescription = "Ekspor berkas terpilih",
+            contentDescription = "Export selected files",
             onClick = { showExtractSelectedPicker = true }
         ),
         ContextualDockItem(
             id = "delete",
             icon = Icons.Outlined.Delete,
-            contentDescription = "Hapus berkas terpilih",
+            contentDescription = "Delete selected files",
             onClick = { showDeleteSelectedDialog = true }
         ),
         ContextualDockItem(
             id = "select_all",
             icon = Icons.Outlined.Checklist,
-            contentDescription = "Pilih semua entri",
+            contentDescription = "Select all entries",
             onClick = { viewModel.selectAll() }
         ),
         ContextualDockItem(
@@ -675,7 +675,7 @@ fun MainScreen(
             // The original folder travels as EXTRA_GAME_DIR so edits made to the
             // staged copy can be applied back from the browser's menu.
             coroutineScope.launch {
-                Toast.makeText(context, "Menyalin folder cache via Shizuku…", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Copying cache folder via Shizuku…", Toast.LENGTH_SHORT).show()
                 val srcDir = path.trimEnd('/')
                 val destDir = File(context.cacheDir, "texdb_stage/" + File(srcDir).name)
                 destDir.deleteRecursively()
@@ -684,7 +684,7 @@ fun MainScreen(
                 if (code == 0) {
                     openBrowser(destDir.absolutePath, srcDir)
                 } else {
-                    Toast.makeText(context, "Gagal menyalin cache via Shizuku", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Copy cache via Shizuku failed", Toast.LENGTH_LONG).show()
                 }
             }
         } else {
@@ -756,26 +756,26 @@ fun MainScreen(
                 val activeArchiveProcess = if (currentProcess?.targetFile == uiState.archive?.archiveName) currentProcess else null
 
                 ArchiveScreen(
-                    title = uiState.archive?.archiveName ?: "Arsip IMG",
+                    title = uiState.archive?.archiveName ?: "IMG Archive",
                     subtitle = if (uiState.archive != null)
                         "${uiState.archive?.version?.name ?: "IMG"} • ${uiState.entries.size} file"
                     else
-                        "Belum ada arsip terbuka",
+                        "No archive open",
                     isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
                     onShizukuClick = {
                         if (!ShizukuManager.isShizukuAvailable()) {
-                            Toast.makeText(context, "Shizuku service tidak terdeteksi. Buka aplikasi Shizuku terlebih dahulu.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Shizuku service not detected. Open the Shizuku app first.", Toast.LENGTH_LONG).show()
                         } else if (!ShizukuManager.hasPermission()) {
                             ShizukuManager.requestPermission()
                         } else {
-                            Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
                         }
                     },
                     items = uiState.displayedEntries,
                     keyExtractor = { "${it.cleanName}_${it.offsetInSectors}" },
                     listState = archiveListState,
-                    emptyTitle = "Belum Ada Arsip IMG Terbuka",
-                    emptyDescription = "Pilih berkas arsip .img untuk melihat dan mengelola entri model 3D dan tekstur game.",
+                    emptyTitle = "No IMG Archive Open Yet",
+                    emptyDescription = "Pick an .img archive file to browse and manage the game's 3D model entries and textures.",
                     emptyActionLabel = "Buka IMG",
                     onEmptyAction = { showOpenArchivePicker = true },
                     isSearching = isSearchExpanded,
@@ -831,10 +831,10 @@ fun MainScreen(
             }
 
             "txd" -> {
-                val activeTxdProcess = if (currentProcess?.targetFile == (uiState.activeTxdName ?: "Tekstur TXD")) currentProcess else null
+                val activeTxdProcess = if (currentProcess?.targetFile == (uiState.activeTxdName ?: "TXD Textures")) currentProcess else null
 
                 TxdEditorScreen(
-                    txdName = uiState.activeTxdName ?: "Tekstur TXD",
+                    txdName = uiState.activeTxdName ?: "TXD Textures",
                     textures = uiState.txdEntries,
                     isLoading = uiState.isTxdLoading,
                     statusMessage = uiState.statusMessage,
@@ -921,7 +921,7 @@ fun MainScreen(
     if (showMoreActionsSheet) {
         MoreActionsBottomSheet(
             onDismissRequest = { showMoreActionsSheet = false },
-            fileName = uiState.archive?.archiveName ?: "Arsip IMG",
+            fileName = uiState.archive?.archiveName ?: "IMG Archive",
             isTxd = false,
             isFileBusy = isCurrentFileBusy,
             onExportAll = {
@@ -960,11 +960,11 @@ fun MainScreen(
             },
             onOpenShizuku = {
                 if (!ShizukuManager.isShizukuAvailable()) {
-                    Toast.makeText(context, "Shizuku service tidak terdeteksi.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Shizuku service not detected.", Toast.LENGTH_SHORT).show()
                 } else if (!ShizukuManager.hasPermission()) {
                     ShizukuManager.requestPermission()
                 } else {
-                    Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
                 }
             },
             onOpenModloader = {
@@ -1008,7 +1008,7 @@ fun MainScreen(
     // 2b2. IDE index scan: pick the game's data folder (files/ or files/data/)
     if (showIdeFolderPicker) {
         FilePickerDialog(
-            title = "Pilih Folder Data Game (berisi berkas .ide)",
+            title = "Pick Game Data Folder (contains .ide files)",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showIdeFolderPicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1050,12 +1050,12 @@ fun MainScreen(
             onVerifyArchive = {
                 val imgPath = uiState.archive?.imgFile?.absolutePath
                 if (imgPath == null) {
-                    Toast.makeText(context, "Tidak ada arsip yang terbuka", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "No archive open", Toast.LENGTH_SHORT).show()
                 } else {
                     coroutineScope.launch {
                         val result = withContext(Dispatchers.IO) { NativeCore.imgVerify(imgPath) }
                         imgVerifyReport = when {
-                            result == null -> "Engine Rust tidak tersedia"
+                            result == null -> "Rust engine unavailable"
                             result.startsWith("OK") -> result.removePrefix("OK\n")
                             else -> result.removePrefix("ERROR ")
                         }
@@ -1066,11 +1066,11 @@ fun MainScreen(
             onDataLines = { showDataFilePicker = true },
             onRequestShizuku = {
                 if (!ShizukuManager.isShizukuAvailable()) {
-                    Toast.makeText(context, "Shizuku service tidak terdeteksi.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Shizuku service not detected.", Toast.LENGTH_SHORT).show()
                 } else if (!ShizukuManager.hasPermission()) {
                     ShizukuManager.requestPermission()
                 } else {
-                    Toast.makeText(context, "Shizuku aktif: akses penuh Android/data tersedia.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -1087,7 +1087,7 @@ fun MainScreen(
     // 3b2. SA Audio Fixer: pick an .osw archive, regenerate its .idx
     if (showOswPicker) {
         FilePickerDialog(
-            title = "Pilih Arsip Audio .osw",
+            title = "Pick .osw Audio Archive",
             mode = PickerMode.PICK_OSW,
             onDismissRequest = { showOswPicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1100,7 +1100,7 @@ fun MainScreen(
     // 3b2a. IMG health report sheet
     imgVerifyReport?.let { report ->
         MessageSheet(
-            title = "Kesehatan Arsip IMG",
+            title = "IMG Archive Health",
             message = report,
             monospace = true,
             onDismissRequest = { imgVerifyReport = null }
@@ -1110,7 +1110,7 @@ fun MainScreen(
     // 3b2a2. Game texture audit: pick the GTA files/ folder, run, show report
     if (showAuditFolderPicker) {
         FilePickerDialog(
-            title = "Pilih Folder files/ GTA (berisi texdb/ dan .img)",
+            title = "Pick GTA files/ Folder (contains texdb/ and .img)",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showAuditFolderPicker = false },
             onFileSelected = { path, _ ->
@@ -1120,7 +1120,7 @@ fun MainScreen(
                     val result = withContext(Dispatchers.IO) { NativeCore.gameAudit(path) }
                     auditBusy = false
                     auditReport = when {
-                        result == null -> "Engine Rust tidak tersedia"
+                        result == null -> "Rust engine unavailable"
                         result.startsWith("OK") -> result.removePrefix("OK\n")
                         else -> result.removePrefix("ERROR ")
                     }
@@ -1129,11 +1129,11 @@ fun MainScreen(
         )
     }
     if (auditBusy) {
-        BusySheet("Memeriksa belasan ribu DFF melawan semua cache…")
+        BusySheet("Checking thousands of DFFs against every cache…")
     }
     auditReport?.let { report ->
         MessageSheet(
-            title = "Audit Tekstur Game",
+            title = "Game Texture Audit",
             message = report,
             monospace = true,
             onDismissRequest = { auditReport = null }
@@ -1143,7 +1143,7 @@ fun MainScreen(
     // 3b2a3. Data lines helper: pick a data file, open the activity
     if (showDataFilePicker) {
         FilePickerDialog(
-            title = "Pilih Berkas Data (handling.cfg / vehicles.ide / carcols.dat)",
+            title = "Pick Data File (handling.cfg / vehicles.ide / carcols.dat)",
             mode = PickerMode.PICK_FILE,
             onDismissRequest = { showDataFilePicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1160,7 +1160,7 @@ fun MainScreen(
     // 3b2b. DFF inspector: pick a .dff, open the inspector activity
     if (showDffInspectPicker) {
         FilePickerDialog(
-            title = "Pilih Berkas Model .dff",
+            title = "Pick .dff Model File",
             mode = PickerMode.PICK_FILE,
             onDismissRequest = { showDffInspectPicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1178,7 +1178,7 @@ fun MainScreen(
     // (user feedback 2026-10-23: folder, not the manifest file).
     if (showTexdbPicker) {
         FilePickerDialog(
-            title = "Masuk ke Folder Cache (mis. texdb/txd), lalu Pilih Folder Ini",
+            title = "Open the cache folder (e.g. texdb/txd), then Pick This Folder",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showTexdbPicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1199,7 +1199,7 @@ fun MainScreen(
     // 3c. Multi-TXD Export: pick TXD files, options dialog, destination folder
     if (showMultiTxdPicker) {
         FilePickerDialog(
-            title = "Pilih Berkas TXD untuk Diekspor",
+            title = "Pick TXD Files to Export",
             mode = PickerMode.PICK_MULTIPLE_TXD,
             onDismissRequest = { showMultiTxdPicker = false },
             onMultipleFilesSelected = { filePaths, isShizuku ->
@@ -1218,11 +1218,11 @@ fun MainScreen(
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                SheetTitle("Ekspor dari ${files.size} TXD")
+                SheetTitle("Export from ${files.size} TXDs")
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Semua tekstur dari ${files.size} berkas TXD akan diekspor sebagai PNG.",
+                text = "All textures from ${files.size} TXD files will be exported as PNG.",
                 style = MaterialTheme.typography.bodyMedium
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1231,7 +1231,7 @@ fun MainScreen(
                     onCheckedChange = { multiTxdSubfolders = it }
                 )
                 Text(
-                    text = "Subfolder untuk setiap TXD",
+                    text = "Subfolder per TXD",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -1242,7 +1242,7 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = { pendingMultiTxdFiles = null }) {
-                    Text("Batal")
+                    Text("Cancel")
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
@@ -1253,7 +1253,7 @@ fun MainScreen(
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Pilih Folder Tujuan", fontWeight = FontWeight.Bold)
+                    Text("Pick Destination Folder", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -1262,7 +1262,7 @@ fun MainScreen(
     if (showMultiTxdDestPicker) {
         val files = pendingMultiTxdFiles
         FilePickerDialog(
-            title = "Pilih Folder Tujuan Ekspor Multi-TXD",
+            title = "Pick Multi-TXD Export Destination Folder",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showMultiTxdDestPicker = false },
             onFileSelected = { folderPath, _ ->
@@ -1302,10 +1302,10 @@ fun MainScreen(
     // 7. Busy Process Sheet (Back Navigation Rule 3)
     if (showBusyProcessDialog) {
         ConfirmSheet(
-            title = "Proses Sedang Berjalan",
-            message = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
-            confirmLabel = "Lanjut di Latar Belakang",
-            dismissLabel = "Tetap di Sini",
+            title = "Process Running",
+            message = "Process '${currentProcess?.title}' is running in the background.\n\nYou can go back to Home while it runs, or stay on this screen.",
+            confirmLabel = "Run in Background",
+            dismissLabel = "Stay Here",
             onDismissRequest = { showBusyProcessDialog = false },
             onConfirm = {
                 showBusyProcessDialog = false
@@ -1317,10 +1317,10 @@ fun MainScreen(
     // 8. Unsaved Close Prompt Sheet
     if (showUnsavedClosePrompt) {
         ConfirmSheet(
-            title = "Tutup Tanpa Menyimpan?",
-            message = "Arsip ini memiliki perubahan yang belum direbuild/disimpan ke file. Menutup sekarang akan membatalkan perubahan yang belum tersimpan.",
-            confirmLabel = "Tutup Saja",
-            dismissLabel = "Batal",
+            title = "Close Without Saving?",
+            message = "This archive has changes not yet rebuilt/saved to disk. Closing now discards them.",
+            confirmLabel = "Close Anyway",
+            dismissLabel = "Cancel",
             danger = true,
             onDismissRequest = { showUnsavedClosePrompt = false },
             onConfirm = {
@@ -1336,7 +1336,7 @@ fun MainScreen(
     // Open IMG Archive Picker
     if (showOpenArchivePicker) {
         FilePickerDialog(
-            title = "Buka Arsip IMG",
+            title = "Open IMG Archive",
             mode = PickerMode.OPEN_IMG,
             onDismissRequest = { showOpenArchivePicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1357,7 +1357,7 @@ fun MainScreen(
     // Add File Picker
     if (showAddFilePicker) {
         FilePickerDialog(
-            title = "Pilih Berkas untuk Ditambahkan",
+            title = "Pick Files to Add",
             mode = PickerMode.PICK_FILE,
             onDismissRequest = { showAddFilePicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1370,7 +1370,7 @@ fun MainScreen(
     // Replace File Picker
     entryToReplace?.let { entry ->
         FilePickerDialog(
-            title = "Ganti ${entry.cleanName}",
+            title = "Replace ${entry.cleanName}",
             mode = PickerMode.PICK_FILE,
             onDismissRequest = { entryToReplace = null },
             onFileSelected = { path, isShizuku ->
@@ -1386,7 +1386,7 @@ fun MainScreen(
     // Extract Single Entry Picker
     entryToExtract?.let { entry ->
         FilePickerDialog(
-            title = "Ekstrak ${entry.cleanName} ke Folder...",
+            title = "Extract ${entry.cleanName} to Folder...",
             mode = PickerMode.SELECT_FOLDER,
             onDismissRequest = { entryToExtract = null },
             onFileSelected = { path, isShizuku ->
@@ -1407,7 +1407,7 @@ fun MainScreen(
     // Extract Selected Entries Picker
     if (showExtractSelectedPicker) {
         FilePickerDialog(
-            title = "Ekstrak ${uiState.selectedEntries.size} Berkas ke Folder atau File IMG...",
+            title = "Extract ${uiState.selectedEntries.size} Files to Folder or IMG File...",
             mode = PickerMode.SELECT_FOLDER_OR_IMG,
             onDismissRequest = { showExtractSelectedPicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1432,7 +1432,7 @@ fun MainScreen(
     // Extract All Entries Picker
     if (showExtractAllPicker) {
         FilePickerDialog(
-            title = "Ekstrak Seluruh Berkas Arsip ke Folder...",
+            title = "Extract All Archive Files to Folder...",
             mode = PickerMode.SELECT_FOLDER,
             onDismissRequest = { showExtractAllPicker = false },
             onFileSelected = { path, isShizuku ->
@@ -1450,7 +1450,7 @@ fun MainScreen(
     entryToRename?.let { entry ->
         InputSheet(
             title = "Ubah Nama Entri",
-            label = "Nama Berkas (Maks 24 karakter)",
+            label = "File Name (Max 24 chars)",
             initial = entry.cleanName,
             onDismissRequest = { entryToRename = null },
             onConfirm = { newName ->
@@ -1463,10 +1463,10 @@ fun MainScreen(
     // Rebuild Confirm Sheet
     if (showRebuildDialog) {
         ConfirmSheet(
-            title = "Rebuild Arsip IMG",
-            message = "Rebuild akan menyusun ulang seluruh entri secara berurutan dan membersihkan ruang sektor kosong yang terfragmentasi.\n\n" +
-                (if (uiState.isShizukuBacked) "Perubahan akan otomatis disimpan kembali ke folder game via Shizuku.\n\n" else "") +
-                "Pastikan arsip memiliki cadangan sebelum memulai rebuild.",
+            title = "Rebuild IMG Archive",
+            message = "Rebuild re-sequences all entries in order and clears fragmented empty sector space.\n\n" +
+                (if (uiState.isShizukuBacked) "Changes are saved back to the game folder via Shizuku.\n\n" else "") +
+                "Make sure the archive has a backup before rebuilding.",
             confirmLabel = "Rebuild Sekarang",
             onDismissRequest = { showRebuildDialog = false },
             onConfirm = {
@@ -1479,9 +1479,9 @@ fun MainScreen(
     // Delete Selected Confirm Sheet
     if (showDeleteSelectedDialog) {
         ConfirmSheet(
-            title = "Hapus Entri Terpilih",
-            message = "Apakah Anda yakin ingin menghapus ${uiState.selectedEntries.size} entri dari arsip ini?",
-            confirmLabel = "Hapus (${uiState.selectedEntries.size})",
+            title = "Delete Selected Entries",
+            message = "Delete ${uiState.selectedEntries.size} entries from this archive?",
+            confirmLabel = "Delete (${uiState.selectedEntries.size})",
             danger = true,
             onDismissRequest = { showDeleteSelectedDialog = false },
             onConfirm = {
@@ -1534,13 +1534,13 @@ private fun HomeScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Akses Semua Berkas Diperlukan",
+                                text = "All Files Access Required",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
                             Text(
-                                text = "Android memerlukan izin penyimpanan untuk memodifikasi berkas game secara langsung.",
+                                text = "Android needs storage permission to modify game files in place.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
@@ -1594,13 +1594,13 @@ private fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Buka dan kelola arsip .img serta tekstur .txd. Kompatibel dengan format game seri Grand Theft Auto (SA, VC, III) dan Bully. Akses langsung folder Android/data menggunakan Shizuku tanpa root!",
+                        text = "Open and manage .img archives and .txd textures. Compatible with Grand Theft Auto (SA, VC, III) and Bully. Direct Android/data access via Shizuku, no root!",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "Tidak berafiliasi dengan Rockstar Games / Take-Two.",
+                        text = "Not affiliated with Rockstar Games / Take-Two.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center
@@ -1648,7 +1648,7 @@ private fun HomeScreen(
         // Section: FILE TERBARU
         item(key = "home_recent_header") {
             Text(
-                text = "FILE TERBARU",
+                text = "RECENT FILES",
                 style = SectionHeaderStyle,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp)
@@ -1677,7 +1677,7 @@ private fun HomeScreen(
                             modifier = Modifier.size(24.dp)
                         )
                         Text(
-                            text = "Belum ada berkas yang baru dibuka.",
+                            text = "No recently opened files.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1840,15 +1840,15 @@ fun TamperedScreen() {
                         modifier = Modifier.size(56.dp)
                     )
                     Text(
-                        text = "Integritas Aplikasi Terlanggar",
+                        text = "App Integrity Violation",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Aplikasi ini mendeteksi perubahan nama paket (repackaging) atau modifikasi kode yang tidak sah. " +
-                                "Demi integritas sistem dan keamanan berkas game Anda, ImgTxd Studio tidak diizinkan berjalan dalam kondisi yang telah diubah.\n\n" +
-                                "Aplikasi akan otomatis ditutup.",
+                        text = "The app detected package renaming (repackaging) or unauthorized code changes. " +
+                                "For system integrity and your game files' safety, ImgTxd Studio is not allowed to run in a modified state.\n\n" +
+                                "The app will close automatically.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1861,7 +1861,7 @@ fun TamperedScreen() {
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Tutup Aplikasi", fontWeight = FontWeight.SemiBold)
+                        Text("Close App", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

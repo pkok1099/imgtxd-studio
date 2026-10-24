@@ -37,8 +37,8 @@ fun <T> ArchiveScreen(
     keyExtractor: (T) -> String,
     itemContent: @Composable (item: T) -> Unit,
     listState: LazyListState = rememberLazyListState(),
-    emptyTitle: String = "Tidak ada berkas",
-    emptyDescription: String = "Belum ada entri yang dimuat di dalam berkas ini.",
+    emptyTitle: String = "No files",
+    emptyDescription: String = "No entries loaded in this archive yet.",
     emptyActionLabel: String? = null,
     onEmptyAction: (() -> Unit)? = null,
     isSearching: Boolean = false,
@@ -105,7 +105,7 @@ fun <T> ArchiveScreen(
                         IconButton(onClick = onCloseSearch) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                contentDescription = "Tutup pencarian",
+                                contentDescription = "Close search",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -127,7 +127,7 @@ fun <T> ArchiveScreen(
                             trailingIcon = {
                                 if (searchQuery.isNotEmpty()) {
                                     IconButton(onClick = { onSearchQueryChange("") }) {
-                                        Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
+                                        Icon(Icons.Outlined.Close, contentDescription = "Clear search")
                                     }
                                 }
                             },
@@ -292,7 +292,7 @@ fun <T> ArchiveScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (searchQuery.isNotBlank()) "Hasil Pencarian" else "Daftar Berkas",
+                                text = if (searchQuery.isNotBlank()) "Hasil Pencarian" else "File List",
                                 fontFamily = FontFamily.Serif,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,

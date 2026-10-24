@@ -36,17 +36,17 @@ object TxdStore {
     fun load(file: File): LoadedTxd {
         AppIntegrity.verifyOrThrow()
         if (!file.exists()) {
-            throw IOException("File TXD tidak ditemukan: ${file.absolutePath}")
+            throw IOException("TXD file not found: ${file.absolutePath}")
         }
         val lines = NativeCore.txdList(file.absolutePath)
-            ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+            ?: throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
         if (lines.isEmpty()) throw IOException("Engine Rust mengembalikan daftar kosong")
         val header = lines[0].split('\t', limit = 3)
         if (header[0] == "ERROR") {
-            throw IOException(header.getOrNull(1) ?: "TXD tidak bisa dibuka")
+            throw IOException(header.getOrNull(1) ?: "TXD can't be opened")
         }
         if (header.size < 3 || header[0] != "OK") {
-            throw IOException("Respons engine tidak dikenal: ${lines[0]}")
+            throw IOException("Unknown engine response: ${lines[0]}")
         }
         val rwVersion = header[1].toIntOrNull() ?: RwChunk.RW_VERSION_SA
         val entries = ArrayList<TxdEntry>(maxOf(lines.size - 1, 0))
@@ -148,7 +148,7 @@ object TxdStore {
     private fun requireOk(result: String?): String {
         when {
             result == null ->
-                throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+                throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
             result.startsWith("ERROR ") ->
                 throw IOException(result.removePrefix("ERROR "))
             else -> return result

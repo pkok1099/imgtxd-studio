@@ -231,7 +231,7 @@ fun FilePickerDialog(
                             )
                         })
                     } else {
-                        errorMessage = "Akses direktori ini memerlukan izin Shizuku."
+                        errorMessage = "Opening this folder needs Shizuku permission."
                     }
                 } else {
                     val dir = File(path)
@@ -273,7 +273,7 @@ fun FilePickerDialog(
                             needsStorageAccess = true
                         }
                         listed == null -> {
-                            errorMessage = "Tidak dapat membaca direktori ini."
+                            errorMessage = "Can't read this folder."
                         }
                         else -> {
                             // Genuinely empty directory.
@@ -305,7 +305,7 @@ fun FilePickerDialog(
 
                 fileItems = filtered.sortedWith(compareBy<UnifiedFileItem> { !it.isDirectory }.thenBy { it.name.lowercase() })
             } catch (e: Exception) {
-                errorMessage = "Gagal membaca direktori: ${e.localizedMessage}"
+                errorMessage = "Failed to read directory: ${e.localizedMessage}"
             } finally {
                 isLoading = false
             }
@@ -432,7 +432,7 @@ fun FilePickerDialog(
                         },
                         enabled = canGoUp
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Kembali ke folder sebelumnya")
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back to previous folder")
                     }
 
                     Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
@@ -452,7 +452,7 @@ fun FilePickerDialog(
                     }
 
                     IconButton(onClick = { dismissWithAnimation() }) {
-                        Icon(Icons.Outlined.Close, contentDescription = "Tutup pemilih berkas")
+                        Icon(Icons.Outlined.Close, contentDescription = "Close file picker")
                     }
                 }
 
@@ -526,16 +526,16 @@ fun FilePickerDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = if (shizukuGranted)
-                                        "Mode Shizuku Aktif — Akses Penuh Android/data"
+                                        "Shizuku Mode Active - Full Android/data Access"
                                     else
-                                        "Akses Android/data memerlukan Shizuku",
+                                        "Android/data access needs Shizuku",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = if (shizukuGranted) SemanticColors.OnSuccessContainer else MaterialTheme.colorScheme.onErrorContainer
                                 )
                                 if (!shizukuGranted) {
                                     Text(
-                                        text = "Beri izin Shizuku untuk membaca dan memodifikasi file game.",
+                                        text = "Grant Shizuku permission to read and modify game files.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onErrorContainer
                                     )
@@ -624,7 +624,7 @@ fun FilePickerDialog(
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Outlined.Close, contentDescription = "Hapus pencarian")
+                                Icon(Icons.Outlined.Close, contentDescription = "Clear search")
                             }
                         }
                     },
@@ -660,7 +660,7 @@ fun FilePickerDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${selectedPaths.size} dari ${selectableFiles.size} file dipilih",
+                                text = "${selectedPaths.size} of ${selectableFiles.size} files selected",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -677,7 +677,7 @@ fun FilePickerDialog(
                                 }
                             ) {
                                 val allSelected = selectableFiles.all { selectedPaths.contains(it.path) }
-                                Text(if (allSelected) "Batal Semua" else "Pilih Semua")
+                                Text(if (allSelected) "Select None" else "Select All")
                             }
                         }
                     }
@@ -700,7 +700,7 @@ fun FilePickerDialog(
                         }
                     } else if (displayedItems.isEmpty()) {
                         Text(
-                            text = "Direktori kosong atau tidak ada file yang cocok.",
+                            text = "Folder is empty or no file matches.",
                             modifier = Modifier.align(Alignment.Center),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -830,7 +830,7 @@ fun FilePickerDialog(
                                 onClick = { dismissWithAnimation() },
                                 shape = CircleShape
                             ) {
-                                Text("Batal")
+                                Text("Cancel")
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
@@ -866,7 +866,7 @@ fun FilePickerDialog(
                             onClick = { dismissWithAnimation() },
                             shape = CircleShape
                         ) {
-                            Text("Batal")
+                            Text("Cancel")
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -879,7 +879,7 @@ fun FilePickerDialog(
                         ) {
                             Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Pilih Folder Ini", fontWeight = FontWeight.SemiBold)
+                            Text("Pick This Folder", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 } else {

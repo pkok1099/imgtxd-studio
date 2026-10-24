@@ -148,7 +148,7 @@ fun ModloaderSheet(
             // loose file from storage. Picking one clears the other.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "BERKAS MODEL",
+                    text = "MODEL FILES",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )

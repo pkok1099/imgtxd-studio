@@ -42,8 +42,8 @@ object LoaderClient {
     const val MAX_MODEL_ID = 26315
 
     private const val MSG_NOT_CONNECTED =
-        "Tidak dapat terhubung ke game. Pastikan GTA SA sedang berjalan dan plugin Modloader aktif."
-    private const val MSG_MODEL_ID_RANGE = "Model ID harus antara 0 dan $MAX_MODEL_ID."
+        "Can't reach the game. Make sure GTA SA is running and the Modloader plugin is loaded."
+    private const val MSG_MODEL_ID_RANGE = "Model ID must be between 0 and $MAX_MODEL_ID."
 
     private fun header(cmd: Int, modelId: Int, payloadSize: Long): ByteArray =
         ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN).apply {
@@ -99,11 +99,11 @@ object LoaderClient {
                 return@withContext Result.failure(IllegalArgumentException(MSG_MODEL_ID_RANGE))
             }
             if (bytes.isEmpty()) {
-                return@withContext Result.failure(IllegalArgumentException("Berkas model kosong."))
+                return@withContext Result.failure(IllegalArgumentException("Model file is empty."))
             }
             if (bytes.size.toLong() > MAX_PAYLOAD_BYTES) {
                 return@withContext Result.failure(
-                    IllegalArgumentException("Berkas model terlalu besar (maksimum 512 MB).")
+                    IllegalArgumentException("Model file too large (max 512 MB).")
                 )
             }
             var socket: Socket? = null

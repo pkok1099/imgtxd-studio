@@ -203,20 +203,20 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             val result = withContext(Dispatchers.IO) { call(cacheDirPath) }
             busyText = null
             when {
-                result == null -> toast("Engine Rust tidak tersedia")
+                result == null -> toast("Rust engine unavailable")
                 result.startsWith("OK") -> {
-                    toast("Selesai: ${result.removePrefix("OK ").replace(";", " · ")}")
+                    toast("Done: ${result.removePrefix("OK ").replace(";", " · ")}")
                     selected = null
                     reload()
                 }
-                else -> toast("Gagal: ${result.removePrefix("ERROR ")}")
+                else -> toast("Failed: ${result.removePrefix("ERROR ")}")
             }
         }
     }
 
     LaunchedEffect(cacheDirPath, reloadTick) {
         if (cacheDirPath == null) {
-            error = "Folder cache tidak diberikan"
+            error = "Cache folder not provided"
             return@LaunchedEffect
         }
         thumbCache.evictAll()
@@ -229,7 +229,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             }
         } catch (e: Exception) {
             error = (e.localizedMessage ?: e.javaClass.simpleName) +
-                "\nPilih folder cache-nya langsung (mis. folder 'txd' di dalam texdb) lewat Menu Cepat → Buka Cache Texdb."
+                "\nPick the cache folder directly (e.g. the 'txd' folder inside texdb) via Quick Menu -> Open Texdb Cache."
         }
     }
 
@@ -259,14 +259,14 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
         val dest = File(stageDir, src.name)
         withContext(Dispatchers.IO) {
             val (code, _) = ShizukuManager.exec("cp \"${src.absolutePath}\" \"${dest.absolutePath}\"")
-            if (code != 0) throw IllegalStateException("Gagal menyalin berkas via Shizuku: ${src.name}")
+            if (code != 0) throw IllegalStateException("Failed to copy file via Shizuku: ${src.name}")
         }
         return dest
     }
 
     fun runImport(images: List<Pair<String, ByteArray>>, options: WizardOptions) {
         if (cacheDirPath == null) return
-        busyText = "Mengimpor ${images.size} tekstur…"
+        busyText = "Importing ${images.size} textures…"
         scope.launch {
             // Fast overwrite (TXD Tool) is folded into the import call
             // itself: the engine writes a clean, defragmented layout and
@@ -289,12 +289,12 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             }
             busyText = null
             when {
-                result == null -> toast("Engine Rust tidak tersedia di perangkat ini")
+                result == null -> toast("Rust engine unavailable on this device")
                 result.startsWith("OK") -> {
-                    toast("Impor selesai: ${result.removePrefix("OK ").replace(";", " · ")}$rebuildNote")
+                    toast("Import done: ${result.removePrefix("OK ").replace(";", " · ")}$rebuildNote")
                     reload()
                 }
-                else -> toast("Impor gagal: ${result.removePrefix("ERROR ")}")
+                else -> toast("Import failed: ${result.removePrefix("ERROR ")}")
             }
         }
     }
@@ -333,7 +333,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
         isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
         onShizukuClick = {
             if (!ShizukuManager.isShizukuAvailable()) {
-                toast("Shizuku service tidak terdeteksi.")
+                toast("Shizuku service not detected.")
             } else if (!ShizukuManager.hasPermission()) {
                 ShizukuManager.requestPermission()
             }
@@ -341,14 +341,14 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
         items = indexedFiltered,
         keyExtractor = { (index, _) -> index.toString() },
         emptyTitle = when {
-            error != null -> "Cannot Open Cache"
+            error != null -> "Can't Open Cache"
             query.isNotBlank() || categoryFilter != null -> "No Results"
             else -> "No Textures"
         },
         emptyDescription = error ?: if (query.isNotBlank() || categoryFilter != null) {
-            "Tidak ada tekstur yang cocok dengan filter saat ini."
+            "No texture matches the current filter."
         } else {
-            "Cache ini tidak memiliki tekstur."
+            "This cache has no textures."
         },
         isSearching = isSearching,
         searchQuery = query,
@@ -390,9 +390,9 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
                         else
                             Icons.Outlined.PhotoSizeSelectActual,
                         contentDescription = if (viewMode == TxdViewMode.LARGE)
-                            "Ubah ke Mode Gambar Kecil"
+                            "Switch to Small Thumbnails"
                         else
-                            "Ubah ke Mode Gambar Besar",
+                            "Switch to Large Thumbnails",
                         onClick = { toggleViewMode() }
                     ),
                     ContextualDockItem(
@@ -425,19 +425,19 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             add(
                 SheetChoice("Rebuild Cache") {
                     if (cacheDirPath != null) {
-                        busyText = "Membangun ulang cache…"
+                        busyText = "Rebuilding cache…"
                         scope.launch {
                             val result = withContext(Dispatchers.IO) {
                                 NativeCore.texdbRebuildCache(cacheDirPath)
                             }
                             busyText = null
                             when {
-                                result == null -> toast("Engine Rust tidak tersedia")
+                                result == null -> toast("Rust engine unavailable")
                                 result.startsWith("OK") -> {
-                                    toast("Rebuild selesai: ${result.removePrefix("OK ").replace(";", " · ")}")
+                                    toast("Rebuild done: ${result.removePrefix("OK ").replace(";", " · ")}")
                                     reload()
                                 }
-                                else -> toast("Rebuild gagal: ${result.removePrefix("ERROR ")}")
+                                else -> toast("Rebuild failed: ${result.removePrefix("ERROR ")}")
                             }
                         }
                     }
@@ -450,7 +450,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             if (gameDirPath != null) {
                 add(
                     SheetChoice("Apply to Game Folder") {
-                        busyText = "Menyalin cache ke folder game…"
+                        busyText = "Copying cache to game folder…"
                         scope.launch {
                             val (code, _) = withContext(Dispatchers.IO) {
                                 ShizukuManager.exec(
@@ -458,8 +458,8 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
                                 )
                             }
                             busyText = null
-                            if (code == 0) toast("Cache diterapkan ke folder game")
-                            else toast("Gagal menerapkan ke folder game (kode $code)")
+                            if (code == 0) toast("Cache applied to game folder")
+                            else toast("Apply to game folder failed (code $code)")
                         }
                     }
                 )
@@ -532,7 +532,7 @@ preview?.let { bmp ->
             )
         }
         Text(
-            "Ketuk gambar untuk layar penuh",
+            "Tap image for fullscreen",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(start = 4.dp)
         )
@@ -566,9 +566,9 @@ Row {
         }) { Text("Go to Original Texture") }
     } else {
         TextButton(onClick = {
-            namePrompt = Triple("Ganti Nama Tekstur", tex.name) { newName ->
+            namePrompt = Triple("Rename Texture", tex.name) { newName ->
                 val idx = cache?.textures?.indexOfFirst { it === tex } ?: -1
-                if (idx >= 0) runEngine("Mengganti nama…") { dir ->
+                if (idx >= 0) runEngine("Renaming…") { dir ->
                     NativeCore.texdbRenameTexture(dir, idx, newName)
                 }
             }
@@ -576,7 +576,7 @@ Row {
         TextButton(onClick = {
             namePrompt = Triple("Buat Alias", "${tex.name}_alias") { aliasName ->
                 val idx = cache?.textures?.indexOfFirst { it === tex } ?: -1
-                if (idx >= 0) runEngine("Membuat alias…") { dir ->
+                if (idx >= 0) runEngine("Creating alias…") { dir ->
                     NativeCore.texdbAddAlias(dir, idx, aliasName)
                 }
             }
@@ -599,7 +599,7 @@ Row {
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Tutup", fontWeight = FontWeight.SemiBold)
+                    Text("Close", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -607,7 +607,7 @@ Row {
 
     if (showDestPicker && selected != null && cache != null) {
         FilePickerDialog(
-            title = "Pilih Folder Tujuan Ekstrak",
+            title = "Pick Extract Destination Folder",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showDestPicker = false },
             onFileSelected = { folderPath, _ ->
@@ -620,7 +620,7 @@ Row {
                         withContext(Dispatchers.IO) { loaded.extractEntry(tex, out) }
                         toast("Entri diekstrak: ${out.name} (${out.length()} byte)")
                     } catch (e: Exception) {
-                        toast("Gagal mengekstrak: ${e.localizedMessage}")
+                        toast("Extract failed: ${e.localizedMessage}")
                     }
                     selected = null
                 }
@@ -630,7 +630,7 @@ Row {
 
     if (showPngDestPicker && selected != null) {
         FilePickerDialog(
-            title = "Pilih Folder Tujuan PNG",
+            title = "Pick PNG Destination Folder",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showPngDestPicker = false },
             onFileSelected = { folderPath, _ ->
@@ -639,14 +639,14 @@ Row {
                 val bmp = preview
                 scope.launch {
                     try {
-                        if (bmp == null) throw IllegalStateException("Pratinjau belum tersedia")
+                        if (bmp == null) throw IllegalStateException("Preview not available yet")
                         val out = File(folderPath, "${tex.name}.png")
                         withContext(Dispatchers.IO) {
                             out.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
                         }
-                        toast("PNG diekspor: ${out.name}")
+                        toast("PNG exported: ${out.name}")
                     } catch (e: Exception) {
-                        toast("Gagal mengekspor PNG: ${e.localizedMessage}")
+                        toast("PNG export failed: ${e.localizedMessage}")
                     }
                     selected = null
                 }
@@ -656,12 +656,12 @@ Row {
 
     if (showImagePicker) {
         FilePickerDialog(
-            title = "Pilih Gambar Tekstur (PNG)",
+            title = "Pick Texture Image (PNG)",
             mode = PickerMode.PICK_MULTIPLE_IMAGES,
             onDismissRequest = { showImagePicker = false },
             onMultipleFilesSelected = { paths, isShizuku ->
                 showImagePicker = false
-                busyText = "Membaca ${paths.size} gambar…"
+                busyText = "Reading ${paths.size} images…"
                 scope.launch {
                     try {
                         val stageDir = File(context.cacheDir, "texdb_import_stage")
@@ -675,7 +675,7 @@ Row {
                         pendingImport = jobs to false
                     } catch (e: Exception) {
                         busyText = null
-                        toast("Gagal membaca gambar: ${e.localizedMessage}")
+                        toast("Failed to read image: ${e.localizedMessage}")
                     }
                 }
             }
@@ -684,12 +684,12 @@ Row {
 
     if (showTxdPicker) {
         FilePickerDialog(
-            title = "Pilih Arsip TXD",
+            title = "Pick TXD Archive",
             mode = PickerMode.PICK_MULTIPLE_TXD,
             onDismissRequest = { showTxdPicker = false },
             onMultipleFilesSelected = { paths, isShizuku ->
                 showTxdPicker = false
-                busyText = "Membaca ${paths.size} arsip TXD…"
+                busyText = "Reading ${paths.size} TXD archives…"
                 scope.launch {
                     try {
                         val stageDir = File(context.cacheDir, "texdb_import_stage")
@@ -708,11 +708,11 @@ Row {
                             out
                         }
                         busyText = null
-                        if (jobs.isEmpty()) toast("Tidak ada tekstur yang bisa dibaca dari TXD tersebut")
+                        if (jobs.isEmpty()) toast("No texture could be read from that TXD")
                         else pendingImport = jobs to true
                     } catch (e: Exception) {
                         busyText = null
-                        toast("Gagal membaca TXD: ${e.localizedMessage}")
+                        toast("Failed to read TXD: ${e.localizedMessage}")
                     }
                 }
             }
@@ -721,13 +721,13 @@ Row {
 
     if (showDffPicker) {
         FilePickerDialog(
-            title = "Pilih Berkas Model (.dff)",
+            title = "Pick Model File (.dff)",
             mode = PickerMode.PICK_FILE,
             onDismissRequest = { showDffPicker = false },
             onFileSelected = { path, isShizuku ->
                 showDffPicker = false
                 if (cacheDirPath != null) {
-                    busyText = "Memeriksa tekstur DFF…"
+                    busyText = "Checking DFF textures…"
                     scope.launch {
                         try {
                             val stageDir = File(context.cacheDir, "texdb_import_stage")
@@ -737,17 +737,17 @@ Row {
                             }
                             busyText = null
                             dffResult = when {
-                                result == null -> "Engine Rust tidak tersedia"
+                                result == null -> "Rust engine unavailable"
                                 result.startsWith("OK") -> {
                                     val missing = result.removePrefix("OK").trim()
-                                    if (missing.isEmpty()) "Semua tekstur yang dibutuhkan model tersedia di cache."
-                                    else "Tekstur yang belum ada di cache:\n$missing"
+                                    if (missing.isEmpty()) "All textures the model needs are in the cache."
+                                    else "Textures not yet in the cache:\n$missing"
                                 }
-                                else -> "Pemeriksaan gagal: ${result.removePrefix("ERROR ")}"
+                                else -> "Check failed: ${result.removePrefix("ERROR ")}"
                             }
                         } catch (e: Exception) {
                             busyText = null
-                            dffResult = "Pemeriksaan gagal: ${e.localizedMessage}"
+                            dffResult = "Check failed: ${e.localizedMessage}"
                         }
                     }
                 }
@@ -796,10 +796,10 @@ Row {
         val loaded = cache!!
         MessageSheet(
             title = "Info Cache ${loaded.name}",
-            message = "Varian aktif: ${loaded.variant}\n" +
+            message = "Active variant: ${loaded.variant}\n" +
                 "Varian tersedia: ${loaded.variants.joinToString()}\n" +
                 "Jumlah entri: ${loaded.textures.size}\n" +
-                "Berkas data: ${loaded.datFile.name} (${loaded.datFile.length() / 1024} KB)\n" +
+                "Data file: ${loaded.datFile.name} (${loaded.datFile.length() / 1024} KB)\n" +
                 "Folder: ${loaded.directory.absolutePath}",
             onDismissRequest = { infoOpen = false }
         )
@@ -828,17 +828,17 @@ Row {
 
     deleteTarget?.let { tex ->
         ConfirmSheet(
-            title = "Hapus tekstur?",
-            message = "Tekstur '${tex.name}' akan dihapus dari cache." +
-                " Alias yang menunjuk ke tekstur ini ikut terhapus.",
-            confirmLabel = "Hapus",
+            title = "Delete texture?",
+            message = "Texture '${tex.name}' will be removed from the cache." +
+                " Aliases pointing at it are removed too.",
+            confirmLabel = "Delete",
             danger = true,
             onDismissRequest = { deleteTarget = null },
             onConfirm = {
                 deleteTarget = null
                 selected = null
                 val idx = cache?.textures?.indexOfFirst { it === tex } ?: -1
-                if (idx >= 0) runEngine("Menghapus tekstur…") { dir ->
+                if (idx >= 0) runEngine("Deleting texture…") { dir ->
                     NativeCore.texdbDeleteTextures(dir, intArrayOf(idx))
                 }
             }
@@ -848,15 +848,15 @@ Row {
     repackTarget?.let { target ->
         val targetName = listOf("DXT", "ETC", "Mentah (565/4444)")[target]
         ConfirmSheet(
-            title = "Repack cache ke $targetName?",
-            message = "Semua tekstur cache akan dikodekan ulang ke format $targetName." +
-                (if (target == 1) " Tekstur beralpha kehilangan channel alpha-nya (ETC1 tidak punya alpha)." else "") +
-                " Tekstur yang gagal didekode dibiarkan apa adanya. Proses ini menulis ulang cache — salinan staging tidak mengubah folder game sampai kamu menekan Terapkan.",
+            title = "Repack cache to $targetName?",
+            message = "All textures in the cache will be re-encoded to $targetName." +
+                (if (target == 1) " Textures with alpha lose their alpha channel (ETC1 has none)." else "") +
+                " Textures that fail to decode are left as-is. This rewrites the cache - the staging copy does not touch the game folder until you press Apply.",
             confirmLabel = "Repack",
             onDismissRequest = { repackTarget = null },
             onConfirm = {
                 repackTarget = null
-                runEngine("Repack ke $targetName…") { dir ->
+                runEngine("Repacking to $targetName…") { dir ->
                     NativeCore.texdbRepackCache(dir, target)
                 }
             }
@@ -894,7 +894,7 @@ Row {
                     )
                 }
                 Text(
-                    "Ketuk gambar untuk menutup",
+                    "Tap image to close",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(start = 4.dp)
                 )
@@ -1003,7 +1003,7 @@ private fun ImportWizardSheet(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onDismiss) { Text("Batal") }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = { onConfirm(options) },

@@ -136,7 +136,7 @@ class ImgToolViewModel : ViewModel() {
                                     entries = allEntries,
                                     filteredEntries = filtered,
                                     displayedEntries = displayed,
-                                    statusMessage = "Arsip diperbarui (${event.entryName} diupdate)"
+                                    statusMessage = "Archive updated (${event.entryName} updated)"
                                 )
                             }
                         } catch (e: Exception) {
@@ -198,7 +198,7 @@ class ImgToolViewModel : ViewModel() {
         viewModelScope.launch {
             val isRestricted = isShizuku || ShizukuManager.isRestrictedPath(path)
             if (isRestricted) {
-                _uiState.update { it.copy(isLoading = true, statusMessage = "Mengimpor file via Shizuku...") }
+                _uiState.update { it.copy(isLoading = true, statusMessage = "Importing files via Shizuku...") }
                 try {
                     val fileName = File(path).name
                     val cacheDir = File(context.cacheDir, "opened_archives").apply { mkdirs() }
@@ -209,7 +209,7 @@ class ImgToolViewModel : ViewModel() {
                     }
 
                     if (!copied) {
-                        _uiState.update { it.copy(isLoading = false, errorMessage = "Gagal membaca file dari Shizuku: $path") }
+                        _uiState.update { it.copy(isLoading = false, errorMessage = "Failed to read file via Shizuku: $path") }
                         return@launch
                     }
 
@@ -363,7 +363,7 @@ class ImgToolViewModel : ViewModel() {
                         archive.extract(entry, tempFile)
                         val remoteDest = "$destRestrictedPath/${entry.cleanName}"
                         if (!ShizukuManager.copyFromLocal(tempFile, remoteDest)) {
-                            throw IOException("Gagal menulis ${entry.cleanName} ke $destRestrictedPath")
+                            throw IOException("Failed to write ${entry.cleanName} to $destRestrictedPath")
                         }
                         tempFile.delete()
                     } else {
@@ -400,25 +400,25 @@ class ImgToolViewModel : ViewModel() {
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
                 targetFile = archive.imgFile.absolutePath,
-                title = "Mengekstrak ${selected.size} berkas"
+                title = "Extracting ${selected.size} files"
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
                         for ((idx, entry) in selected.withIndex()) {
-                            onProgress(idx, selected.size, "Mengekstrak ${entry.cleanName} (${idx + 1}/${selected.size})")
+                            onProgress(idx, selected.size, "Extracting ${entry.cleanName} (${idx + 1}/${selected.size})")
                             if (isShizuku && destRestrictedPath != null) {
                                 val tempFile = File.createTempFile("extract_", entry.cleanName)
                                 archive.extract(entry, tempFile)
                                 val remoteDest = "$destRestrictedPath/${entry.cleanName}"
                                 if (!ShizukuManager.copyFromLocal(tempFile, remoteDest)) {
-                                    throw IOException("Gagal menulis ${entry.cleanName} ke $destRestrictedPath")
+                                    throw IOException("Failed to write ${entry.cleanName} to $destRestrictedPath")
                                 }
                                 tempFile.delete()
                             } else {
                                 val target = File(destinationDir, entry.cleanName)
                                 archive.extract(entry, target)
                             }
-                            onProgress(idx + 1, selected.size, "Selesai ${entry.cleanName}")
+                            onProgress(idx + 1, selected.size, "Finished ${entry.cleanName}")
                         }
                     }
                     Result.success(Unit)
@@ -433,7 +433,7 @@ class ImgToolViewModel : ViewModel() {
                     progress = null,
                     selectedEntries = emptySet(),
                     isSelecting = false,
-                    statusMessage = if (res.isSuccess) "Berhasil mengekstrak ${selected.size} berkas ke ${destinationDir.name}" else null,
+                    statusMessage = if (res.isSuccess) "Extracted ${selected.size} files to ${destinationDir.name}" else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
@@ -451,7 +451,7 @@ class ImgToolViewModel : ViewModel() {
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.ADD_ENTRY,
                 targetFile = targetImgFile.absolutePath,
-                title = "Mengekspor ${selected.size} berkas ke ${targetImgFile.name}"
+                title = "Exporting ${selected.size} files to ${targetImgFile.name}"
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
@@ -459,13 +459,13 @@ class ImgToolViewModel : ViewModel() {
                         val cacheDir = File(targetImgFile.parentFile ?: File("/tmp"), ".export_cache").apply { mkdirs() }
                         try {
                             for ((idx, entry) in selected.withIndex()) {
-                                onProgress(idx, selected.size, "Mengekstrak ${entry.cleanName} (${idx + 1}/${selected.size})")
+                                onProgress(idx, selected.size, "Extracting ${entry.cleanName} (${idx + 1}/${selected.size})")
                                 val tempEntryFile = File(cacheDir, entry.cleanName)
                                 archive.extract(entry, tempEntryFile)
-                                onProgress(idx, selected.size, "Menambahkan ${entry.cleanName} ke ${targetImgFile.name}")
+                                onProgress(idx, selected.size, "Adding ${entry.cleanName} to ${targetImgFile.name}")
                                 targetArchive.add(tempEntryFile, entry.cleanName)
                                 tempEntryFile.delete()
-                                onProgress(idx + 1, selected.size, "Selesai ${entry.cleanName}")
+                                onProgress(idx + 1, selected.size, "Finished ${entry.cleanName}")
                             }
                         } finally {
                             cacheDir.deleteRecursively()
@@ -483,7 +483,7 @@ class ImgToolViewModel : ViewModel() {
                     progress = null,
                     selectedEntries = emptySet(),
                     isSelecting = false,
-                    statusMessage = if (res.isSuccess) "Berhasil mengekspor ${selected.size} berkas ke ${targetImgFile.name}" else null,
+                    statusMessage = if (res.isSuccess) "Exported ${selected.size} files to ${targetImgFile.name}" else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
@@ -502,25 +502,25 @@ class ImgToolViewModel : ViewModel() {
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.EXPORT_ALL,
                 targetFile = archive.imgFile.absolutePath,
-                title = "Mengekstrak semua berkas"
+                title = "Extracting all files"
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
                         for ((idx, entry) in allEntries.withIndex()) {
-                            onProgress(idx, allEntries.size, "Mengekstrak ${entry.cleanName} (${idx + 1}/${allEntries.size})")
+                            onProgress(idx, allEntries.size, "Extracting ${entry.cleanName} (${idx + 1}/${allEntries.size})")
                             if (isShizuku && destRestrictedPath != null) {
                                 val tempFile = File.createTempFile("extract_", entry.cleanName)
                                 archive.extract(entry, tempFile)
                                 val remoteDest = "$destRestrictedPath/${entry.cleanName}"
                                 if (!ShizukuManager.copyFromLocal(tempFile, remoteDest)) {
-                                    throw IOException("Gagal menulis ${entry.cleanName} ke $destRestrictedPath")
+                                    throw IOException("Failed to write ${entry.cleanName} to $destRestrictedPath")
                                 }
                                 tempFile.delete()
                             } else {
                                 val target = File(destinationDir, entry.cleanName)
                                 archive.extract(entry, target)
                             }
-                            onProgress(idx + 1, allEntries.size, "Selesai ${entry.cleanName}")
+                            onProgress(idx + 1, allEntries.size, "Finished ${entry.cleanName}")
                         }
                     }
                     Result.success(Unit)
@@ -533,7 +533,7 @@ class ImgToolViewModel : ViewModel() {
                 it.copy(
                     isLoading = false,
                     progress = null,
-                    statusMessage = if (res.isSuccess) "Berhasil mengekstrak ${allEntries.size} berkas ke ${destinationDir.name}" else null,
+                    statusMessage = if (res.isSuccess) "Extracted ${allEntries.size} files to ${destinationDir.name}" else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
@@ -550,7 +550,7 @@ class ImgToolViewModel : ViewModel() {
                     val fileToUse = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
                         val temp = File(context.cacheDir, "temp_add_" + File(path).name)
                         if (!ShizukuManager.copyToLocal(path, temp)) {
-                            throw IOException("Gagal menyalin file dari Shizuku: $path")
+                            throw IOException("Failed to copy file from Shizuku: $path")
                         }
                         temp
                     } else {
@@ -584,7 +584,7 @@ class ImgToolViewModel : ViewModel() {
                     val fileToUse = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
                         val temp = File(context.cacheDir, "temp_replace_" + File(path).name)
                         if (!ShizukuManager.copyToLocal(path, temp)) {
-                            throw IOException("Gagal menyalin file dari Shizuku: $path")
+                            throw IOException("Failed to copy file from Shizuku: $path")
                         }
                         temp
                     } else {
@@ -681,23 +681,23 @@ class ImgToolViewModel : ViewModel() {
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.REBUILD,
                 targetFile = archive.archiveName,
-                title = "Rebuild & rapikan arsip"
+                title = "Rebuild & tidy up archive"
             ) { onProgress ->
                 try {
                     withContext(Dispatchers.IO) {
                         archive.rebuild { current, total ->
-                            onProgress(current, total, "Menyusun ulang sektor ($current / $total)")
+                            onProgress(current, total, "Rebuilding sectors ($current / $total)")
                         }
 
                         if (isShizukuBacked && originalPath != null) {
-                            onProgress(archive.entryCount, archive.entryCount, "Menyimpan ke folder game via Shizuku...")
+                            onProgress(archive.entryCount, archive.entryCount, "Saving to game folder via Shizuku...")
                             if (!ShizukuManager.copyFromLocal(archive.imgFile, originalPath)) {
-                                throw IOException("Gagal menulis arsip kembali ke folder game: $originalPath")
+                                throw IOException("Failed to write archive back to game folder: $originalPath")
                             }
                             if (archive.version == ImgVersion.VER1 && archive.dirFile != null) {
                                 val dirOriginal = originalPath.substringBeforeLast(".") + ".dir"
                                 if (!ShizukuManager.copyFromLocal(archive.dirFile, dirOriginal)) {
-                                    throw IOException("Gagal menulis .dir kembali ke folder game: $dirOriginal")
+                                    throw IOException("Failed to write .dir back to game folder: $dirOriginal")
                                 }
                             }
                         }
@@ -722,9 +722,9 @@ class ImgToolViewModel : ViewModel() {
                     displayedEntries = displayed,
                     statusMessage = if (res.isSuccess) {
                         if (isShizukuBacked)
-                            "Arsip berhasil direbuild dan disimpan kembali ke game!"
+                            "Archive rebuilt and saved back to the game!"
                         else
-                            "Arsip berhasil direbuild dan dirapikan!"
+                            "Archive rebuilt and defragmented!"
                     } else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
@@ -745,7 +745,7 @@ class ImgToolViewModel : ViewModel() {
                 hasUnsavedChanges = false,
                 originalPath = null,
                 isShizukuBacked = false,
-                statusMessage = "Arsip IMG ditutup."
+                statusMessage = "IMG archive closed."
             )
         }
     }
@@ -756,7 +756,7 @@ class ImgToolViewModel : ViewModel() {
         val archive = _uiState.value.archive ?: return
         val currentMode = AppSettings.cachedWindowMode
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, statusMessage = "Mengekstrak dan membaca ${imgEntry.cleanName}...") }
+            _uiState.update { it.copy(isLoading = true, statusMessage = "Extracting and reading ${imgEntry.cleanName}...") }
             try {
                 val tempTxdFile = File(context.cacheDir, "opened_txd_" + imgEntry.cleanName)
                 withContext(Dispatchers.IO) {
@@ -795,14 +795,14 @@ class ImgToolViewModel : ViewModel() {
                         activeTxdOriginalPath = null,
                         isTxdShizuku = false,
                         selectedTxdEntry = parser.entries.firstOrNull(),
-                        statusMessage = "Berhasil memuat ${parser.entries.size} tekstur dari ${imgEntry.cleanName}"
+                        statusMessage = "Loaded ${parser.entries.size} textures from ${imgEntry.cleanName}"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "Gagal membaca TXD: ${e.localizedMessage}"
+                        errorMessage = "Failed to read TXD: ${e.localizedMessage}"
                     )
                 }
             }
@@ -822,14 +822,14 @@ class ImgToolViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, statusMessage = "Membuka file TXD...") }
+            _uiState.update { it.copy(isLoading = true, statusMessage = "Opening TXD file...") }
             try {
                 val txdFile = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
                     val temp = File(context.cacheDir, "opened_standalone_" + File(path).name)
                     val ok = withContext(Dispatchers.IO) {
                         ShizukuManager.copyToLocal(path, temp)
                     }
-                    if (!ok) throw IOException("Gagal menyalin file dari Shizuku: $path")
+                    if (!ok) throw IOException("Failed to copy file from Shizuku: $path")
                     temp
                 } else {
                     File(path)
@@ -850,14 +850,14 @@ class ImgToolViewModel : ViewModel() {
                         activeTxdOriginalPath = path,
                         isTxdShizuku = isShizuku,
                         selectedTxdEntry = parser.entries.firstOrNull(),
-                        statusMessage = "Berhasil memuat ${parser.entries.size} tekstur dari ${File(path).name}"
+                        statusMessage = "Loaded ${parser.entries.size} textures from ${File(path).name}"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "Gagal membuka TXD: ${e.localizedMessage}"
+                        errorMessage = "Failed to open TXD: ${e.localizedMessage}"
                     )
                 }
             }
@@ -904,14 +904,14 @@ class ImgToolViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
-                        statusMessage = "Tekstur diekspor ke ${destinationDir.name}/${entry.name}.png"
+                        statusMessage = "Textures exported to ${destinationDir.name}/${entry.name}.png"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
-                        errorMessage = "Gagal ekspor tekstur: ${e.localizedMessage}"
+                        errorMessage = "Texture export failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -941,7 +941,7 @@ class ImgToolViewModel : ViewModel() {
                                 bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
                             }
                             exported++
-                            onProgress(idx + 1, list.size, "Mengekspor ${entry.name}.png ($exported/${list.size})")
+                            onProgress(idx + 1, list.size, "Exporting ${entry.name}.png ($exported/${list.size})")
                         }
                     }
                     Result.success(Unit)
@@ -953,7 +953,7 @@ class ImgToolViewModel : ViewModel() {
             _uiState.update {
                 it.copy(
                     isTxdLoading = false,
-                    statusMessage = if (res.isSuccess) "Berhasil mengekspor ${list.size} tekstur ke ${destinationDir.name}" else null,
+                    statusMessage = if (res.isSuccess) "Exported ${list.size} textures to ${destinationDir.name}" else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
@@ -982,7 +982,7 @@ class ImgToolViewModel : ViewModel() {
                                 bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
                             }
                             exported++
-                            onProgress(idx + 1, entries.size, "Mengekspor ${entry.name}.png ($exported/${entries.size})")
+                            onProgress(idx + 1, entries.size, "Exporting ${entry.name}.png ($exported/${entries.size})")
                         }
                     }
                     Result.success(Unit)
@@ -994,7 +994,7 @@ class ImgToolViewModel : ViewModel() {
             _uiState.update {
                 it.copy(
                     isTxdLoading = false,
-                    statusMessage = if (res.isSuccess) "Berhasil mengekspor ${entries.size} tekstur ke ${destinationDir.name}" else null,
+                    statusMessage = if (res.isSuccess) "Exported ${entries.size} textures to ${destinationDir.name}" else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
@@ -1026,7 +1026,7 @@ class ImgToolViewModel : ViewModel() {
                     }
 
                     val newBitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
-                        ?: throw IOException("Gagal membaca file gambar: ${imageFile.name}")
+                        ?: throw IOException("Failed to read image file: ${imageFile.name}")
 
                     if (imageFile != File(imagePath)) {
                         imageFile.delete()
@@ -1057,14 +1057,14 @@ class ImgToolViewModel : ViewModel() {
                         val imgOriginalPath = _uiState.value.originalPath
                         if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
                             if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
-                                throw IOException("Gagal menulis arsip IMG kembali ke folder game: $imgOriginalPath")
+                                throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
                             }
                         }
                     }
 
                     if (isShizukuTxd && originalPath != null) {
                         if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
-                            throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                            throw IOException("Failed to write TXD back to its source: $originalPath")
                         }
                     }
                 }
@@ -1075,14 +1075,14 @@ class ImgToolViewModel : ViewModel() {
                         isTxdLoading = false,
                         txdEntries = updatedList,
                         selectedTxdEntry = updatedList.getOrNull(targetEntry.sourceIndex) ?: targetEntry,
-                        statusMessage = "Tekstur ${targetEntry.name} berhasil diganti!"
+                        statusMessage = "Texture ${targetEntry.name} replaced!"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
-                        errorMessage = "Gagal mengganti tekstur: ${e.localizedMessage}"
+                        errorMessage = "Texture replace failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -1102,7 +1102,7 @@ class ImgToolViewModel : ViewModel() {
         val targetName = _uiState.value.activeTxdName ?: "tekstur.txd"
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Memproses auto-replace ${matches.size} tekstur...") }
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Auto-replacing ${matches.size} textures...") }
             var replacedCount = 0
             val res = ProcessRepositoryLocator.get().executeProcess(
                 type = ProcessType.AUTO_REPLACE,
@@ -1140,7 +1140,7 @@ class ImgToolViewModel : ViewModel() {
                                 batchImages.add(Triple(px, newBitmap.width, newBitmap.height))
                                 replacedCount++
                             }
-                            onProgress(idx + 1, matches.size, "Mengganti ${entry.name} (${idx + 1}/${matches.size})")
+                            onProgress(idx + 1, matches.size, "Replacing ${entry.name} (${idx + 1}/${matches.size})")
                         }
 
                         if (replacedCount > 0) {
@@ -1153,14 +1153,14 @@ class ImgToolViewModel : ViewModel() {
                                 val imgOriginalPath = _uiState.value.originalPath
                                 if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
                                     if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
-                                        throw IOException("Gagal menulis arsip IMG kembali ke folder game: $imgOriginalPath")
+                                        throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
                                     }
                                 }
                             }
 
                             if (isShizukuTxd && originalPath != null) {
                                 if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
-                                    throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                                    throw IOException("Failed to write TXD back to its source: $originalPath")
                                 }
                             }
                         }
@@ -1177,7 +1177,7 @@ class ImgToolViewModel : ViewModel() {
                     isTxdLoading = false,
                     txdEntries = updatedList,
                     hasTxdUnsavedChanges = true,
-                    statusMessage = if (res.isSuccess) "Berhasil mengganti $replacedCount tekstur secara otomatis!" else null,
+                    statusMessage = if (res.isSuccess) "Auto-replaced $replacedCount textures!" else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
             }
@@ -1200,7 +1200,7 @@ class ImgToolViewModel : ViewModel() {
         val isShizukuTxd = _uiState.value.isTxdShizuku
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Mengimpor ${images.size} tekstur baru...") }
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Importing ${images.size} new textures...") }
             try {
                 var added = 0
                 var overwritten = 0
@@ -1247,14 +1247,14 @@ class ImgToolViewModel : ViewModel() {
                             val imgOriginalPath = _uiState.value.originalPath
                             if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
                                 if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
-                                    throw IOException("Gagal menulis arsip IMG kembali ke folder game: $imgOriginalPath")
+                                    throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
                                 }
                             }
                         }
 
                         if (isShizukuTxd && originalPath != null) {
                             if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
-                                throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                                throw IOException("Failed to write TXD back to its source: $originalPath")
                             }
                         }
                     }
@@ -1266,14 +1266,14 @@ class ImgToolViewModel : ViewModel() {
                         isTxdLoading = false,
                         txdEntries = updatedEntries,
                         hasTxdUnsavedChanges = true,
-                        statusMessage = "Impor selesai: $added tekstur baru ditambahkan, $overwritten ditimpa"
+                        statusMessage = "Import done: $added new textures added, $overwritten overwritten"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
-                        errorMessage = "Gagal mengimpor tekstur: ${e.localizedMessage}"
+                        errorMessage = "Texture import failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -1292,11 +1292,11 @@ class ImgToolViewModel : ViewModel() {
                     if (isShizuku || ShizukuManager.isRestrictedPath(oswPath)) {
                         val tmp = File(context.cacheDir, "oswfix_tmp_" + File(oswPath).name)
                         if (!ShizukuManager.copyToLocal(oswPath, tmp)) {
-                            throw IOException("Gagal menyalin file dari Shizuku: $oswPath")
+                            throw IOException("Failed to copy file from Shizuku: $oswPath")
                         }
                         val result = com.onlasdan.studio.audio.OswIdxFixer.fix(tmp)
                         if (!ShizukuManager.copyFromLocal(result.idxFile, oswPath + ".idx")) {
-                            throw IOException("Gagal menulis .idx ke lokasi asal")
+                            throw IOException("Failed to write .idx back to source")
                         }
                         tmp.delete()
                         result.idxFile.delete()
@@ -1308,14 +1308,14 @@ class ImgToolViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
-                        statusMessage = "IDX fixed successfully! $entryCount entri audio diindeks ulang untuk ${File(oswPath).name}"
+                        statusMessage = "IDX fixed successfully! Re-indexed $entryCount audio entries for ${File(oswPath).name}"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isTxdLoading = false,
-                        errorMessage = "Gagal memperbaiki .idx: ${e.localizedMessage}"
+                        errorMessage = "Failed to fix .idx: ${e.localizedMessage}"
                     )
                 }
             }
@@ -1353,7 +1353,7 @@ class ImgToolViewModel : ViewModel() {
                                 val localFile = if (isShizuku || ShizukuManager.isRestrictedPath(path)) {
                                     val tmp = File(context.cacheDir, "multitxd_tmp_" + File(path).name)
                                     if (!ShizukuManager.copyToLocal(path, tmp)) {
-                                        throw IOException("Gagal menyalin file dari Shizuku: $path")
+                                        throw IOException("Failed to copy file from Shizuku: $path")
                                     }
                                     tmp
                                 } else {
@@ -1376,11 +1376,11 @@ class ImgToolViewModel : ViewModel() {
                             } catch (e: Exception) {
                                 failedFiles++
                             }
-                            onProgress(idx + 1, txdFiles.size, "Mengekspor $baseName.txd (${idx + 1}/${txdFiles.size})")
+                            onProgress(idx + 1, txdFiles.size, "Exporting $baseName.txd (${idx + 1}/${txdFiles.size})")
                         }
                     }
                     if (exportedTextures == 0 && failedFiles > 0) {
-                        Result.failure(IOException("Semua file TXD gagal diekspor"))
+                        Result.failure(IOException("All TXD files failed to export"))
                     } else {
                         Result.success(Unit)
                     }
@@ -1393,8 +1393,8 @@ class ImgToolViewModel : ViewModel() {
                 it.copy(
                     isTxdLoading = false,
                     statusMessage = if (res.isSuccess) {
-                        "Ekspor multi-TXD selesai: $exportedTextures tekstur dari ${txdFiles.size - failedFiles} file" +
-                            if (failedFiles > 0) " ($failedFiles file gagal)" else ""
+                        "Multi-TXD export done: $exportedTextures textures from ${txdFiles.size - failedFiles} files" +
+                            if (failedFiles > 0) " ($failedFiles files failed)" else ""
                     } else null,
                     errorMessage = res.exceptionOrNull()?.localizedMessage
                 )
@@ -1587,9 +1587,9 @@ class ImgToolViewModel : ViewModel() {
                     loaderBusy = false,
                     loaderConnected = ok,
                     loaderFeedback = if (ok) {
-                        "Terhubung ke plugin Modloader di dalam game."
+                        "Connected to the Modloader plugin inside the game."
                     } else {
-                        "Game tidak terdeteksi. Pastikan GTA SA sedang berjalan dan plugin Modloader aktif."
+                        "Game not detected. Make sure GTA SA is running and the Modloader plugin is loaded."
                     }
                 )
             }
@@ -1609,7 +1609,7 @@ class ImgToolViewModel : ViewModel() {
         if (entry == null && loose == null) {
             _uiState.update {
                 it.copy(
-                    loaderFeedback = "Pilih dulu berkas model (.dff/.txd) dari arsip atau berkas lepas."
+                    loaderFeedback = "Pick a model file (.dff/.txd) from an archive or a standalone file first."
                 )
             }
             return
@@ -1618,7 +1618,7 @@ class ImgToolViewModel : ViewModel() {
         val archive = if (entry != null) state.archive ?: return else null
         val modelId = validLoaderModelId() ?: run {
             _uiState.update {
-                it.copy(loaderFeedback = "Isi Model ID yang valid (0–${LoaderClient.MAX_MODEL_ID}).")
+                it.copy(loaderFeedback = "Enter a valid Model ID (0-${LoaderClient.MAX_MODEL_ID}).")
             }
             return
         }
@@ -1640,7 +1640,7 @@ class ImgToolViewModel : ViewModel() {
                                 tmp.delete()
                             }
                         }
-                        else -> throw IOException("Tidak ada berkas model yang dipilih.")
+                        else -> throw IOException("No model file selected.")
                     }
                 }
                 LoaderClient.substitute(modelId, bytes)
@@ -1653,9 +1653,9 @@ class ImgToolViewModel : ViewModel() {
                         it.copy(
                             loaderBusy = false,
                             loaderConnected = true,
-                            loaderFeedback = "$displayName terkirim sebagai model $modelId. " +
-                                "Tekan Reload Model agar game memuat ulang modelnya.",
-                            statusMessage = "Model $modelId dikirim ke game"
+                            loaderFeedback = "$displayName sent as model $modelId. " +
+                                "Press Reload Model to make the game load it again.",
+                            statusMessage = "Model $modelId sent to the game"
                         )
                     }
                 },
@@ -1698,7 +1698,7 @@ class ImgToolViewModel : ViewModel() {
                 throw IOException(context.getString(R.string.modloader_file_missing, file.name))
             }
             if (local.length() > LoaderClient.MAX_PAYLOAD_BYTES) {
-                throw IOException("Berkas model terlalu besar (maksimum 512 MB).")
+                throw IOException("Model file too large (max 512 MB).")
             }
             return local.readBytes()
         } finally {
@@ -1710,7 +1710,7 @@ class ImgToolViewModel : ViewModel() {
         if (_uiState.value.loaderBusy) return
         val modelId = validLoaderModelId() ?: run {
             _uiState.update {
-                it.copy(loaderFeedback = "Isi Model ID yang valid (0–${LoaderClient.MAX_MODEL_ID}).")
+                it.copy(loaderFeedback = "Enter a valid Model ID (0-${LoaderClient.MAX_MODEL_ID}).")
             }
             return
         }
@@ -1722,8 +1722,8 @@ class ImgToolViewModel : ViewModel() {
                         it.copy(
                             loaderBusy = false,
                             loaderConnected = true,
-                            loaderFeedback = "Perintah muat ulang model $modelId terkirim ke game.",
-                            statusMessage = "Model $modelId dimuat ulang di game"
+                            loaderFeedback = "Reload command for model $modelId sent to the game.",
+                            statusMessage = "Model $modelId reloaded in the game"
                         )
                     }
                 },

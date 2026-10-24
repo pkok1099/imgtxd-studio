@@ -192,7 +192,7 @@ object WorkerShizukuManager {
             val unwrapped = unwrapException(e)
             if (isShizukuDisconnectError(unwrapped)) {
                 throw ShizukuDisconnectedException(
-                    "Layanan Shizuku terputus saat proses berlangsung. Berkas dipulihkan ke kondisi awal.",
+                    "Shizuku service disconnected mid-process. File restored to its previous state.",
                     unwrapped
                 )
             }

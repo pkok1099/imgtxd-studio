@@ -111,14 +111,14 @@ fun RuntimeSettingsSheet(
                 }
                 Column {
                     Text(
-                        text = "Proses Runtime",
+                        text = "Runtime Process",
                         style = MaterialTheme.typography.headlineSmall,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Kelola proses di service terpisah",
+                        text = "Run process in a separate service",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -128,7 +128,7 @@ fun RuntimeSettingsSheet(
             // 2. Grup Pengaturan: STATUS RUNTIME (Card 20dp)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "STATUS RUNTIME",
+                    text = "RUNTIME STATUS",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -154,14 +154,14 @@ fun RuntimeSettingsSheet(
                                 .padding(end = 16.dp)
                         ) {
                             Text(
-                                text = "Aktifkan proses runtime",
+                                text = "Enable runtime process",
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Jalankan ekspor & rebuild di service independen",
+                                text = "Run exports & rebuilds in an independent service",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -184,7 +184,7 @@ fun RuntimeSettingsSheet(
             // 3. Grup Alokasi Memori: ALOKASI MEMORI (Card 20dp)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "ALOKASI MEMORI",
+                    text = "MEMORY ALLOCATION",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -280,7 +280,7 @@ fun RuntimeSettingsSheet(
                                         color = PrimaryPink
                                     )
                                     Text(
-                                        text = "Memori sistem tersedia: ${uiState.availableDeviceMemMb} MB",
+                                        text = "Available system memory: ${uiState.availableDeviceMemMb} MB",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -332,7 +332,7 @@ fun RuntimeSettingsSheet(
 
                         // Teks Info
                         Text(
-                            text = "Batas lebih tinggi mempercepat proses pada perangkat yang mendukung.",
+                            text = "A higher limit speeds up the process on supported devices.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -358,7 +358,7 @@ fun RuntimeSettingsSheet(
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    text = "Batas memori tinggi dapat membuat proses jauh lebih lambat di beberapa perangkat. Naikkan hanya jika proses terus gagal pada batas lebih rendah.",
+                                    text = "A high memory limit can slow the process down on some devices. Raise it only if the process keeps failing at lower limits.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = SemanticColors.Warning
                                 )
@@ -388,8 +388,8 @@ fun RuntimeSettingsSheet(
                         )
 
                         Text(
-                            text = "• Di dalam aplikasi & Mode Meja: 100% Core aktif (${uiState.totalCpuCores} Core)\n" +
-                                   "• Di latar belakang (layar mati): Dibatasi ke ${uiState.backgroundCpuCores} Core",
+                            text = "• In-app & Desk Mode: 100% of cores (${uiState.totalCpuCores} cores)\n" +
+                                   "• In background (screen off): Limited to ${uiState.backgroundCpuCores} cores",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -444,7 +444,7 @@ fun RuntimeSettingsSheet(
                         }
 
                         Text(
-                            text = "Membatasi core latar belakang menjaga suhu HP tetap dingin saat impor berjalan berhari-hari dan mencegah sistem mematikan proses.",
+                            text = "Limiting background cores keeps the phone cool during multi-day imports and keeps Android from killing the process.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                         )
@@ -472,7 +472,7 @@ fun RuntimeSettingsSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Buka Mode Meja (Layar Redup Anti-Sleep)",
+                    text = "Open Desk Mode (Dim Screen, Anti-Sleep)",
                     style = MaterialTheme.typography.labelLarge
                 )
             }
@@ -518,7 +518,7 @@ fun RuntimeSettingsSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (isIgnoringBatteryOptimizations) "Optimasi Baterai Sudah Diabaikan" else "Abaikan Optimasi Baterai",
+                    text = if (isIgnoringBatteryOptimizations) "Battery Optimization Already Ignored" else "Ignore Battery Optimization",
                     style = MaterialTheme.typography.labelLarge
                 )
             }
@@ -546,7 +546,7 @@ fun RuntimeSettingsSheet(
                     .height(48.dp)
             ) {
                 Text(
-                    text = if (benchmarkRunning) "Benchmark Berjalan…" else "Jalankan Benchmark Engine (R0)",
+                    text = if (benchmarkRunning) "Benchmark running…" else "Run Engine Benchmark (R0)",
                     style = MaterialTheme.typography.labelLarge
                 )
             }

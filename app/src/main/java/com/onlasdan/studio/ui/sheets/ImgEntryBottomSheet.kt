@@ -88,7 +88,7 @@ fun ImgEntryBottomSheet(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Ukuran ~$sizeKb KB • Sektor ${entry.offsetInSectors} (${entry.sizeInSectors} sek)",
+                        text = "Size ~${sizeKb}KB • Sector ${entry.offsetInSectors} (${entry.sizeInSectors} sec)",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -114,7 +114,7 @@ fun ImgEntryBottomSheet(
                 ) {
                     Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Buka Editor Tekstur TXD", fontWeight = FontWeight.Bold)
+                    Text("Open TXD Texture Editor", fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -159,7 +159,7 @@ fun ImgEntryBottomSheet(
                 ) {
                     Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Ganti", fontWeight = FontWeight.SemiBold)
+                    Text("Replace", fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -181,7 +181,7 @@ fun ImgEntryBottomSheet(
                         EntryMenuItem(
                             icon = Icons.Outlined.Edit,
                             title = "Rename",
-                            subtitle = "Ganti nama file entri di dalam arsip",
+                            subtitle = "Rename the entry inside the archive",
                             onClick = {
                                 onDismissRequest()
                                 onRename()
@@ -191,7 +191,7 @@ fun ImgEntryBottomSheet(
                         EntryMenuItem(
                             icon = Icons.Outlined.DeleteOutline,
                             title = "Delete File",
-                            subtitle = "Keluarkan berkas ini dari arsip",
+                            subtitle = "Remove this file from the archive",
                             iconTint = MaterialTheme.colorScheme.error,
                             onClick = {
                                 onDismissRequest()

@@ -65,7 +65,7 @@ object ArchiveRepository {
 
                 if (shizukuDestPath != null && ShizukuManager.hasPermission()) {
                     if (!ShizukuManager.copyFromLocal(archive.imgFile, shizukuDestPath)) {
-                        throw IOException("Gagal menulis arsip kembali ke folder game: $shizukuDestPath")
+                        throw IOException("Failed to write archive back to game folder: $shizukuDestPath")
                     }
                 }
 

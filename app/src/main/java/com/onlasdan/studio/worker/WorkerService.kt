@@ -157,13 +157,13 @@ class WorkerService : Service() {
 
         override fun setAppForegroundState(isForeground: Boolean) {
             this@WorkerService.isAppInForeground = isForeground
-            Log.d(TAG, "Status foreground aplikasi: $isForeground")
+            Log.d(TAG, "App foreground state: $isForeground")
         }
 
         override fun setBackgroundCoreLimit(maxCores: Int) {
             val total = Runtime.getRuntime().availableProcessors()
             this@WorkerService.backgroundCoreLimit = maxCores.coerceIn(1, total)
-            Log.d(TAG, "Batas core latar belakang: ${this@WorkerService.backgroundCoreLimit} dari $total core")
+            Log.d(TAG, "Background core limit: ${this@WorkerService.backgroundCoreLimit} of $total cores")
         }
     }
 
@@ -197,7 +197,7 @@ class WorkerService : Service() {
                 }
                 WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS -> {
                     val targetPath = intent.getStringExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)
-                    Log.i(TAG, "Menerima aksi ACTION_RESUME_INTERRUPTED_JOBS untuk $targetPath")
+                    Log.i(TAG, "Received ACTION_RESUME_INTERRUPTED_JOBS for $targetPath")
                     handleResumeInterruptedJobs(targetPath)
                 }
             }
@@ -264,7 +264,7 @@ class WorkerService : Service() {
             totalItems = 0,
             status = "QUEUED",
             currentItemName = null,
-            message = "Menunggu antrean..."
+            message = "Waiting in queue..."
         )
 
         synchronized(queueLock) {
@@ -294,7 +294,7 @@ class WorkerService : Service() {
             val cancelledProgress = JobProgress(
                 id = jobId,
                 status = "CANCELLED",
-                message = "Dibatalkan oleh pengguna"
+                message = "Cancelled by user"
             )
             synchronized(queueLock) {
                 activeJobProgressMap[jobId] = cancelledProgress
@@ -322,14 +322,14 @@ class WorkerService : Service() {
             val cancelledProgress = JobProgress(
                 id = jobId,
                 status = "CANCELLED",
-                message = "Dibatalkan dari antrean"
+                message = "Cancelled from queue"
             )
             notifyProgress(cancelledProgress)
             notifyFinished(
                 JobResult(
                     id = jobId,
                     success = false,
-                    message = "Dibatalkan dari antrean"
+                    message = "Cancelled from queue"
                 )
             )
             notifyQueueChanged()
@@ -379,7 +379,7 @@ class WorkerService : Service() {
                         totalItems = 0,
                         status = "RUNNING",
                         currentItemName = null,
-                        message = "Memulai proses..."
+                        message = "Starting process..."
                     )
 
                     synchronized(queueLock) {
@@ -397,7 +397,7 @@ class WorkerService : Service() {
                             preferences[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_JSON)] = nextRequest.toJson()
                         }
                     } catch (e: Exception) {
-                        Log.w(TAG, "Gagal mencatat status pekerjaan aktif ke DataStore", e)
+                        Log.w(TAG, "Failed to record active job status to DataStore", e)
                     }
 
                     val foregroundNotif = WorkerNotificationHelper.buildForegroundNotification(
@@ -432,14 +432,14 @@ class WorkerService : Service() {
                         JobResult(
                             id = nextRequest.id,
                             success = false,
-                            message = "Dibatalkan"
+                            message = "Cancelled"
                         )
                     } catch (e: Throwable) {
                         Log.e(TAG, "Exception during job execution: ${nextRequest.id}", e)
                         JobResult(
                             id = nextRequest.id,
                             success = false,
-                            message = e.localizedMessage ?: "Terjadi kesalahan pada engine"
+                            message = e.localizedMessage ?: "Engine error"
                         )
                     } finally {
                         // Hapus penanda aktif di DataStore setelah pekerjaan selesai dieksekusi normal (bukan saat timing out)
@@ -451,7 +451,7 @@ class WorkerService : Service() {
                                     preferences.remove(stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_JOB_JSON))
                                 }
                             } catch (e: Exception) {
-                                Log.w(TAG, "Gagal membersihkan penanda aktif dari DataStore", e)
+                                Log.w(TAG, "Failed to clear active marker from DataStore", e)
                             }
                         }
                     }
@@ -469,7 +469,7 @@ class WorkerService : Service() {
                     } else {
                         WorkerNotificationHelper.sendFailedNotification(
                             this@WorkerService,
-                            result.message ?: "Operasi gagal"
+                            result.message ?: "Operation failed"
                         )
                     }
                 }
@@ -617,7 +617,7 @@ class WorkerService : Service() {
             isTimingOut = true
         }
 
-        Log.w(TAG, "System timeout dipicu untuk startId: $startId, fgsType: $fgsType. Memulai session cycling untuk me-reset kuota sistem...")
+        Log.w(TAG, "System timeout triggered for startId: $startId, fgsType: $fgsType. Starting session cycling to reset system quota...")
         processingJob?.cancel()
 
         val active = currentJob
@@ -668,7 +668,7 @@ class WorkerService : Service() {
                 if (!jobJson.isNullOrEmpty()) {
                     val jobRequest = JobRequest.fromJson(jobJson)
                     if (jobRequest != null) {
-                        Log.i(TAG, "Berhasil merekonstruksi pekerjaan terinterupsi: ${jobRequest.id}")
+                        Log.i(TAG, "Recovered interrupted job: ${jobRequest.id}")
                         enqueueJob(jobRequest)
                         return@launch
                     }
@@ -677,11 +677,11 @@ class WorkerService : Service() {
                 if (!targetPath.isNullOrEmpty()) {
                     val checkpoint = com.onlasdan.studio.worker.engine.CheckpointManager.getCheckpoint(targetPath)
                     if (checkpoint != null && !checkpoint.isFinished) {
-                        Log.i(TAG, "Checkpoint terinterupsi ditemukan untuk $targetPath")
+                        Log.i(TAG, "Found interrupted checkpoint for $targetPath")
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Gagal memproses resume pekerjaan terinterupsi", e)
+                Log.e(TAG, "Failed to resume interrupted job", e)
             }
         }
     }

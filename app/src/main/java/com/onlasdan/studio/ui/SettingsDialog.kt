@@ -66,14 +66,14 @@ fun SettingsBottomSheet(
                 }
                 Column {
                     Text(
-                        text = "Pengaturan",
+                        text = "Settings",
                         style = MaterialTheme.typography.headlineSmall,
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Konfigurasi sistem & tampilan aplikasi",
+                        text = "System & app appearance settings",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -83,7 +83,7 @@ fun SettingsBottomSheet(
             // Group: TAMPILAN
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "TAMPILAN",
+                    text = "APPEARANCE",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -111,13 +111,13 @@ fun SettingsBottomSheet(
                             )
                             Column {
                                 Text(
-                                    text = "Tema Noir & Blush",
+                                    text = "Noir & Blush Theme",
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Hitam pekat OLED dengan aksen blush pink lembut.",
+                                    text = "Pure OLED black with a soft blush pink accent.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -143,7 +143,7 @@ fun SettingsBottomSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "Aktif",
+                                    text = "Active",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
@@ -157,7 +157,7 @@ fun SettingsBottomSheet(
             // Group: MODE JENDELA
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "MODE JENDELA (MULTI-WINDOW)",
+                    text = "WINDOW MODE (MULTI-WINDOW)",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -232,7 +232,7 @@ fun SettingsBottomSheet(
                         }
 
                         Text(
-                            text = "Pengaturan mode jendela akan berlaku untuk jendela atau file yang dibuka berikutnya.",
+                            text = "Window mode settings apply to the next window or file you open.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)

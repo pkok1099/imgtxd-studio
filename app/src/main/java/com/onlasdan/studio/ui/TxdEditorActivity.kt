@@ -188,10 +188,10 @@ class TxdEditorActivity : ComponentActivity() {
                         // Busy Process Sheet
                         if (showBusyProcessDialog) {
                             ConfirmSheet(
-                                title = "Proses Sedang Berjalan",
-                                message = "Proses '${currentProcess?.title}' saat ini sedang berjalan di latar belakang.\n\nAnda dapat kembali ke Beranda sementara proses terus berjalan, atau tetap berada di layar ini.",
-                                confirmLabel = "Lanjut di Latar Belakang",
-                                dismissLabel = "Tetap di Sini",
+                                title = "Process Running",
+                                message = "Process '${currentProcess?.title}' is running in the background.\n\nYou can go back to Home while it runs, or stay on this screen.",
+                                confirmLabel = "Run in Background",
+                                dismissLabel = "Stay Here",
                                 onDismissRequest = { showBusyProcessDialog = false },
                                 onConfirm = {
                                     showBusyProcessDialog = false
@@ -210,10 +210,10 @@ class TxdEditorActivity : ComponentActivity() {
                                 showUnsavedChangesPrompt = false
                                 pendingIntentToLoad = null
                             }) {
-                                SheetTitle("Perubahan Belum Disimpan")
+                                SheetTitle("Unsaved Changes")
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "File TXD saat ini memiliki perubahan yang belum disimpan. Apakah Anda ingin menyimpan perubahan sebelum membuka file baru?",
+                                    text = "This TXD has unsaved changes. Save them before opening another file?",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -234,7 +234,7 @@ class TxdEditorActivity : ComponentActivity() {
                                     ),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("Simpan & Buka", fontWeight = FontWeight.SemiBold)
+                                    Text("Save & Open", fontWeight = FontWeight.SemiBold)
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Row(
@@ -246,7 +246,7 @@ class TxdEditorActivity : ComponentActivity() {
                                         showUnsavedChangesPrompt = false
                                         pendingIntentToLoad = null
                                     }) {
-                                        Text("Batal")
+                                        Text("Cancel")
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     OutlinedButton(

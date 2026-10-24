@@ -26,7 +26,7 @@ object WorkerNotificationHelper {
                     WorkerContracts.NOTIFICATION_CHANNEL_NAME,
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
-                    description = "Notifikasi status operasi latar belakang ImgTxd Studio"
+                    description = "ImgTxd Studio background operation status"
                     setShowBadge(false)
                 }
                 notificationManager.createNotificationChannel(channel)
@@ -45,7 +45,7 @@ object WorkerNotificationHelper {
     ): Notification {
         ensureNotificationChannel(context)
 
-        val title = currentJob?.message ?: "Memproses berkas..."
+        val title = currentJob?.message ?: "Processing files..."
         val currentItem = currentJob?.currentItem ?: 0
         val totalItems = currentJob?.totalItems ?: 0
         val percent = ((currentJob?.percent ?: 0f) * 100).toInt().coerceIn(0, 100)
@@ -78,7 +78,7 @@ object WorkerNotificationHelper {
         )
         builder.addAction(
             android.R.drawable.ic_menu_close_clear_cancel,
-            "Batal",
+            "Cancel",
             cancelPendingIntent
         )
 
@@ -90,12 +90,12 @@ object WorkerNotificationHelper {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             ?: return
 
-        val title = if (result.success) "Operasi Selesai" else "Operasi Gagal"
+        val title = if (result.success) "Operation Complete" else "Operation Failed"
         val message = result.message?.ifBlank { null }
             ?: if (result.success) {
-                "Semua berkas telah berhasil diproses"
+                "All files processed successfully"
             } else {
-                "Terjadi kesalahan saat memproses berkas"
+                "An error occurred while processing files"
             }
 
         val notification = NotificationCompat.Builder(context, WorkerContracts.NOTIFICATION_CHANNEL_ID)
@@ -120,7 +120,7 @@ object WorkerNotificationHelper {
 
         val notification = NotificationCompat.Builder(context, WorkerContracts.NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Operasi Gagal")
+            .setContentTitle("Operation Failed")
             .setContentText(errorMsg)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_ERROR)

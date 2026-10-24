@@ -88,7 +88,7 @@ fun FileOptionsBottomSheet(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Ukuran ~$sizeKb KB • Offset Sektor ${entry.offsetInSectors}",
+                        text = "Size ~${sizeKb}KB • Sector Offset ${entry.offsetInSectors}",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -137,14 +137,14 @@ fun FileOptionsBottomSheet(
                 ) {
                     Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Ganti", fontWeight = FontWeight.SemiBold)
+                    Text("Replace", fontWeight = FontWeight.SemiBold)
                 }
             }
 
             // Group: TINDAKAN BERKAS
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "TINDAKAN BERKAS",
+                    text = "FILE ACTIONS",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -159,7 +159,7 @@ fun FileOptionsBottomSheet(
                             FileOptionItem(
                                 icon = Icons.Outlined.Palette,
                                 title = "Open & Edit Texture (TXD)",
-                                subtitle = "Lihat tekstur renderware, ganti gambar, atau ekspor PNG",
+                                subtitle = "View renderware textures, replace images, or export PNG",
                                 iconTint = MaterialTheme.colorScheme.secondary,
                                 onClick = {
                                     onDismissRequest()
@@ -184,7 +184,7 @@ fun FileOptionsBottomSheet(
                         FileOptionItem(
                             icon = Icons.Outlined.Delete,
                             title = "Delete from Archive",
-                            subtitle = "Menghapus entri berkas ini dari arsip .img",
+                            subtitle = "Remove this entry from the .img archive",
                             titleColor = MaterialTheme.colorScheme.error,
                             iconTint = MaterialTheme.colorScheme.error,
                             onClick = {
@@ -210,14 +210,14 @@ fun FileOptionsBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "DETAIL TEKNIS ARSIP",
+                        text = "ARCHIVE TECHNICAL DETAILS",
                         style = SectionHeaderStyle,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(4.dp))
                     DetailRow("Offset Sektor", "${entry.offsetInSectors} (byte ${entry.offsetInSectors.toLong() * 2048})")
                     DetailRow("Ukuran Sektor", "${entry.sizeInSectors} sektor (${entry.sizeInBytes} bytes)")
-                    DetailRow("Format Berkas", entry.cleanName.substringAfterLast('.', "Unknown").uppercase())
+                    DetailRow("File Format", entry.cleanName.substringAfterLast('.', "Unknown").uppercase())
                 }
             }
         }

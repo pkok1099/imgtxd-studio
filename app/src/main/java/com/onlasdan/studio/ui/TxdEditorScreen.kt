@@ -188,7 +188,7 @@ fun TxdEditorScreen(
 
         isAutoReplaceShizuku = isShizuku
         if (matches.isEmpty()) {
-            noMatchesSourceMessage = "Tidak ditemukan gambar yang namanya cocok dengan tekstur di TXD ini (${filePaths.size} file diperiksa)."
+            noMatchesSourceMessage = "No image file matched any texture name in this TXD (${filePaths.size} files checked)."
             showNoMatchesDialog = true
         } else {
             autoReplaceMatches = matches
@@ -213,7 +213,7 @@ fun TxdEditorScreen(
                 }
                 processAutoReplaceFiles(imageFiles, isShizuku)
             } catch (e: Exception) {
-                noMatchesSourceMessage = "Gagal memindai folder: ${e.localizedMessage}"
+                noMatchesSourceMessage = "Folder scan failed: ${e.localizedMessage}"
                 showNoMatchesDialog = true
             } finally {
                 isScanningFolder = false
@@ -232,13 +232,13 @@ fun TxdEditorScreen(
         ContextualDockItem(
             id = "select_all",
             icon = Icons.Outlined.SelectAll,
-            contentDescription = "Pilih semua tekstur",
+            contentDescription = "Select all textures",
             onClick = { selectedTextures = textures.toSet() }
         ),
         ContextualDockItem(
             id = "cancel_selection",
             icon = Icons.Outlined.Close,
-            contentDescription = "Batal seleksi",
+            contentDescription = "Clear selection",
             onClick = {
                 selectedTextures = emptySet()
                 isSelectionMode = false
@@ -275,7 +275,7 @@ fun TxdEditorScreen(
         ContextualDockItem(
             id = "save",
             icon = Icons.Outlined.Save,
-            contentDescription = "Simpan Tekstur",
+            contentDescription = "Save Texture",
             showDotBadge = hasUnsavedChanges,
             isEnabled = hasUnsavedChanges,
             onClick = { onSaveTxd?.invoke() }
@@ -290,14 +290,14 @@ fun TxdEditorScreen(
 
     // Single Framework Composable: ArchiveScreen
     ArchiveScreen(
-        title = txdName.ifBlank { "Tekstur TXD" },
-        subtitle = if (textures.isEmpty()) "0 tekstur" else "${textures.size} tekstur RenderWare",
+        title = txdName.ifBlank { "TXD Textures" },
+        subtitle = if (textures.isEmpty()) "0 textures" else "${textures.size} RenderWare textures",
         isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
         onShizukuClick = {
             if (!ShizukuManager.isShizukuAvailable()) {
                 snackbarHostState.currentSnackbarData?.dismiss()
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("Shizuku service tidak terdeteksi.")
+                    snackbarHostState.showSnackbar("Shizuku service not detected.")
                 }
             } else if (!ShizukuManager.hasPermission()) {
                 ShizukuManager.requestPermission()
@@ -305,8 +305,8 @@ fun TxdEditorScreen(
         },
         items = displayedTextures,
         keyExtractor = { "${it.name}_${it.width}_${it.height}" },
-        emptyTitle = "Tidak ada tekstur",
-        emptyDescription = if (isLoading) "Memuat tekstur..." else "Tidak ada entri tekstur di dalam file TXD ini.",
+        emptyTitle = "No textures",
+        emptyDescription = if (isLoading) "Loading textures..." else "No texture entries in this TXD file.",
         isSearching = isSearching,
         searchQuery = searchQuery,
         searchPlaceholder = "Cari tekstur, misal cj_face...",
@@ -418,7 +418,7 @@ fun TxdEditorScreen(
     // 4. File Picker for Export Single
     entryToExport?.let { target ->
         FilePickerDialog(
-            title = "Pilih Folder Ekspor untuk ${target.name}.png",
+            title = "Pick Export Folder for ${target.name}.png",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { entryToExport = null },
             onFileSelected = { folderPath, _ ->
@@ -432,7 +432,7 @@ fun TxdEditorScreen(
     // 5. File Picker for Export All
     if (showExportAllPicker) {
         FilePickerDialog(
-            title = "Pilih Folder untuk Ekspor Semua Tekstur",
+            title = "Pick Folder to Export All Textures",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showExportAllPicker = false },
             onFileSelected = { folderPath, _ ->
@@ -447,7 +447,7 @@ fun TxdEditorScreen(
     if (showExportSelectedPicker) {
         val targets = selectedTextures.toList()
         FilePickerDialog(
-            title = "Pilih Folder Ekspor (${targets.size} Tekstur Terpilih)",
+            title = "Pick Export Folder (${targets.size} Textures Selected)",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showExportSelectedPicker = false },
             onFileSelected = { folderPath, _ ->
@@ -470,7 +470,7 @@ fun TxdEditorScreen(
     // 6. File Picker for Replace Single Texture
     entryToReplace?.let { target ->
         FilePickerDialog(
-            title = "Pilih Gambar Pengganti untuk ${target.name}",
+            title = "Pick Replacement Image for ${target.name}",
             mode = PickerMode.PICK_IMAGE,
             onDismissRequest = { entryToReplace = null },
             onFileSelected = { imgPath, isShizuku ->
@@ -494,7 +494,7 @@ fun TxdEditorScreen(
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                SheetTitle("Konfirmasi Ganti Tekstur")
+                SheetTitle("Confirm Texture Replace")
             }
             Spacer(modifier = Modifier.height(8.dp))
                 Column(
@@ -502,7 +502,7 @@ fun TxdEditorScreen(
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Text(
-                        text = "Bandingkan tekstur asli dengan gambar baru sebelum menerapkan perubahan:",
+                        text = "Compare the original texture with the new image before applying:",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -657,7 +657,7 @@ fun TxdEditorScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = { singleReplaceCandidate = null }) {
-                    Text("Batal")
+                    Text("Cancel")
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
@@ -671,7 +671,7 @@ fun TxdEditorScreen(
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Ganti Tekstur", fontWeight = FontWeight.Bold)
+                    Text("Replace Texture", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -689,7 +689,7 @@ fun TxdEditorScreen(
     // 8. Auto Replace Folder Picker
     if (showAutoReplaceFolderPicker) {
         FilePickerDialog(
-            title = "Pilih Folder Sumber Gambar Mod",
+            title = "Pick Mod Image Source Folder",
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showAutoReplaceFolderPicker = false },
             onFileSelected = { folderPath, isShizuku ->
@@ -702,7 +702,7 @@ fun TxdEditorScreen(
     // 9. Auto Replace Multi-File Picker
     if (showAutoReplaceMultiFilePicker) {
         FilePickerDialog(
-            title = "Pilih File Gambar Pengganti",
+            title = "Pick Replacement Image File",
             mode = PickerMode.PICK_MULTIPLE_IMAGES,
             onDismissRequest = { showAutoReplaceMultiFilePicker = false },
             onMultipleFilesSelected = { filePaths, isShizuku ->
@@ -728,9 +728,9 @@ fun TxdEditorScreen(
     // 11. No Matches Warning Sheet
     if (showNoMatchesDialog) {
         ConfirmSheet(
-            title = "Tidak Ada Tekstur Cocok",
+            title = "No Matching Texture",
             message = noMatchesSourceMessage.ifEmpty {
-                "Tidak ada file gambar yang cocok dengan nama tekstur di TXD ini. Pastikan nama file gambar sama dengan nama tekstur (contoh: cj_face.png)."
+                "No image file matched a texture name in this TXD. Make sure the image file name matches the texture name (e.g. cj_face.png)."
             },
             confirmLabel = "Mengerti",
             dismissLabel = null,
@@ -747,7 +747,7 @@ fun TxdEditorScreen(
     // 13. File Picker for Add Textures (Import Wizard "add" path)
     if (showAddTexturesPicker && onAddTextures != null) {
         FilePickerDialog(
-            title = "Pilih Gambar untuk Ditambahkan sebagai Tekstur",
+            title = "Pick Images to Add as Textures",
             mode = PickerMode.PICK_MULTIPLE_IMAGES,
             onDismissRequest = { showAddTexturesPicker = false },
             onMultipleFilesSelected = { filePaths, isShizuku ->
@@ -778,14 +778,14 @@ fun TxdEditorScreen(
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                SheetTitle("Nama Tekstur Sudah Ada")
+                SheetTitle("Texture Name Already Exists")
             }
             Spacer(modifier = Modifier.height(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "${pendingAddConflicts.size} nama gambar sama dengan tekstur yang sudah ada " +
+                        text = "${pendingAddConflicts.size} image names collide with existing textures " +
                             "(${pendingAddConflicts.take(4).joinToString(", ")}${if (pendingAddConflicts.size > 4) ", …" else ""}). " +
-                            "Pilih perlakuan untuk nama yang bentrok:",
+                            "Pick how to handle the conflicting names:",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -808,7 +808,7 @@ fun TxdEditorScreen(
                                     text = if (policy == TextureNames.ConflictPolicy.JUST_ADD) {
                                         "Tetap ditambahkan, nama diberi akhiran _1, _2, …"
                                     } else {
-                                        "Tekstur lama diganti dengan gambar baru"
+                                        "Replace the old texture with the new image"
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -824,7 +824,7 @@ fun TxdEditorScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = { pendingAddImages = null }) {
-                    Text("Batal")
+                    Text("Cancel")
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(

@@ -89,7 +89,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
                 }
                 Log.d(TAG, "Menjadwalkan auto-resume dalam ${delayMs}ms")
             } catch (e: Exception) {
-                Log.e(TAG, "Gagal menjadwalkan auto-resume", e)
+                Log.e(TAG, "Failed to schedule auto-resume", e)
             }
         }
 
@@ -132,7 +132,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
                     )
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal memasang watchdog alarm", e)
+                Log.w(TAG, "Failed to schedule watchdog alarm", e)
             }
         }
 
@@ -208,7 +208,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
             try {
                 checkAndTriggerResume(context.applicationContext, targetHint)
             } catch (e: Exception) {
-                Log.e(TAG, "Error saat memeriksa pekerjaan untuk resume", e)
+                Log.e(TAG, "Error while checking jobs to resume", e)
             } finally {
                 pendingResult.finish()
             }
@@ -231,7 +231,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
                     prefs[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)]
                 }.first()
                 if (stored.isNullOrEmpty() || stored != targetPath) {
-                    Log.w(TAG, "targetPathHint '$targetPath' tidak cocok workerDataStore; mengabaikan")
+                    Log.w(TAG, "targetPathHint '$targetPath' does not match workerDataStore; ignoring")
                     return
                 }
             }
@@ -239,7 +239,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
             if (!targetPath.isNullOrEmpty()) {
                 val hasIncomplete = CheckpointManager.hasIncompleteCheckpoint(targetPath)
                 if (hasIncomplete) {
-                    Log.i(TAG, "Pekerjaan aktif terdeteksi untuk: $targetPath. Membangunkan WorkerService...")
+                    Log.i(TAG, "Active job detected for: $targetPath. Waking WorkerService...")
                     val serviceIntent = Intent(context, WorkerService::class.java).apply {
                         this.action = WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS
                         setPackage(context.packageName)
@@ -253,7 +253,7 @@ class JobGuardianReceiver : BroadcastReceiver() {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error saat memeriksa pekerjaan untuk resume", e)
+            Log.e(TAG, "Error while checking jobs to resume", e)
         }
     }
 }

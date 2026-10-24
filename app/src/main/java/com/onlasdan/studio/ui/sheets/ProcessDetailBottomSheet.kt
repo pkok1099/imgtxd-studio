@@ -73,7 +73,7 @@ fun ProcessDetailBottomSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = process.message ?: "Sedang memproses...",
+                            text = process.message ?: "Processing...",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -98,7 +98,7 @@ fun ProcessDetailBottomSheet(
 
                     if (process.total > 0) {
                         Text(
-                            text = "Langkah: ${process.current} dari ${process.total}",
+                            text = "Step: ${process.current} of ${process.total}",
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -131,7 +131,7 @@ fun ProcessDetailBottomSheet(
     if (showConfirmCancel) {
         ConfirmSheet(
             title = "Batalkan Proses?",
-            message = "Apakah Anda yakin ingin membatalkan operasi ini? Perubahan yang belum selesai akan di-rollback dengan aman.",
+            message = "Cancel this operation? Unfinished changes will be rolled back safely.",
             confirmLabel = "Ya, Batalkan",
             dismissLabel = "Lanjutkan Proses",
             danger = true,

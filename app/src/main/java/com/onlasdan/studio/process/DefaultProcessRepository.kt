@@ -79,7 +79,7 @@ object DefaultProcessRepository : ProcessRepository {
                     current = 0,
                     total = 0,
                     status = ProcessStatus.RUNNING,
-                    message = "Memulai proses..."
+                    message = "Starting process..."
                 )
                 _processes.update { it + process }
                 newProcess = process
@@ -88,7 +88,7 @@ object DefaultProcessRepository : ProcessRepository {
 
         val process = newProcess ?: return Result.failure(
             IllegalStateException(
-                "Berkas '${targetFile.substringAfterLast('/')}' sedang diproses ($busyTitle). Harap tunggu proses selesai terlebih dahulu."
+                "'${targetFile.substringAfterLast('/')}' is being processed ($busyTitle). Wait for it to finish first."
             )
         )
         val processId = process.id
@@ -118,7 +118,7 @@ object DefaultProcessRepository : ProcessRepository {
                                 p.copy(
                                     status = ProcessStatus.COMPLETED,
                                     progress = 1f,
-                                    message = "Selesai"
+                                    message = "Done"
                                 )
                             } else p
                         }
@@ -143,7 +143,7 @@ object DefaultProcessRepository : ProcessRepository {
                         if (p.id == processId) {
                             p.copy(
                                 status = ProcessStatus.CANCELLED,
-                                message = "Dibatalkan oleh pengguna"
+                                message = "Cancelled by user"
                             )
                         } else p
                     }
@@ -171,8 +171,8 @@ object DefaultProcessRepository : ProcessRepository {
         val finalProcess = _processes.value.find { it.id == processId }
         return when (finalProcess?.status) {
             ProcessStatus.COMPLETED -> Result.success(Unit)
-            ProcessStatus.CANCELLED -> Result.failure(CancellationException("Dibatalkan"))
-            ProcessStatus.FAILED -> Result.failure(Exception(finalProcess.errorMessage ?: "Gagal memproses"))
+            ProcessStatus.CANCELLED -> Result.failure(CancellationException("Cancelled"))
+            ProcessStatus.FAILED -> Result.failure(Exception(finalProcess.errorMessage ?: "Processing failed"))
             else -> Result.success(Unit)
         }
     }
@@ -183,7 +183,7 @@ object DefaultProcessRepository : ProcessRepository {
             job.cancel()
             _processes.update { list ->
                 list.map { p ->
-                    if (p.id == id) p.copy(status = ProcessStatus.CANCELLED, message = "Dibatalkan") else p
+                    if (p.id == id) p.copy(status = ProcessStatus.CANCELLED, message = "Cancelled") else p
                 }
             }
             true

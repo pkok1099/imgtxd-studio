@@ -81,7 +81,7 @@ class ImgArchive private constructor(
         @Throws(IOException::class)
         private fun loadSnapshot(imgFile: File, dirFile: File?): Snapshot {
             val lines = NativeCore.imgList(imgFile.absolutePath, dirFile?.absolutePath)
-                ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+                ?: throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
             return snapshotFromLines(lines, dirFile)
         }
 
@@ -91,10 +91,10 @@ class ImgArchive private constructor(
             if (lines.isEmpty()) throw IOException("Engine Rust mengembalikan daftar kosong")
             val header = lines[0].split('\t', limit = 5)
             if (header[0] == "ERROR") {
-                throw IOException(header.getOrNull(1) ?: "Arsip tidak bisa dibuka")
+                throw IOException(header.getOrNull(1) ?: "Archive can't be opened")
             }
             if (header.size < 5 || header[0] != "OK") {
-                throw IOException("Respons engine tidak dikenal: ${lines[0]}")
+                throw IOException("Unknown engine response: ${lines[0]}")
             }
             val version = if (header[1] == "VER1") ImgVersion.VER1 else ImgVersion.VER2
             val total = header[3].toLongOrNull() ?: 0L
@@ -114,7 +114,7 @@ class ImgArchive private constructor(
         private fun requireOk(result: String?) {
             when {
                 result == null ->
-                    throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+                    throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
                 result.startsWith("ERROR ") -> {
                     val msg = result.removePrefix("ERROR ")
                     // Match the old Kotlin engine's exception type for duplicates.
@@ -155,7 +155,7 @@ class ImgArchive private constructor(
 
     private fun indexOfEntry(entry: ImgEntry): Int {
         val idx = entriesList.indexOf(entry)
-        if (idx < 0) throw IOException("Entri tidak ditemukan di arsip: ${entry.cleanName}")
+        if (idx < 0) throw IOException("Entry not found in archive: ${entry.cleanName}")
         return idx
     }
 
@@ -250,7 +250,7 @@ class ImgArchive private constructor(
         AppIntegrity.verifyOrThrow()
         progressListener?.invoke(0, entryCount)
         val lines = NativeCore.imgRebuild(imgFile.absolutePath, dirFile?.absolutePath)
-            ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+            ?: throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
         val snap = snapshotFromLines(lines, dirFile)
         entriesList = ArrayList(snap.entries)
         totalDataSize = snap.totalDataSize

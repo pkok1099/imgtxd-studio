@@ -153,7 +153,7 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
 
     LaunchedEffect(sourcePath) {
         if (sourcePath == null) {
-            error = "Berkas data tidak diberikan"
+            error = "Data file not provided"
             return@LaunchedEffect
         }
         val src = File(sourcePath)
@@ -161,13 +161,13 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
         val effective = if (readable) {
             sourcePath
         } else {
-            busyText = "Menyalin berkas data via Shizuku…"
+            busyText = "Copying data file via Shizuku…"
             val dest = File(context.cacheDir, "data_stage/${src.name}")
             dest.parentFile?.mkdirs()
             val (code, _) = ShizukuManager.exec("cp \"$sourcePath\" \"${dest.absolutePath}\"")
             busyText = null
             if (code != 0) {
-                error = "Gagal menyalin via Shizuku (kode $code)"
+                error = "Copy via Shizuku failed (code $code)"
                 return@LaunchedEffect
             }
             originalPath = sourcePath
@@ -176,14 +176,14 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
         localPath = effective
         fileText = withContext(Dispatchers.IO) { File(effective).readText() }
         if (!refreshMeta(fileText)) {
-            error = "Engine Rust tidak tersedia di perangkat ini"
+            error = "Rust engine unavailable on this device"
         }
     }
 
     fun previewPlan() {
         scope.launch {
             val p = enginePlan(fileText, pasted)
-            plan = p?.notes ?: "Engine Rust tidak tersedia di perangkat ini"
+            plan = p?.notes ?: "Rust engine unavailable on this device"
         }
     }
 
@@ -191,14 +191,14 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
         val target = File(localPath ?: return)
         scope.launch {
             val p = enginePlan(fileText, pasted) ?: run {
-                toast("Engine Rust tidak tersedia di perangkat ini")
+                toast("Rust engine unavailable on this device")
                 return@launch
             }
             if (p.changed == 0) {
-                toast("Tidak ada perubahan")
+                toast("No changes")
                 return@launch
             }
-            busyText = "Menulis berkas data…"
+            busyText = "Writing data file…"
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
                     val bak = File(target.path + ".bak")
@@ -211,9 +211,9 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
             if (ok) {
                 fileText = p.mergedText
                 refreshMeta(p.mergedText)
-                toast("Tersimpan: ${p.changed} baris diubah (cadangan .bak dibuat)")
+                toast("Saved: ${p.changed} lines changed (.bak backup created)")
             } else {
-                toast("Gagal menulis berkas")
+                toast("Failed to write file")
             }
         }
     }
@@ -221,12 +221,12 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
     fun applyToOriginal() {
         val from = localPath ?: return
         val to = originalPath ?: return
-        busyText = "Menerapkan ke lokasi asli…"
+        busyText = "Applying to source location…"
         scope.launch {
             val (code, _) = ShizukuManager.exec("cp \"$from\" \"$to\"")
             busyText = null
-            if (code == 0) toast("Diterapkan ke lokasi asli")
-            else toast("Gagal menerapkan (kode $code)")
+            if (code == 0) toast("Applied to source location")
+            else toast("Apply failed (code $code)")
         }
     }
 
@@ -236,7 +236,7 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
         isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
         onShizukuClick = {
             if (!ShizukuManager.isShizukuAvailable()) {
-                toast("Shizuku service tidak terdeteksi.")
+                toast("Shizuku service not detected.")
             } else if (!ShizukuManager.hasPermission()) {
                 ShizukuManager.requestPermission()
             }
@@ -277,18 +277,18 @@ private fun DataLinesScreen(sourcePath: String?, isShizuku: Boolean, onBack: () 
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 108.dp)
         ) {
             when {
-                error != null -> Text("Tidak bisa membuka berkas: $error")
+                error != null -> Text("Can't open file: $error")
                 localPath == null -> CircularProgressIndicator()
                 else -> {
                     Text(
                         "Target: ${File(localPath!!).name} ($fileLineCount baris)" +
-                            if (sectioned) " · berkas berseksi → mode ganti-saja" else ""
+                            if (sectioned) " · file has sections -> replace-only mode" else ""
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = pasted,
                         onValueChange = { pasted = it },
-                        label = { Text("Tempel baris dari readme mod (handling / ide / carcols)") },
+                        label = { Text("Paste lines from a mod readme (handling / ide / carcols)") },
                         modifier = Modifier.fillMaxWidth().height(180.dp),
                         textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace)
                     )

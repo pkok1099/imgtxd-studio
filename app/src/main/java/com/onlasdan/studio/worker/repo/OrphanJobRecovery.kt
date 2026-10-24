@@ -40,7 +40,7 @@ object OrphanJobRecovery {
             val runningProcesses = am.runningAppProcesses ?: return false
             runningProcesses.any { it.processName == workerProcessName }
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal memeriksa status proses :worker", e)
+            Log.w(TAG, "Failed to check :worker process status", e)
             false
         }
     }
@@ -74,7 +74,7 @@ object OrphanJobRecovery {
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal memindai direktori ${dir.absolutePath}", e)
+                Log.w(TAG, "Failed to scan directory ${dir.absolutePath}", e)
             }
         }
         return orphanFiles
@@ -91,7 +91,7 @@ object OrphanJobRecovery {
                     deletedCount++
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal menghapus berkas yatim: ${file.absolutePath}", e)
+                Log.w(TAG, "Failed to delete orphan file: ${file.absolutePath}", e)
             }
         }
         return deletedCount
@@ -111,7 +111,7 @@ object OrphanJobRecovery {
         val prefs = try {
             context.workerDataStore.data.first()
         } catch (e: Exception) {
-            Log.w(TAG, "Gagal membaca DataStore untuk pemeriksaan orphan job", e)
+            Log.w(TAG, "Failed to read DataStore for orphan job check", e)
             null
         }
 
@@ -134,11 +134,11 @@ object OrphanJobRecovery {
             return@withContext emptyList()
         }
 
-        Log.w(TAG, "Ditemukan pekerjaan yatim! activeJobId=$activeJobId, targetPath=$activeTargetPath, orphanFiles=${orphanFiles.size}. Memulai pembersihan...")
+        Log.w(TAG, "Orphan job found! activeJobId=$activeJobId, targetPath=$activeTargetPath, orphanFiles=${orphanFiles.size}. Cleaning up...")
 
         // 1. Bersihkan semua file .tmp, .lock, dan .checkpoint yatim yang tertinggal
         val deletedCount = cleanupOrphanFiles(orphanFiles)
-        Log.i(TAG, "Berhasil membersihkan $deletedCount berkas sementara yatim.")
+        Log.i(TAG, "Cleaned up $deletedCount orphan temp files.")
 
         // 2. Hapus penanda aktif di DataStore & catat pesan kegagalan yang jelas
         try {
@@ -148,7 +148,7 @@ object OrphanJobRecovery {
                 preferences[KEY_LAST_CRASH_INFO] = "$CRASH_MESSAGE [Job: ${activeJobId ?: "unknown"}, Time: ${System.currentTimeMillis()}]"
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Gagal memperbarui DataStore saat pemulihan pekerjaan", e)
+            Log.e(TAG, "Failed to update DataStore during job recovery", e)
         }
 
         // 3. Kembalikan representasi AppProcess gagal yang informatif untuk UI
@@ -156,7 +156,7 @@ object OrphanJobRecovery {
         val failedProcess = AppProcess(
             id = jobId,
             type = ProcessType.REBUILD,
-            targetFile = activeTargetPath ?: "Operasi Sebelumnya",
+            targetFile = activeTargetPath ?: "Previous Operation",
             title = "Pemulihan Pekerjaan Terhenti",
             progress = 0f,
             current = 0,

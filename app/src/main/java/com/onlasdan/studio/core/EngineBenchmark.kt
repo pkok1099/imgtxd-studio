@@ -30,13 +30,13 @@ object EngineBenchmark {
 
     suspend fun run(context: Context): String = withContext(Dispatchers.Default) {
         val lines = mutableListOf<String>()
-        lines += "Perangkat: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})"
+        lines += "Device: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})"
         lines += "CPU cores: ${Runtime.getRuntime().availableProcessors()}"
         lines += ""
 
         val rustVersion = NativeCore.version()
         if (rustVersion == null) {
-            lines += "Rust core: tidak tersedia di build ini — benchmark dibatalkan"
+            lines += "Rust core: unavailable in this build - benchmark skipped"
             return@withContext lines.joinToString("\n")
         }
         lines += "Rust core: $rustVersion"
@@ -96,7 +96,7 @@ object EngineBenchmark {
             val openMs = measureTimeMillis {
                 entryCount = ImgArchive.open(imgFile).entries.size
             }
-            lines += "IMG 100×128KiB: tambah $addMs ms · rebuild $rebuildMs ms · buka+parse ($entryCount entri) $openMs ms"
+            lines += "IMG 100x128KiB: add ${addMs}ms · rebuild ${rebuildMs}ms · open+parse ($entryCount entries) ${openMs}ms"
         } finally {
             dir.deleteRecursively()
         }

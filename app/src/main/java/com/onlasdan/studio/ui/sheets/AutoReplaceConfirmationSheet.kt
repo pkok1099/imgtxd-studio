@@ -115,7 +115,7 @@ fun AutoReplaceConfirmationSheet(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Ditemukan ${matches.size} tekstur yang cocok untuk diganti",
+                            text = "Found ${matches.size} textures that match, ready to replace",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -221,7 +221,7 @@ fun AutoReplaceConfirmationSheet(
                                     )
                                     val parentName = replacementFile.parentFile?.name ?: ""
                                     Text(
-                                        text = if (parentName.isNotBlank()) "📁 $parentName" else "File Mod",
+                                        text = if (parentName.isNotBlank()) "📁 $parentName" else "Mod File",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
@@ -256,7 +256,7 @@ fun AutoReplaceConfirmationSheet(
                             .height(48.dp)
                     ) {
                         Text(
-                            text = "Batal",
+                            text = "Cancel",
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -273,7 +273,7 @@ fun AutoReplaceConfirmationSheet(
                             .height(48.dp)
                     ) {
                         Text(
-                            text = "Ganti Sekarang (${matches.size})",
+                            text = "Replace Now (${matches.size})",
                             fontWeight = FontWeight.Bold
                         )
                     }

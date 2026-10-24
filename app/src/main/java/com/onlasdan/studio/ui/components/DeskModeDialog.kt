@@ -145,7 +145,7 @@ fun DeskModeDialog(
                     )
 
                     Text(
-                        text = activeProcess.message ?: "Memproses operasi berkas...",
+                        text = activeProcess.message ?: "Processing files...",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.5f),
                         maxLines = 1
@@ -160,7 +160,7 @@ fun DeskModeDialog(
                     }
                 } else {
                     Text(
-                        text = "Tidak ada proses aktif yang berjalan",
+                        text = "No process running",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White.copy(alpha = 0.4f)
                     )
@@ -179,7 +179,7 @@ fun DeskModeDialog(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "Mode Meja Aktif • 100% Core CPU • Anti-Sleep",
+                        text = "Desk Mode Active • 100% CPU • Anti-Sleep",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White.copy(alpha = 0.35f)
                     )
@@ -200,7 +200,7 @@ fun DeskModeDialog(
                     .height(44.dp)
             ) {
                 Text(
-                    text = "Kembali ke Tampilan Normal",
+                    text = "Back to Normal View",
                     style = MaterialTheme.typography.labelMedium
                 )
             }

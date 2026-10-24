@@ -107,7 +107,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
     // Stage protected files locally (same pattern as the texdb browser).
     LaunchedEffect(sourcePath) {
         if (sourcePath == null) {
-            error = "Berkas DFF tidak diberikan"
+            error = "DFF file not provided"
             return@LaunchedEffect
         }
         val src = File(sourcePath)
@@ -115,7 +115,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
             localPath = sourcePath
             return@LaunchedEffect
         }
-        busyText = "Menyalin DFF via Shizuku…"
+        busyText = "Copying DFF via Shizuku…"
         val dest = File(context.cacheDir, "dff_stage/${src.name}")
         dest.parentFile?.mkdirs()
         val (code, _) = withContext(Dispatchers.IO) {
@@ -126,7 +126,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
             localPath = dest.absolutePath
             originalPath = sourcePath
         } else {
-            error = "Gagal menyalin DFF via Shizuku (kode $code)"
+            error = "Copy DFF via Shizuku failed (code $code)"
         }
     }
 
@@ -134,7 +134,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
         val path = localPath ?: return@LaunchedEffect
         val result = withContext(Dispatchers.IO) { NativeCore.dffInspect(path) }
         when {
-            result == null -> error = "Engine Rust tidak tersedia"
+            result == null -> error = "Rust engine unavailable"
             result.startsWith("OK") -> {
                 val text = result.removePrefix("OK\n")
                 report = text
@@ -153,14 +153,14 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
     fun applyToOriginal() {
         val from = localPath ?: return
         val to = originalPath ?: return
-        busyText = "Menerapkan ke lokasi asli…"
+        busyText = "Applying to source location…"
         scope.launch {
             val (code, _) = withContext(Dispatchers.IO) {
                 ShizukuManager.exec("cp \"$from\" \"$to\"")
             }
             busyText = null
-            if (code == 0) toast("DFF diterapkan ke lokasi asli")
-            else toast("Gagal menerapkan (kode $code)")
+            if (code == 0) toast("DFF applied to source location")
+            else toast("Apply failed (code $code)")
         }
     }
 
@@ -170,7 +170,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
         isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
         onShizukuClick = {
             if (!ShizukuManager.isShizukuAvailable()) {
-                toast("Shizuku service tidak terdeteksi.")
+                toast("Shizuku service not detected.")
             } else if (!ShizukuManager.hasPermission()) {
                 ShizukuManager.requestPermission()
             }
@@ -197,7 +197,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 108.dp)
         ) {
             when {
-                error != null -> Text("Tidak bisa memeriksa DFF: $error")
+                error != null -> Text("Can't inspect DFF: $error")
                 report == null -> CircularProgressIndicator()
                 else -> {
                     Text(
@@ -206,7 +206,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Tekstur dirujuk (${textures.size}) — ketuk untuk mengganti nama di dalam DFF:",
+                        "Referenced textures (${textures.size}) - tap to rename inside the DFF:",
                         fontWeight = FontWeight.SemiBold
                     )
                     textures.forEach { name ->
@@ -217,7 +217,7 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
                         HorizontalDivider()
                     }
                     Text(
-                        "Penggantian nama membuat cadangan utuh <nama>.dff.bak di samping berkas (sekali, versi asli).",
+                        "Renaming keeps a full <name>.dff.bak backup next to the file (one-time, original).",
                         modifier = Modifier.padding(top = 12.dp)
                     )
                 }
@@ -231,27 +231,27 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
 
     renameTarget?.let { old ->
         InputSheet(
-            title = "Ganti Nama Tekstur di DFF",
-            label = "Nama baru untuk '$old'",
+            title = "Rename Texture in DFF",
+            label = "New name for '$old'",
             initial = old,
             onDismissRequest = { renameTarget = null },
             onConfirm = { newName ->
                 val path = localPath
                 renameTarget = null
                 if (newName != old && path != null) {
-                    busyText = "Mengganti nama di DFF…"
+                    busyText = "Renaming inside DFF…"
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             NativeCore.dffRenameTexture(path, old, newName)
                         }
                         busyText = null
                         when {
-                            result == null -> toast("Engine Rust tidak tersedia")
+                            result == null -> toast("Rust engine unavailable")
                             result.startsWith("OK") -> {
-                                toast("Diganti: $old → $newName")
+                                toast("Renamed: $old -> $newName")
                                 tick++
                             }
-                            else -> toast("Gagal: ${result.removePrefix("ERROR ")}")
+                            else -> toast("Failed: ${result.removePrefix("ERROR ")}")
                         }
                     }
                 }

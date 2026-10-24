@@ -54,7 +54,7 @@ class JobEngineImpl(
                 return@withContext JobResult(
                     id = request.id,
                     success = false,
-                    message = "Dibatalkan oleh pengguna"
+                    message = "Cancelled by user"
                 )
             }
 
@@ -69,20 +69,20 @@ class JobEngineImpl(
                 else -> JobResult(
                     id = request.id,
                     success = false,
-                    message = "Tipe pekerjaan '${request.type}' tidak didukung"
+                    message = "Job type '${request.type}' is not supported"
                 )
             }
         } catch (e: CancellationException) {
             JobResult(
                 id = request.id,
                 success = false,
-                message = "Dibatalkan oleh pengguna"
+                message = "Cancelled by user"
             )
         } catch (e: Throwable) {
             JobResult(
                 id = request.id,
                 success = false,
-                message = e.localizedMessage ?: e.message ?: "Terjadi kesalahan internal saat memproses berkas"
+                message = e.localizedMessage ?: e.message ?: "Internal error while processing files"
             )
         } finally {
             cancelledJobIds.remove(request.id)
@@ -107,7 +107,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Berkas IMG tidak ditemukan: ${targetFile.absolutePath}"
+                message = "IMG archive not found: ${targetFile.absolutePath}"
             )
         }
 
@@ -120,11 +120,11 @@ class JobEngineImpl(
             // longer opens the archive separately just to read them.
             val lines = com.onlasdan.studio.core.NativeCore.imgRebuild(
                 targetFile.absolutePath, null
-            ) ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+            ) ?: throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
             val header = lines.firstOrNull()?.split('\t', limit = 5)
                 ?: throw IOException("Engine Rust mengembalikan daftar kosong")
             if (header[0] == "ERROR") {
-                throw IOException(header.getOrNull(1) ?: "Rebuild gagal")
+                throw IOException(header.getOrNull(1) ?: "Rebuild failed")
             }
             val version = if (header.getOrNull(1) == "VER1") ImgVersion.VER1 else ImgVersion.VER2
             val total = header.getOrNull(2)?.toIntOrNull() ?: 0
@@ -138,21 +138,21 @@ class JobEngineImpl(
                     currentItem = 0,
                     totalItems = total,
                     status = "RUNNING",
-                    message = "Menyusun ulang sektor via engine Rust..."
+                    message = "Rebuilding sectors via Rust engine..."
                 )
             )
 
-            if (isCancelled(request.id)) throw CancellationException("Dibatalkan oleh pengguna")
+            if (isCancelled(request.id)) throw CancellationException("Cancelled by user")
 
             // Sinkronisasi Shizuku jika path tujuan disediakan
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
                 val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
-                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
+                if (!copied) throw IOException("Failed to copy archive file to Shizuku destination: $dest")
                 if (version == ImgVersion.VER1 && dirFile != null) {
                     val dirDest = dest.substringBeforeLast(".") + ".dir"
                     val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
-                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
+                    if (!dirCopied) throw IOException("Failed to copy .dir file to Shizuku destination: $dirDest")
                 }
             }
 
@@ -164,22 +164,22 @@ class JobEngineImpl(
                     currentItem = total,
                     totalItems = total,
                     status = "COMPLETED",
-                    message = "Rebuild arsip selesai!"
+                    message = "Archive rebuild complete!"
                 )
             )
 
             JobResult(
                 id = request.id,
                 success = true,
-                message = "Arsip berhasil direbuild dan dirapikan",
+                message = "Archive rebuilt and defragmented",
                 outputFiles = listOf(targetFile.absolutePath)
             )
         } catch (e: CancellationException) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "CANCELLED")
-            JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
+            JobResult(id = request.id, success = false, message = "Cancelled by user")
         } catch (e: Exception) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "FAILED")
-            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Rebuild gagal")
+            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Rebuild failed")
         } finally {
             lockHandle.release()
         }
@@ -200,7 +200,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Berkas target tidak ditemukan: ${targetFile.absolutePath}"
+                message = "Target file not found: ${targetFile.absolutePath}"
             )
         }
 
@@ -241,7 +241,7 @@ class JobEngineImpl(
         return try {
             for ((idx, entry) in textures.withIndex()) {
                 if (isCancelled(request.id)) {
-                    throw CancellationException("Dibatalkan oleh pengguna")
+                    throw CancellationException("Cancelled by user")
                 }
 
                 val bmp = entry.bitmap
@@ -267,7 +267,7 @@ class JobEngineImpl(
                         totalItems = total,
                         status = "RUNNING",
                         currentItemName = entry.name,
-                        message = "Mengekspor ${entry.name}.png ($current / $total)"
+                        message = "Exporting ${entry.name}.png ($current / $total)"
                     )
                 )
                 CheckpointManager.updateCheckpoint(request.id, request.targetPath, current)
@@ -277,15 +277,15 @@ class JobEngineImpl(
             JobResult(
                 id = request.id,
                 success = true,
-                message = "Berhasil mengekstrak ${exportedPaths.size} tekstur",
+                message = "Exported ${exportedPaths.size} textures",
                 outputFiles = exportedPaths
             )
         } catch (e: CancellationException) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, exportedPaths.size, status = "CANCELLED")
-            JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
+            JobResult(id = request.id, success = false, message = "Cancelled by user")
         } catch (e: Exception) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, exportedPaths.size, status = "FAILED")
-            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Ekspor TXD gagal")
+            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "TXD export failed")
         }
     }
 
@@ -311,7 +311,7 @@ class JobEngineImpl(
         return try {
             for ((idx, entry) in entries.withIndex()) {
                 if (isCancelled(request.id)) {
-                    throw CancellationException("Dibatalkan oleh pengguna")
+                    throw CancellationException("Cancelled by user")
                 }
 
                 val outEntry = File(destDir, entry.cleanName)
@@ -331,7 +331,7 @@ class JobEngineImpl(
                         totalItems = total,
                         status = "RUNNING",
                         currentItemName = entry.cleanName,
-                        message = "Mengekstrak ${entry.cleanName} ($current / $total)"
+                        message = "Extracting ${entry.cleanName} ($current / $total)"
                     )
                 )
                 CheckpointManager.updateCheckpoint(request.id, request.targetPath, current)
@@ -341,15 +341,15 @@ class JobEngineImpl(
             JobResult(
                 id = request.id,
                 success = true,
-                message = "Berhasil mengekstrak ${exportedPaths.size} berkas",
+                message = "Extracted ${exportedPaths.size} files",
                 outputFiles = exportedPaths
             )
         } catch (e: CancellationException) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, exportedPaths.size, status = "CANCELLED")
-            JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
+            JobResult(id = request.id, success = false, message = "Cancelled by user")
         } catch (e: Exception) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, exportedPaths.size, status = "FAILED")
-            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Ekspor IMG gagal")
+            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "IMG export failed")
         }
     }
 
@@ -367,7 +367,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Berkas arsip tidak ditemukan: ${targetFile.absolutePath}"
+                message = "Archive file not found: ${targetFile.absolutePath}"
             )
         }
 
@@ -376,7 +376,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Tidak ada berkas sumber yang dipilih untuk ditambahkan"
+                message = "No source file picked to add"
             )
         }
 
@@ -413,10 +413,10 @@ class JobEngineImpl(
 
             for ((idx, srcFile) in sourceFiles.withIndex()) {
                 if (isCancelled(request.id)) {
-                    throw CancellationException("Dibatalkan oleh pengguna")
+                    throw CancellationException("Cancelled by user")
                 }
                 if (!srcFile.exists()) {
-                    throw IOException("Berkas sumber tidak ditemukan: ${srcFile.absolutePath}")
+                    throw IOException("Source file not found: ${srcFile.absolutePath}")
                 }
 
                 val requestedName = request.entryNames.getOrNull(idx) ?: srcFile.name
@@ -438,28 +438,28 @@ class JobEngineImpl(
                         totalItems = total,
                         status = "RUNNING",
                         currentItemName = cleanName,
-                        message = "Menambahkan $cleanName ($current / $total)"
+                        message = "Adding $cleanName ($current / $total)"
                     )
                 )
                 CheckpointManager.updateCheckpoint(request.id, request.targetPath, current)
             }
 
             val replaced = SafeFileWriter.atomicReplace(tmpFile, targetFile)
-            if (!replaced) throw IOException("Gagal mengganti berkas arsip secara atomik")
+            if (!replaced) throw IOException("Failed to atomically swap archive file")
             if (tmpDirFile != null && dirFile != null) {
                 if (!SafeFileWriter.atomicReplace(tmpDirFile, dirFile)) {
-                    throw IOException("Gagal mengganti berkas .dir secara atomik")
+                    throw IOException("Failed to atomically swap .dir file")
                 }
             }
 
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
                 val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
-                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
+                if (!copied) throw IOException("Failed to copy archive file to Shizuku destination: $dest")
                 if (!isV2 && dirFile != null) {
                     val dirDest = dest.substringBeforeLast(".") + ".dir"
                     val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
-                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
+                    if (!dirCopied) throw IOException("Failed to copy .dir file to Shizuku destination: $dirDest")
                 }
             }
 
@@ -468,15 +468,15 @@ class JobEngineImpl(
             JobResult(
                 id = request.id,
                 success = true,
-                message = "Berhasil menambahkan $total berkas ke arsip",
+                message = "Added $total files to the archive",
                 outputFiles = listOf(targetFile.absolutePath)
             )
         } catch (e: CancellationException) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "CANCELLED")
-            JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
+            JobResult(id = request.id, success = false, message = "Cancelled by user")
         } catch (e: Exception) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "FAILED")
-            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Tambah berkas gagal")
+            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Add files failed")
         } finally {
             if (!isSuccess) {
                 SafeFileWriter.cleanupFile(tmpFile)
@@ -499,7 +499,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Berkas arsip tidak ditemukan: ${targetFile.absolutePath}"
+                message = "Archive file not found: ${targetFile.absolutePath}"
             )
         }
 
@@ -508,7 +508,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Tidak ada berkas pengganti yang dipilih"
+                message = "No replacement file picked"
             )
         }
 
@@ -545,10 +545,10 @@ class JobEngineImpl(
 
             for ((idx, srcFile) in sourceFiles.withIndex()) {
                 if (isCancelled(request.id)) {
-                    throw CancellationException("Dibatalkan oleh pengguna")
+                    throw CancellationException("Cancelled by user")
                 }
                 if (!srcFile.exists()) {
-                    throw IOException("Berkas sumber tidak ditemukan: ${srcFile.absolutePath}")
+                    throw IOException("Source file not found: ${srcFile.absolutePath}")
                 }
 
                 val requestedName = request.entryNames.getOrNull(idx) ?: srcFile.name
@@ -561,7 +561,7 @@ class JobEngineImpl(
                     if (request.parameters["add_if_missing"] == "true") {
                         archive.add(srcFile, cleanName)
                     } else {
-                        throw IllegalArgumentException("Entri '$cleanName' tidak ditemukan dalam arsip")
+                        throw IllegalArgumentException("Entry '$cleanName' not found in the archive")
                     }
                 }
 
@@ -574,28 +574,28 @@ class JobEngineImpl(
                         totalItems = total,
                         status = "RUNNING",
                         currentItemName = cleanName,
-                        message = "Mengganti $cleanName ($current / $total)"
+                        message = "Replacing $cleanName ($current / $total)"
                     )
                 )
                 CheckpointManager.updateCheckpoint(request.id, request.targetPath, current)
             }
 
             val replaced = SafeFileWriter.atomicReplace(tmpFile, targetFile)
-            if (!replaced) throw IOException("Gagal mengganti berkas arsip secara atomik")
+            if (!replaced) throw IOException("Failed to atomically swap archive file")
             if (tmpDirFile != null && dirFile != null) {
                 if (!SafeFileWriter.atomicReplace(tmpDirFile, dirFile)) {
-                    throw IOException("Gagal mengganti berkas .dir secara atomik")
+                    throw IOException("Failed to atomically swap .dir file")
                 }
             }
 
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
                 val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
-                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
+                if (!copied) throw IOException("Failed to copy archive file to Shizuku destination: $dest")
                 if (!isV2 && dirFile != null) {
                     val dirDest = dest.substringBeforeLast(".") + ".dir"
                     val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
-                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
+                    if (!dirCopied) throw IOException("Failed to copy .dir file to Shizuku destination: $dirDest")
                 }
             }
 
@@ -604,15 +604,15 @@ class JobEngineImpl(
             JobResult(
                 id = request.id,
                 success = true,
-                message = "Berhasil mengganti $total berkas dalam arsip",
+                message = "Replaced $total files in the archive",
                 outputFiles = listOf(targetFile.absolutePath)
             )
         } catch (e: CancellationException) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "CANCELLED")
-            JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
+            JobResult(id = request.id, success = false, message = "Cancelled by user")
         } catch (e: Exception) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "FAILED")
-            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Ganti berkas gagal")
+            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Replace file failed")
         } finally {
             if (!isSuccess) {
                 SafeFileWriter.cleanupFile(tmpFile)
@@ -635,7 +635,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Berkas target tidak ditemukan: ${targetFile.absolutePath}"
+                message = "Target file not found: ${targetFile.absolutePath}"
             )
         }
 
@@ -644,7 +644,7 @@ class JobEngineImpl(
             return JobResult(
                 id = request.id,
                 success = false,
-                message = "Tidak ada berkas pengganti yang valid ditemukan"
+                message = "No valid replacement file found"
             )
         }
 
@@ -688,7 +688,7 @@ class JobEngineImpl(
             for (idx in startIndex until total) {
                 val srcFile = sourceFiles[idx]
                 if (isCancelled(request.id)) {
-                    throw CancellationException("Dibatalkan oleh pengguna")
+                    throw CancellationException("Cancelled by user")
                 }
 
                 val baseName = srcFile.nameWithoutExtension
@@ -731,12 +731,12 @@ class JobEngineImpl(
                 )
                 TxdStore.replaceTextures(tmpFile, batchIndices, batchImages)
                 val moved = SafeFileWriter.atomicReplace(tmpFile, targetFile)
-                if (!moved) throw IOException("Gagal mengganti berkas TXD secara atomik")
+                if (!moved) throw IOException("Failed to atomically swap TXD file")
 
                 if (request.isShizuku && shizukuBridge != null) {
                     val dest = request.destinationPath ?: request.targetPath
                     val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
-                    if (!copied) throw IOException("Gagal menyalin berkas TXD ke lokasi tujuan Shizuku: $dest")
+                    if (!copied) throw IOException("Failed to copy TXD file to Shizuku destination: $dest")
                 }
             }
 
@@ -745,17 +745,17 @@ class JobEngineImpl(
             JobResult(
                 id = request.id,
                 success = true,
-                message = "Berhasil mengganti $replacedCount tekstur dalam berkas TXD",
+                message = "Replaced $replacedCount textures in the TXD file",
                 outputFiles = listOf(targetFile.absolutePath)
             )
         } catch (e: CancellationException) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "CANCELLED")
-            JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
+            JobResult(id = request.id, success = false, message = "Cancelled by user")
         } catch (e: Exception) {
             val isInterrupted = e.message?.contains("timeout", ignoreCase = true) == true
             val status = if (isInterrupted) "INTERRUPTED" else "FAILED"
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = status)
-            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Auto Replace TXD gagal")
+            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Auto Replace TXD failed")
         } finally {
             if (!isSuccess && !CheckpointManager.hasIncompleteCheckpoint(request.targetPath)) {
                 SafeFileWriter.cleanupFile(tmpFile)
@@ -816,7 +816,7 @@ class JobEngineImpl(
             for (idx in startIndex until total) {
                 val srcFile = sourceFiles[idx]
                 if (isCancelled(request.id)) {
-                    throw CancellationException("Dibatalkan oleh pengguna")
+                    throw CancellationException("Cancelled by user")
                 }
 
                 val cleanName = srcFile.name
@@ -846,21 +846,21 @@ class JobEngineImpl(
             }
 
             val replaced = SafeFileWriter.atomicReplace(tmpFile, targetFile)
-            if (!replaced) throw IOException("Gagal mengganti berkas arsip secara atomik")
+            if (!replaced) throw IOException("Failed to atomically swap archive file")
             if (tmpDirFile != null && dirFile != null) {
                 if (!SafeFileWriter.atomicReplace(tmpDirFile, dirFile)) {
-                    throw IOException("Gagal mengganti berkas .dir secara atomik")
+                    throw IOException("Failed to atomically swap .dir file")
                 }
             }
 
             if (request.isShizuku && shizukuBridge != null) {
                 val dest = request.destinationPath ?: request.targetPath
                 val copied = shizukuBridge.copy(targetFile.absolutePath, dest)
-                if (!copied) throw IOException("Gagal menyalin berkas arsip ke lokasi tujuan Shizuku: $dest")
+                if (!copied) throw IOException("Failed to copy archive file to Shizuku destination: $dest")
                 if (!isV2 && dirFile != null) {
                     val dirDest = dest.substringBeforeLast(".") + ".dir"
                     val dirCopied = shizukuBridge.copy(dirFile.absolutePath, dirDest)
-                    if (!dirCopied) throw IOException("Gagal menyalin berkas .dir ke lokasi tujuan Shizuku: $dirDest")
+                    if (!dirCopied) throw IOException("Failed to copy .dir file to Shizuku destination: $dirDest")
                 }
             }
 
@@ -869,17 +869,17 @@ class JobEngineImpl(
             JobResult(
                 id = request.id,
                 success = true,
-                message = "Berhasil mengganti $replacedCount berkas dalam arsip IMG",
+                message = "Replaced $replacedCount files in the IMG archive",
                 outputFiles = listOf(targetFile.absolutePath)
             )
         } catch (e: CancellationException) {
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = "CANCELLED")
-            JobResult(id = request.id, success = false, message = "Dibatalkan oleh pengguna")
+            JobResult(id = request.id, success = false, message = "Cancelled by user")
         } catch (e: Exception) {
             val isInterrupted = e.message?.contains("timeout", ignoreCase = true) == true
             val status = if (isInterrupted) "INTERRUPTED" else "FAILED"
             CheckpointManager.updateCheckpoint(request.id, request.targetPath, 0, status = status)
-            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Auto Replace IMG gagal")
+            JobResult(id = request.id, success = false, message = e.localizedMessage ?: "Auto Replace IMG failed")
         } finally {
             if (!isSuccess && !CheckpointManager.hasIncompleteCheckpoint(request.targetPath)) {
                 SafeFileWriter.cleanupFile(tmpFile)

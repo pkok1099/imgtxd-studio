@@ -102,7 +102,7 @@ data class TextureImportOptions(
 /** Name-conflict policies for texture import (TXD Tool's Import Wizard). */
 object TextureNames {
     enum class ConflictPolicy(val label: String) {
-        JUST_ADD("Tambah Saja"),
+        JUST_ADD("Add Only"),
         OVERWRITE("Timpa")
     }
 }

@@ -59,7 +59,7 @@ fun ConfirmSheet(
     title: String,
     message: String,
     confirmLabel: String = "Ya",
-    dismissLabel: String? = "Batal",
+    dismissLabel: String? = "Cancel",
     danger: Boolean = false,
     onDismissRequest: () -> Unit,
     onConfirm: () -> Unit
@@ -109,7 +109,7 @@ fun MessageSheet(
     title: String,
     message: String,
     monospace: Boolean = false,
-    closeLabel: String = "Tutup",
+    closeLabel: String = "Close",
     onDismissRequest: () -> Unit
 ) {
     FloatingSheet(onDismissRequest = onDismissRequest) {
@@ -288,7 +288,7 @@ fun InputSheet(
     title: String,
     label: String,
     initial: String,
-    confirmLabel: String = "Simpan",
+    confirmLabel: String = "Save",
     onDismissRequest: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
@@ -309,7 +309,7 @@ fun InputSheet(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onDismissRequest) { Text("Batal") }
+            TextButton(onClick = onDismissRequest) { Text("Cancel") }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = { onConfirm(value.trim()) },
@@ -339,7 +339,7 @@ fun BusySheet(text: String) {
             Spacer(modifier = Modifier.width(16.dp))
             Column {
                 Text(
-                    text = "Memproses",
+                    text = "Processing",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )

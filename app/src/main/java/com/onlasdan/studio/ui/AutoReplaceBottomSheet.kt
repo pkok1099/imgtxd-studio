@@ -94,7 +94,7 @@ fun AutoReplaceBottomSheet(
                         AutoReplaceModeItem(
                             icon = Icons.Outlined.FolderOpen,
                             title = "Scan Folder (Auto)",
-                            subtitle = "Periksa seluruh gambar di dalam direktori folder mod",
+                            subtitle = "Look through all images in the mod folder",
                             onClick = {
                                 onDismissRequest()
                                 onSelectFolder()
@@ -104,7 +104,7 @@ fun AutoReplaceBottomSheet(
                         AutoReplaceModeItem(
                             icon = Icons.Outlined.PhotoLibrary,
                             title = "Select Image Files",
-                            subtitle = "Pilih file gambar mod secara spesifik untuk dicocokkan",
+                            subtitle = "Pick specific mod images to match",
                             onClick = {
                                 onDismissRequest()
                                 onSelectMultiFiles()
@@ -122,7 +122,7 @@ fun AutoReplaceBottomSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "File gambar yang memiliki nama sama dengan tekstur di TXD (contoh: cj_face.png) akan otomatis dideteksi dan diminta konfirmasi sebelum diganti.",
+                    text = "Image files whose name matches a texture in the TXD (e.g. cj_face.png) are matched automatically, with a confirmation before replacing.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(14.dp)

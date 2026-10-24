@@ -18,15 +18,15 @@ import java.io.File
 enum class WindowMode(val title: String, val description: String) {
     PER_FEATURE(
         title = "Per Fitur (Default)",
-        description = "Maksimal 1 jendela IMG dan 1 jendela TXD. File baru menggunakan ulang jendela yang ada. IMG dan TXD bisa berdampingan sebagai dua kartu di Recent Apps."
+        description = "At most 1 IMG window and 1 TXD window. New files reuse the existing window. IMG and TXD sit side by side as two cards in Recent Apps."
     ),
     PER_FILE(
         title = "Per File",
-        description = "Setiap file dibuka di jendela tersendiri (banyak kartu dokumen di Recent Apps seperti tab browser)."
+        description = "Each file opens in its own window (multiple document cards in Recent Apps, like browser tabs)."
     ),
     SINGLE_WINDOW(
-        title = "Jendela Tunggal",
-        description = "Semua file dan tekstur dibuka di dalam satu jendela aplikasi yang sama (perilaku klasik)."
+        title = "Single Window",
+        description = "All files and textures open inside the same app window (classic behavior)."
     )
 }
 

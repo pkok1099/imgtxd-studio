@@ -84,7 +84,7 @@ fun QuickMenuBottomSheet(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Aksi cepat & manajemen arsip game",
+                        text = "Quick actions & game archive management",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -94,7 +94,7 @@ fun QuickMenuBottomSheet(
             // Group: NAVIGASI & BERKAS
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "NAVIGASI & BERKAS",
+                    text = "NAVIGATION & FILES",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -108,7 +108,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.FolderOpen,
                             title = "Open IMG Archive",
-                            subtitle = "Pilih berkas arsip .img dari penyimpanan",
+                            subtitle = "Pick an .img archive file from storage",
                             onClick = {
                                 onDismissRequest()
                                 onOpenArchive()
@@ -118,7 +118,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.Layers,
                             title = "Texdb",
-                            subtitle = "Telusuri & edit cache tekstur GTA (texdb) — pilih FOLDER cache-nya",
+                            subtitle = "Browse and edit GTA texture caches (texdb) - pick the cache FOLDER",
                             onClick = {
                                 onDismissRequest()
                                 onOpenTexdbCache()
@@ -128,7 +128,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.ViewInAr,
                             title = "Inspect DFF",
-                            subtitle = "Laporan struktur model (versi RW, geometri, tekstur) + ganti nama tekstur di dalam DFF",
+                            subtitle = "Model structure report (RW version, geometry, textures) + rename textures inside DFF",
                             onClick = {
                                 onDismissRequest()
                                 onInspectDff()
@@ -138,7 +138,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.Checklist,
                             title = "Game Texture Audit",
-                            subtitle = "Cari tekstur hilang & tak terpakai di seluruh folder game (DFF vs cache texdb)",
+                            subtitle = "Find missing & unused textures across the game folder (DFF vs texdb cache)",
                             onClick = {
                                 onDismissRequest()
                                 onGameAudit()
@@ -148,7 +148,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.FileCopy,
                             title = "Paste Mod Data Lines",
-                            subtitle = "Tempel baris handling.cfg / vehicles.ide / carcols.dat dari readme mod ke berkas game",
+                            subtitle = "Paste handling.cfg / vehicles.ide / carcols.dat lines from a mod's readme into the game file",
                             onClick = {
                                 onDismissRequest()
                                 onDataLines()
@@ -158,7 +158,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.Audiotrack,
                             title = "Fix SA Audio (.osw)",
-                            subtitle = "Buat ulang file .idx untuk arsip audio .osw hasil modifikasi",
+                            subtitle = "Rebuild the .idx for a modified .osw audio archive",
                             onClick = {
                                 onDismissRequest()
                                 onFixAudio()
@@ -168,7 +168,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.FileCopy,
                             title = "Export from Multiple TXDs",
-                            subtitle = "Ekspor semua tekstur dari beberapa berkas .txd sekaligus",
+                            subtitle = "Export all textures from multiple .txd files at once",
                             onClick = {
                                 onDismissRequest()
                                 onExportMultipleTxd()
@@ -182,7 +182,7 @@ fun QuickMenuBottomSheet(
             if (hasActiveArchive) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "OPERASI ARSIP",
+                        text = "ARCHIVE OPERATIONS",
                         style = SectionHeaderStyle,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -196,7 +196,7 @@ fun QuickMenuBottomSheet(
                             QuickMenuItem(
                                 icon = Icons.Outlined.Add,
                                 title = "Add New File",
-                                subtitle = "Tambahkan entri .dff, .txd, dll ke arsip",
+                                subtitle = "Add .dff, .txd, etc. entries to the archive",
                                 onClick = {
                                     onDismissRequest()
                                     onAddFile()
@@ -206,7 +206,7 @@ fun QuickMenuBottomSheet(
                             QuickMenuItem(
                                 icon = Icons.Outlined.Checklist,
                                 title = "Select All Files",
-                                subtitle = "Aktifkan seleksi ke semua entri arsip",
+                                subtitle = "Select all archive entries",
                                 onClick = {
                                     onDismissRequest()
                                     onSelectAll()
@@ -226,7 +226,7 @@ fun QuickMenuBottomSheet(
                             QuickMenuItem(
                                 icon = Icons.Outlined.Build,
                                 title = "Rebuild Archive",
-                                subtitle = "Susun ulang sektor entri dan hemat ruang",
+                                subtitle = "Re-sequence entry sectors and save space",
                                 onClick = {
                                     onDismissRequest()
                                     onRebuildArchive()
@@ -240,7 +240,7 @@ fun QuickMenuBottomSheet(
             // Group: SISTEM & PENGATURAN
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "SISTEM & PENGATURAN",
+                    text = "SYSTEM & SETTINGS",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -272,13 +272,13 @@ fun QuickMenuBottomSheet(
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Status Akses Shizuku",
+                                    text = "Shizuku Access Status",
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (isShizukuActive) "Akses penuh Android/data aktif" else "Akses Android/data belum diizinkan",
+                                    text = if (isShizukuActive) "Full Android/data access active" else "Android/data access not granted yet",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -303,7 +303,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.Settings,
                             title = "Settings",
-                            subtitle = "Mode jendela (multi-window) & info tema",
+                            subtitle = "Window mode (multi-window) & theme info",
                             onClick = {
                                 onDismissRequest()
                                 onOpenSettings()
@@ -316,7 +316,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.History,
                             title = "Operations History",
-                            subtitle = "Hasil ekspor, rebuild, dan operasi latar terakhir",
+                            subtitle = "Latest export, rebuild, and background op results",
                             onClick = {
                                 onDismissRequest()
                                 onOpenHistory()

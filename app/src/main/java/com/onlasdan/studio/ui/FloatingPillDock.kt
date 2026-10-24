@@ -141,11 +141,11 @@ fun FloatingPillDock(
                             ) {
                                 Icon(
                                     Icons.Outlined.Delete,
-                                    contentDescription = "Hapus terpilih",
+                                    contentDescription = "Delete Selected",
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(Modifier.width(4.dp))
-                                Text("Hapus", style = MaterialTheme.typography.labelMedium)
+                                Text("Delete", style = MaterialTheme.typography.labelMedium)
                             }
 
                             IconButton(

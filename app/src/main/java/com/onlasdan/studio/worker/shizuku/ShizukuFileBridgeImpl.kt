@@ -20,7 +20,7 @@ class ShizukuDisconnectedException(
     cause: Throwable? = null
 ) : IOException(message, cause) {
     companion object {
-        const val DEFAULT_MESSAGE = "Layanan Shizuku terputus saat proses berlangsung. Berkas dipulihkan ke kondisi awal."
+        const val DEFAULT_MESSAGE = "Shizuku service disconnected mid-process. File restored to its previous state."
     }
 }
 
@@ -72,7 +72,7 @@ class ShizukuFileBridgeImpl(
                 throw ShizukuDisconnectedException(ShizukuDisconnectedException.DEFAULT_MESSAGE, unwrapped)
             }
             if (unwrapped is IOException) throw unwrapped
-            throw IOException("Gagal membuka aliran baca untuk berkas $path: ${unwrapped.message}", unwrapped)
+            throw IOException("Failed to open input stream for file $path: ${unwrapped.message}", unwrapped)
         }
     }
 
@@ -96,7 +96,7 @@ class ShizukuFileBridgeImpl(
 
             // Restricted path requires active Shizuku
             if (!WorkerShizukuManager.isShizukuReady()) {
-                throw IOException("Shizuku diperlukan untuk jalur berkas yang dibatasi: $path tetapi tidak siap.")
+                throw IOException("Shizuku is required for the restricted path: $path but it isn't ready.")
             }
 
             // Ensure parent directory exists via Shizuku shell
@@ -104,7 +104,7 @@ class ShizukuFileBridgeImpl(
             if (!parentPath.isNullOrEmpty()) {
                 val (mkdirExit, mkdirErr) = WorkerShizukuManager.exec("mkdir -p ${shellQuote(parentPath)}")
                 if (mkdirExit != 0) {
-                    throw IOException("Gagal membuat direktori induk $parentPath: $mkdirErr")
+                    throw IOException("Failed to create parent directory $parentPath: $mkdirErr")
                 }
             }
 
@@ -126,7 +126,7 @@ class ShizukuFileBridgeImpl(
                 throw ShizukuDisconnectedException(ShizukuDisconnectedException.DEFAULT_MESSAGE, unwrapped)
             }
             if (unwrapped is IOException) throw unwrapped
-            throw IOException("Gagal membuka aliran tulis untuk berkas $path: ${unwrapped.message}", unwrapped)
+            throw IOException("Failed to open output stream for file $path: ${unwrapped.message}", unwrapped)
         }
     }
 
@@ -290,7 +290,7 @@ class ShizukuFileBridgeImpl(
                     )
                 }
                 if (unwrapped is IOException) throw unwrapped
-                throw IOException("Error saat membaca aliran Shizuku: ${unwrapped.message}", unwrapped)
+                throw IOException("Error reading Shizuku stream: ${unwrapped.message}", unwrapped)
             }
         }
 
@@ -348,7 +348,7 @@ class ShizukuFileBridgeImpl(
                     )
                 }
                 if (unwrapped is IOException) throw unwrapped
-                throw IOException("Error saat menulis ke aliran Shizuku: ${unwrapped.message}", unwrapped)
+                throw IOException("Error writing to Shizuku stream: ${unwrapped.message}", unwrapped)
             }
         }
 
@@ -370,7 +370,7 @@ class ShizukuFileBridgeImpl(
                         if (!WorkerShizukuManager.isShizukuAvailable()) {
                             throw ShizukuDisconnectedException(ShizukuDisconnectedException.DEFAULT_MESSAGE)
                         }
-                        throw IOException("Proses penulisan Shizuku ke $targetPath berakhir dengan kode keluar $exitCode")
+                        throw IOException("Shizuku write process to $targetPath exited with code $exitCode")
                     }
                 } catch (e: Throwable) {
                     val unwrapped = WorkerShizukuManager.unwrapException(e)
@@ -381,7 +381,7 @@ class ShizukuFileBridgeImpl(
                         )
                     }
                     if (unwrapped is IOException) throw unwrapped
-                    throw IOException("Gagal menutup aliran penulisan Shizuku ke $targetPath: ${unwrapped.message}", unwrapped)
+                    throw IOException("Failed to close Shizuku output stream to $targetPath: ${unwrapped.message}", unwrapped)
                 } finally {
                     try {
                         process.destroy()

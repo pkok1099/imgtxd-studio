@@ -57,7 +57,7 @@ class TxdEditorViewModel(
         parentInfo: ParentArchiveInfo? = null
     ) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, statusMessage = "Membuka file TXD...") }
+            _uiState.update { it.copy(isLoading = true, statusMessage = "Opening TXD file...") }
             try {
                 val txdFile: File
                 val name: String
@@ -71,7 +71,7 @@ class TxdEditorViewModel(
                         val ok = withContext(Dispatchers.IO) {
                             ShizukuManager.copyToLocal(filePath, temp)
                         }
-                        if (!ok) throw IOException("Gagal menyalin file dari Shizuku: $filePath")
+                        if (!ok) throw IOException("Failed to copy file from Shizuku: $filePath")
                         temp
                     } else {
                         File(filePath)
@@ -91,7 +91,7 @@ class TxdEditorViewModel(
                         effectiveOriginalPath = null
                     }
                 } else {
-                    throw IllegalArgumentException("Tidak ada path atau URI file TXD yang diberikan")
+                    throw IllegalArgumentException("No TXD path or URI given")
                 }
 
                 val parser = withContext(Dispatchers.IO) {
@@ -109,14 +109,14 @@ class TxdEditorViewModel(
                         selectedEntry = parser.entries.firstOrNull(),
                         isLoading = false,
                         hasUnsavedChanges = false,
-                        statusMessage = "Berhasil memuat ${parser.entries.size} tekstur"
+                        statusMessage = "Loaded ${parser.entries.size} textures"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "Gagal memuat TXD: ${e.localizedMessage}"
+                        errorMessage = "Failed to load TXD: ${e.localizedMessage}"
                     )
                 }
             }
@@ -138,14 +138,14 @@ class TxdEditorViewModel(
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        statusMessage = "Tekstur diekspor ke ${destinationDir.name}/${entry.name}.png"
+                        statusMessage = "Textures exported to ${destinationDir.name}/${entry.name}.png"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        errorMessage = "Gagal ekspor: ${e.localizedMessage}"
+                        errorMessage = "Export failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -174,14 +174,14 @@ class TxdEditorViewModel(
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        statusMessage = "Berhasil mengekspor $count tekstur ke ${destinationDir.name}"
+                        statusMessage = "Exported $count textures to ${destinationDir.name}"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        errorMessage = "Gagal ekspor semua: ${e.localizedMessage}"
+                        errorMessage = "Export all failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -209,14 +209,14 @@ class TxdEditorViewModel(
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        statusMessage = "Berhasil mengekspor $count tekstur ke ${destinationDir.name}"
+                        statusMessage = "Exported $count textures to ${destinationDir.name}"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        errorMessage = "Gagal ekspor tekstur: ${e.localizedMessage}"
+                        errorMessage = "Texture export failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -248,7 +248,7 @@ class TxdEditorViewModel(
                     }
 
                     val newBitmap = BitmapFactory.decodeFile(imageFile.absolutePath)
-                        ?: throw IOException("Gagal membaca gambar: ${imageFile.name}")
+                        ?: throw IOException("Failed to read image: ${imageFile.name}")
 
                     if (imageFile != File(imagePath)) {
                         imageFile.delete()
@@ -278,7 +278,7 @@ class TxdEditorViewModel(
                         )
                     } else if (isShizuku && originalPath != null) {
                         if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
-                            throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                            throw IOException("Failed to write TXD back to its source: $originalPath")
                         }
                     }
                 }
@@ -289,14 +289,14 @@ class TxdEditorViewModel(
                         isSaving = false,
                         txdEntries = reloaded,
                         selectedEntry = reloaded.getOrNull(targetEntry.sourceIndex) ?: targetEntry,
-                        statusMessage = "Tekstur ${targetEntry.name} berhasil diganti!"
+                        statusMessage = "Texture ${targetEntry.name} replaced!"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        errorMessage = "Gagal mengganti tekstur: ${e.localizedMessage}"
+                        errorMessage = "Texture replace failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -315,7 +315,7 @@ class TxdEditorViewModel(
         val isShizuku = _uiState.value.isShizuku
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSaving = true, statusMessage = "Memproses auto-replace ${matches.size} tekstur...") }
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Auto-replacing ${matches.size} textures...") }
             try {
                 var count = 0
                 withContext(Dispatchers.IO) {
@@ -361,7 +361,7 @@ class TxdEditorViewModel(
                             )
                         } else if (isShizuku && originalPath != null) {
                             if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
-                                throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                                throw IOException("Failed to write TXD back to its source: $originalPath")
                             }
                         }
                     }
@@ -372,14 +372,14 @@ class TxdEditorViewModel(
                     it.copy(
                         isSaving = false,
                         txdEntries = reloaded,
-                        statusMessage = "Berhasil mengganti $count tekstur secara otomatis!"
+                        statusMessage = "Auto-replaced $count textures!"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        errorMessage = "Gagal auto-replace: ${e.localizedMessage}"
+                        errorMessage = "Auto-replace failed: ${e.localizedMessage}"
                     )
                 }
             }
@@ -402,7 +402,7 @@ class TxdEditorViewModel(
         val isShizuku = _uiState.value.isShizuku
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSaving = true, statusMessage = "Mengimpor ${images.size} tekstur baru...") }
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Importing ${images.size} new textures...") }
             try {
                 var added = 0
                 var overwritten = 0
@@ -450,7 +450,7 @@ class TxdEditorViewModel(
                             )
                         } else if (isShizuku && originalPath != null) {
                             if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
-                                throw IOException("Gagal menulis TXD kembali ke lokasi asal: $originalPath")
+                                throw IOException("Failed to write TXD back to its source: $originalPath")
                             }
                         }
                     }
@@ -462,14 +462,14 @@ class TxdEditorViewModel(
                         isSaving = false,
                         txdEntries = updatedEntries,
                         hasUnsavedChanges = true,
-                        statusMessage = "Impor selesai: $added tekstur baru ditambahkan, $overwritten ditimpa"
+                        statusMessage = "Import done: $added new textures added, $overwritten overwritten"
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        errorMessage = "Gagal mengimpor tekstur: ${e.localizedMessage}"
+                        errorMessage = "Texture import failed: ${e.localizedMessage}"
                     )
                 }
             }

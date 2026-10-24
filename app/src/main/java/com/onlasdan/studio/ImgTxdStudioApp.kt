@@ -22,7 +22,7 @@ class ImgTxdStudioApp : Application() {
             override fun onActivityStarted(activity: Activity) {
                 startedActivityCount++
                 if (startedActivityCount == 1) {
-                    Log.d(TAG, "Aplikasi memasuki status FOREGROUND (semua core CPU diaktifkan)")
+                    Log.d(TAG, "App entered FOREGROUND (all CPU cores active)")
                     WorkerProcessRepositoryImpl.getInstance(applicationContext).setAppForegroundState(true)
                 }
             }
@@ -31,7 +31,7 @@ class ImgTxdStudioApp : Application() {
                 startedActivityCount--
                 if (startedActivityCount <= 0) {
                     startedActivityCount = 0
-                    Log.d(TAG, "Aplikasi memasuki status BACKGROUND (membatasi core CPU sesuai setelan)")
+                    Log.d(TAG, "App entered BACKGROUND (limiting CPU cores per settings)")
                     WorkerProcessRepositoryImpl.getInstance(applicationContext).setAppForegroundState(false)
                 }
             }

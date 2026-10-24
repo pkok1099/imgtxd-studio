@@ -87,17 +87,17 @@ fun AboutBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "TENTANG APLIKASI",
+                        text = "ABOUT THE APP",
                         style = SectionHeaderStyle,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "ImgTxd Studio adalah alat modifikasi arsip .img dan tekstur .txd modern untuk Android yang mendukung arsitektur RenderWare game GTA seri 3D (San Andreas, Vice City, III) dan Bully.",
+                        text = "ImgTxd Studio is a modern Android tool for editing .img archives and .txd textures, supporting the RenderWare architecture of 3D-era GTA games (San Andreas, Vice City, III) and Bully.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Dilengkapi integrasi Shizuku untuk mengakses langsung folder restricted Android/data tanpa memerlukan akses root perangkat.",
+                        text = "Includes Shizuku integration for direct access to the restricted Android/data folder without root.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -157,7 +157,7 @@ fun AboutBottomSheet(
 
             // Legal Disclaimer
             Text(
-                text = "Aplikasi ini merupakan perangkat lunak independen dan tidak terafiliasi dengan Rockstar Games, Take-Two Interactive, atau pengembang game terkait.",
+                text = "This app is an independent piece of software and is not affiliated with Rockstar Games, Take-Two Interactive, or related game developers.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,

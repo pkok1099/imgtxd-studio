@@ -104,7 +104,7 @@ class WorkerProcessRepositoryImpl private constructor(
             try {
                 service?.setAppForegroundState(isForeground)
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal mengirim setAppForegroundState", e)
+                Log.w(TAG, "Failed to send setAppForegroundState", e)
             }
         }
     }
@@ -115,13 +115,13 @@ class WorkerProcessRepositoryImpl private constructor(
             try {
                 service?.setBackgroundCoreLimit(maxCores)
             } catch (e: Exception) {
-                Log.w(TAG, "Gagal mengirim setBackgroundCoreLimit", e)
+                Log.w(TAG, "Failed to send setBackgroundCoreLimit", e)
             }
         }
     }
 
     private val deathRecipient = IBinder.DeathRecipient {
-        Log.w(TAG, "Koneksi ke WorkerService terputus tak terduga (DeathRecipient dipicu)")
+        Log.w(TAG, "Connection to WorkerService died unexpectedly (DeathRecipient fired)")
         handleServiceDied()
     }
 
@@ -152,13 +152,13 @@ class WorkerProcessRepositoryImpl private constructor(
             try {
                 binder.linkToDeath(deathRecipient, 0)
             } catch (e: RemoteException) {
-                Log.e(TAG, "Gagal mendaftarkan DeathRecipient pada service binder", e)
+                Log.e(TAG, "Failed to register DeathRecipient on service binder", e)
             }
 
             try {
                 svc.registerCallback(workerCallback)
             } catch (e: RemoteException) {
-                Log.e(TAG, "Gagal mendaftarkan IWorkerCallback ke WorkerService", e)
+                Log.e(TAG, "Failed to register IWorkerCallback with WorkerService", e)
             }
 
             // Sinkronkan antrean aktif dan status CPU core ke service
@@ -171,7 +171,7 @@ class WorkerProcessRepositoryImpl private constructor(
                         handleQueueChanged(activeJobs)
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Gagal mengambil daftar pekerjaan aktif saat tersambung", e)
+                    Log.w(TAG, "Failed to fetch active job list on connect", e)
                 }
             }
         }
@@ -202,7 +202,7 @@ class WorkerProcessRepositoryImpl private constructor(
                     _processes.update { it + orphanProcesses }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Gagal menjalankan pemulihan orphan jobs pada inisialisasi", e)
+                Log.e(TAG, "Failed to run orphan job recovery at init", e)
             }
 
             // 2. Lakukan inisiasi koneksi ke WorkerService di latar belakang
@@ -250,7 +250,7 @@ class WorkerProcessRepositoryImpl private constructor(
             }
             return@withLock (service != null)
         } catch (e: Exception) {
-            Log.e(TAG, "Gagal melakukan bind ke WorkerService", e)
+            Log.e(TAG, "Failed to bind to WorkerService", e)
             return@withLock false
         }
     }
@@ -297,16 +297,16 @@ class WorkerProcessRepositoryImpl private constructor(
                 try {
                     OrphanJobRecovery.recoverOrphanJobs(context, force = true)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Gagal menjalankan OrphanJobRecovery setelah service crash", e)
+                    Log.e(TAG, "Failed to run OrphanJobRecovery after service crash", e)
                 }
 
                 // 4. Otomatis coba re-bind setelah jeda
                 delay(1000)
                 try {
-                    Log.i(TAG, "Mencoba melakukan re-bind ke WorkerService...")
+                    Log.i(TAG, "Re-binding to WorkerService...")
                     ensureConnected()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Re-bind gagal, akan dicoba kembali saat ada permintaan berikutnya", e)
+                    Log.w(TAG, "Re-bind failed, will retry on next request", e)
                 }
             }
         }
@@ -334,7 +334,7 @@ class WorkerProcessRepositoryImpl private constructor(
                 val newProcess = AppProcess(
                     id = progress.id,
                     type = meta?.type ?: parseProcessType(progress.currentItemName),
-                    targetFile = meta?.targetFile ?: "Arsip",
+                    targetFile = meta?.targetFile ?: "Archive",
                     title = meta?.title ?: progress.currentItemName ?: "Operasi Latar Belakang",
                     progress = progress.percent,
                     current = progress.currentItem,
@@ -358,10 +358,10 @@ class WorkerProcessRepositoryImpl private constructor(
                         p.copy(
                             status = ProcessStatus.COMPLETED,
                             progress = 1f,
-                            message = result.message ?: "Selesai"
+                            message = result.message ?: "Done"
                         )
                     } else {
-                        val errMsg = result.message ?: "Gagal memproses berkas"
+                        val errMsg = result.message ?: "Failed to process files"
                         p.copy(
                             status = ProcessStatus.FAILED,
                             errorMessage = errMsg,
@@ -392,7 +392,7 @@ class WorkerProcessRepositoryImpl private constructor(
                     updatedMap[item.id] = AppProcess(
                         id = item.id,
                         type = meta?.type ?: parseProcessType(item.currentItemName),
-                        targetFile = meta?.targetFile ?: "Arsip",
+                        targetFile = meta?.targetFile ?: "Archive",
                         title = meta?.title ?: item.currentItemName ?: "Operasi Latar Belakang",
                         progress = item.percent,
                         current = item.currentItem,
@@ -474,7 +474,7 @@ class WorkerProcessRepositoryImpl private constructor(
                 current = 0,
                 total = 0,
                 status = ProcessStatus.QUEUED,
-                message = "Menunggu antrean..."
+                message = "Waiting in queue..."
             )
             _processes.update { it + placeholder }
             null
@@ -483,7 +483,7 @@ class WorkerProcessRepositoryImpl private constructor(
         if (busyProcess != null) {
             return Result.failure(
                 IllegalStateException(
-                    "Berkas '${targetFile.substringAfterLast('/')}' sedang diproses (${busyProcess.title}). Harap tunggu proses selesai terlebih dahulu."
+                    "'${targetFile.substringAfterLast('/')}' is being processed (${busyProcess.title}). Wait for it to finish first."
                 )
             )
         }
@@ -526,7 +526,7 @@ class WorkerProcessRepositoryImpl private constructor(
                 current = 0,
                 total = 0,
                 status = ProcessStatus.QUEUED,
-                message = "Menunggu antrean..."
+                message = "Waiting in queue..."
             )
             _processes.update { it + placeholder }
             null
@@ -535,7 +535,7 @@ class WorkerProcessRepositoryImpl private constructor(
         if (busyProcess != null) {
             return Result.failure(
                 IllegalStateException(
-                    "Berkas '${request.targetPath.substringAfterLast('/')}' sedang diproses (${busyProcess.title})."
+                    "'${request.targetPath.substringAfterLast('/')}' is being processed (${busyProcess.title})."
                 )
             )
         }
@@ -546,7 +546,7 @@ class WorkerProcessRepositoryImpl private constructor(
         val connected = ensureConnected()
         val svc = service
         if (!connected || svc == null) {
-            return Result.failure(IllegalStateException("WorkerService tidak dapat dihubungi"))
+            return Result.failure(IllegalStateException("WorkerService unreachable"))
         }
 
         val deferred = CompletableDeferred<JobResult>()
@@ -584,13 +584,13 @@ class WorkerProcessRepositoryImpl private constructor(
                 current = 0,
                 total = 0,
                 status = ProcessStatus.RUNNING,
-                message = "Memulai proses (in-process)..."
+                message = "Starting process (in-process)..."
             )
             _processes.update { it + initialProcess }
         } else {
             _processes.update { list ->
                 list.map {
-                    if (it.id == jobId) it.copy(status = ProcessStatus.RUNNING, message = "Memulai proses (in-process)...") else it
+                    if (it.id == jobId) it.copy(status = ProcessStatus.RUNNING, message = "Starting process (in-process)...") else it
                 }
             }
         }
@@ -617,7 +617,7 @@ class WorkerProcessRepositoryImpl private constructor(
                     _processes.update { list ->
                         list.map { p ->
                             if (p.id == jobId) {
-                                p.copy(status = ProcessStatus.COMPLETED, progress = 1f, message = "Selesai")
+                                p.copy(status = ProcessStatus.COMPLETED, progress = 1f, message = "Done")
                             } else p
                         }
                     }
@@ -634,7 +634,7 @@ class WorkerProcessRepositoryImpl private constructor(
             } catch (e: CancellationException) {
                 _processes.update { list ->
                     list.map { p ->
-                        if (p.id == jobId) p.copy(status = ProcessStatus.CANCELLED, message = "Dibatalkan oleh pengguna") else p
+                        if (p.id == jobId) p.copy(status = ProcessStatus.CANCELLED, message = "Cancelled by user") else p
                     }
                 }
             } catch (e: Throwable) {
@@ -655,8 +655,8 @@ class WorkerProcessRepositoryImpl private constructor(
         val finalProcess = _processes.value.find { it.id == jobId }
         return when (finalProcess?.status) {
             ProcessStatus.COMPLETED -> Result.success(Unit)
-            ProcessStatus.CANCELLED -> Result.failure(CancellationException("Dibatalkan"))
-            ProcessStatus.FAILED -> Result.failure(Exception(finalProcess.errorMessage ?: "Gagal memproses"))
+            ProcessStatus.CANCELLED -> Result.failure(CancellationException("Cancelled"))
+            ProcessStatus.FAILED -> Result.failure(Exception(finalProcess.errorMessage ?: "Processing failed"))
             else -> Result.success(Unit)
         }
     }
@@ -670,14 +670,14 @@ class WorkerProcessRepositoryImpl private constructor(
             try {
                 cancelled = svc.cancelJob(id)
             } catch (e: RemoteException) {
-                Log.e(TAG, "Gagal membatalkan job melalui WorkerService IPC", e)
+                Log.e(TAG, "Failed to cancel job via WorkerService IPC", e)
             }
         }
 
         // 2. Batalkan deferred pending jika ada
         val deferred = pendingResults.remove(id)
         if (deferred != null && deferred.isActive) {
-            deferred.cancel(CancellationException("Dibatalkan oleh pengguna"))
+            deferred.cancel(CancellationException("Cancelled by user"))
             cancelled = true
         }
 
@@ -692,7 +692,7 @@ class WorkerProcessRepositoryImpl private constructor(
         _processes.update { list ->
             list.map { p ->
                 if (p.id == id && (p.status == ProcessStatus.RUNNING || p.status == ProcessStatus.QUEUED)) {
-                    p.copy(status = ProcessStatus.CANCELLED, message = "Dibatalkan oleh pengguna")
+                    p.copy(status = ProcessStatus.CANCELLED, message = "Cancelled by user")
                 } else p
             }
         }

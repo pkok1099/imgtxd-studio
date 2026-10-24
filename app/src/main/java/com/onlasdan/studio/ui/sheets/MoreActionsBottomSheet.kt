@@ -58,7 +58,7 @@ fun MoreActionsBottomSheet(
             // Header: Judul Sheet
             Column {
                 Text(
-                    text = "Menu & Opsi Berkas",
+                    text = "Menu & File Options",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -73,7 +73,7 @@ fun MoreActionsBottomSheet(
             // Grup: OPERASI BERKAS
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "OPERASI BERKAS",
+                    text = "FILE OPERATIONS",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -87,8 +87,8 @@ fun MoreActionsBottomSheet(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         MoreActionRow(
                             icon = Icons.Outlined.FileDownload,
-                            title = if (isTxd) "Ekspor Semua PNG" else "Ekspor Semua Berkas",
-                            subtitle = "Ekstrak seluruh isi file ke penyimpanan",
+                            title = if (isTxd) "Ekspor Semua PNG" else "Export All Files",
+                            subtitle = "Extract everything to storage",
                             onClick = {
                                 onDismissRequest()
                                 onExportAll()
@@ -100,7 +100,7 @@ fun MoreActionsBottomSheet(
                             MoreActionRow(
                                 icon = Icons.Outlined.AddPhotoAlternate,
                                 title = "Add New Texture",
-                                subtitle = "Impor gambar sebagai tekstur baru ke TXD ini",
+                                subtitle = "Import images as new textures into this TXD",
                                 onClick = {
                                     onDismissRequest()
                                     onAddTextures()
@@ -112,8 +112,8 @@ fun MoreActionsBottomSheet(
                             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             MoreActionRow(
                                 icon = if (isLargeImage) Icons.Outlined.ViewCompact else Icons.Outlined.PhotoSizeSelectActual,
-                                title = if (isLargeImage) "Tampilan: Gambar Besar" else "Tampilan: Gambar Kecil",
-                                subtitle = if (isLargeImage) "Ketuk untuk beralih ke daftar kompak (gambar kecil)" else "Ketuk untuk beralih ke kartu pratinjau besar",
+                                title = if (isLargeImage) "View: Large Thumbnails" else "View: Small Thumbnails",
+                                subtitle = if (isLargeImage) "Tap to switch to compact list (small thumbnails)" else "Tap to switch to large preview cards",
                                 onClick = {
                                     onDismissRequest()
                                     onToggleTxdViewMode()
@@ -126,7 +126,7 @@ fun MoreActionsBottomSheet(
                             MoreActionRow(
                                 icon = Icons.Outlined.Build,
                                 title = "Rebuild Archive",
-                                subtitle = "Padatkan dan rapikan sektor file IMG",
+                                subtitle = "Defragment and tidy up IMG file sectors",
                                 onClick = {
                                     onDismissRequest()
                                     onRebuildArchive()
@@ -139,7 +139,7 @@ fun MoreActionsBottomSheet(
                             MoreActionRow(
                                 icon = Icons.Outlined.DriveFileRenameOutline,
                                 title = "Rename File",
-                                subtitle = "Ubah nama file fisik di penyimpanan",
+                                subtitle = "Rename the physical file in storage",
                                 onClick = {
                                     onDismissRequest()
                                     onRenameFile()
@@ -192,7 +192,7 @@ fun MoreActionsBottomSheet(
                         MoreActionRow(
                             icon = Icons.Outlined.Layers,
                             title = "Window Mode",
-                            subtitle = "Atur jendela multi-window atau single-window",
+                            subtitle = "Configure multi-window or single-window",
                             onClick = {
                                 onDismissRequest()
                                 onOpenWindowMode()
@@ -203,7 +203,7 @@ fun MoreActionsBottomSheet(
                         MoreActionRow(
                             icon = Icons.Outlined.Settings,
                             title = "Settings",
-                            subtitle = "Konfigurasi tema & preferensi aplikasi",
+                            subtitle = "Configure theme & app preferences",
                             onClick = {
                                 onDismissRequest()
                                 onOpenSettings()
@@ -226,7 +226,7 @@ fun MoreActionsBottomSheet(
                         MoreActionRow(
                             icon = Icons.Outlined.Info,
                             title = "About",
-                            subtitle = "Informasi versi & lisensi aplikasi",
+                            subtitle = "Version & license info",
                             onClick = {
                                 onDismissRequest()
                                 onOpenAbout()
@@ -253,7 +253,7 @@ fun MoreActionsBottomSheet(
                     MoreActionRow(
                         icon = Icons.Outlined.Close,
                         title = "Close File",
-                        subtitle = if (isFileBusy) "Menunggu proses selesai..." else "Tutup berkas dan kembali ke beranda",
+                        subtitle = if (isFileBusy) "Waiting for process to finish..." else "Close file and go back home",
                         iconTint = if (isFileBusy) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                         isEnabled = !isFileBusy,
                         onClick = {

@@ -90,7 +90,7 @@ fun OperationsHistorySheet(
                     ) {
                         Icon(Icons.Outlined.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Hapus Semua")
+                        Text("Clear All")
                     }
                 }
             }
@@ -110,12 +110,12 @@ fun OperationsHistorySheet(
                         modifier = Modifier.size(40.dp)
                     )
                     Text(
-                        text = "Belum ada operasi tercatat",
+                        text = "No operations yet",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "Ekspor, rebuild, auto replace, dan operasi latar lain akan muncul di sini setelah selesai.",
+                        text = "Exports, rebuilds, auto replace, and other background ops will show up here once done.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

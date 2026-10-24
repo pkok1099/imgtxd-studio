@@ -51,14 +51,14 @@ class TexdbCache private constructor(
         @Throws(IOException::class)
         fun load(directory: File): TexdbCache {
             val lines = NativeCore.texdbList(directory.absolutePath)
-                ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+                ?: throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
             if (lines.isEmpty()) throw IOException("Engine Rust mengembalikan daftar kosong")
             val header = lines[0].split('\t', limit = 5)
             if (header[0] == "ERROR") {
-                throw IOException(header.getOrNull(1) ?: "Cache tidak bisa dibuka")
+                throw IOException(header.getOrNull(1) ?: "Cache can't be opened")
             }
             if (header.size < 5 || header[0] != "OK") {
-                throw IOException("Respons engine tidak dikenal: ${lines[0]}")
+                throw IOException("Unknown engine response: ${lines[0]}")
             }
             val cacheName = header[1]
             val variant = header[2]
@@ -115,11 +115,11 @@ class TexdbCache private constructor(
     @Throws(IOException::class)
     fun extractEntry(texture: TexdbTexture, destination: File) {
         val idx = textures.indexOf(texture)
-        if (idx < 0) throw IOException("Tekstur tidak ditemukan di cache: ${texture.name}")
+        if (idx < 0) throw IOException("Texture not found in cache: ${texture.name}")
         val result = NativeCore.texdbExtractRaw(directory.absolutePath, idx, destination.absolutePath)
         when {
             result == null ->
-                throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+                throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
             result.startsWith("ERROR ") ->
                 throw IOException(result.removePrefix("ERROR "))
         }

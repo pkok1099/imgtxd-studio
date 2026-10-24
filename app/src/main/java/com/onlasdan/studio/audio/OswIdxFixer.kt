@@ -26,11 +26,11 @@ object OswIdxFixer {
     @Throws(IOException::class)
     fun computeIndex(oswFile: File): List<IdxEntry> {
         val lines = NativeCore.audioComputeOsw(oswFile.absolutePath)
-            ?: throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+            ?: throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
         if (lines.isEmpty()) throw IOException("Engine Rust mengembalikan daftar kosong")
         val header = lines[0].split('\t', limit = 2)
         if (header[0] == "ERROR") {
-            throw IOException(header.getOrNull(1) ?: ".osw tidak bisa dibaca")
+            throw IOException(header.getOrNull(1) ?: ".osw can't be read")
         }
         val entries = ArrayList<IdxEntry>(maxOf(lines.size - 1, 0))
         for (i in 1 until lines.size) {
@@ -55,7 +55,7 @@ object OswIdxFixer {
         val result = NativeCore.audioFixOsw(oswFile.absolutePath)
         when {
             result == null ->
-                throw IOException("Engine Rust tidak tersedia (libimgtxd_core gagal dimuat)")
+                throw IOException("Rust engine unavailable (libimgtxd_core failed to load)")
             result.startsWith("ERROR ") ->
                 throw IOException(result.removePrefix("ERROR "))
         }
