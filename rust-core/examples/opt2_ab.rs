@@ -50,7 +50,13 @@ fn hash(data: &[u8]) -> u64 {
 }
 
 fn hash_px(px: &[u32]) -> u64 {
-    hash(unsafe { std::slice::from_raw_parts(px.as_ptr() as *const u8, px.len() * 4) })
+    // SAFETY: `px` is a valid `&[u32]` produced by `lcg_image`/`gradient`/
+    // `mipmap::downscale_half`, so its backing memory is properly aligned
+    // for u32 (and thus u8). `px.len() * 4` is bounded by the test image
+    // sizes (≤ 1024×1024×4 = 4 MiB), well below usize::MAX even on 32-bit.
+    // The cast `*const u8` preserves provenance; u8 has no alignment req.
+    let byte_len = px.len().saturating_mul(4);
+    hash(unsafe { std::slice::from_raw_parts(px.as_ptr() as *const u8, byte_len) })
 }
 
 const FILTERS: &[(&str, MipFilter)] = &[

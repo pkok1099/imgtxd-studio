@@ -275,10 +275,15 @@ impl ImgArchive {
     fn move_entry_to_end(&mut self, idx: usize) -> io::Result<()> {
         let (offset, size) = (self.entries[idx].offset_bytes(), self.entries[idx].size_bytes());
         let mut f = OpenOptions::new().read(true).write(true).open(&self.img_file)?;
+        let file_len = f.metadata()?.len();
+        // Cap the read at the actual file length to prevent a malicious
+        // directory entry (size_sectors up to u32::MAX → ~2^53 bytes) from
+        // triggering an allocation-DoS abort. extract() uses take() and is
+        // already safe; this fixes the in-memory move path.
+        let size = size.min(file_len.saturating_sub(offset));
         let mut data = vec![0u8; size as usize];
         f.seek(SeekFrom::Start(offset))?;
         f.read_exact(&mut data)?;
-        let file_len = f.metadata()?.len();
         let end = file_len.div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
         f.seek(SeekFrom::Start(end))?;
         f.write_all(&data)?;
@@ -289,8 +294,14 @@ impl ImgArchive {
     /// Reads an entry's (sector-padded) bytes into memory.
     pub fn read_entry_bytes(&self, entry: &ImgEntry) -> io::Result<Vec<u8>> {
         let mut src = File::open(&self.img_file)?;
-        src.seek(SeekFrom::Start(entry.offset_bytes()))?;
-        let mut buf = vec![0u8; entry.size_bytes() as usize];
+        let offset = entry.offset_bytes();
+        // Cap the read at the actual file length to prevent allocation-DoS
+        // from a malicious directory entry whose size_sectors is u32::MAX
+        // (would request ~2^53 bytes on 64-bit and abort the process).
+        let file_len = src.metadata()?.len();
+        let size = entry.size_bytes().min(file_len.saturating_sub(offset));
+        src.seek(SeekFrom::Start(offset))?;
+        let mut buf = vec![0u8; size as usize];
         src.read_exact(&mut buf)?;
         Ok(buf)
     }

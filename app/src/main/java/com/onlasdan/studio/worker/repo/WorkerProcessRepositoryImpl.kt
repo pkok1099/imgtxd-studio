@@ -451,8 +451,33 @@ class WorkerProcessRepositoryImpl private constructor(
         title: String,
         block: suspend (updateProgress: (current: Int, total: Int, message: String?) -> Unit) -> Result<Unit>
     ): Result<Unit> {
+        // CRITICAL: busy-check AND register must happen inside the same
+        // fileLocks.withLock block, otherwise two concurrent callers (e.g.
+        // MainActivity + TxdEditorActivity in PER_FILE mode) can both pass
+        // the busy-check before either registers — then both write to the
+        // same archive and corrupt it. Mirrors DefaultProcessRepository.executeProcess.
         val busyProcess = fileLocks.withLock {
-            getActiveProcessForFile(targetFile)
+            val active = getActiveProcessForFile(targetFile)
+            if (active != null) {
+                return@withLock active
+            }
+            // Reserve the slot atomically: assign the jobId and insert the
+            // QUEUED placeholder so any concurrent caller's busy-check sees it.
+            val jobId = UUID.randomUUID().toString()
+            processMetadata[jobId] = ProcessMetadata(type, targetFile, title)
+            val placeholder = AppProcess(
+                id = jobId,
+                type = type,
+                targetFile = targetFile,
+                title = title,
+                progress = 0f,
+                current = 0,
+                total = 0,
+                status = ProcessStatus.QUEUED,
+                message = "Menunggu antrean..."
+            )
+            _processes.update { it + placeholder }
+            null
         }
 
         if (busyProcess != null) {
@@ -463,19 +488,48 @@ class WorkerProcessRepositoryImpl private constructor(
             )
         }
 
-        val jobId = UUID.randomUUID().toString()
-        processMetadata[jobId] = ProcessMetadata(type, targetFile, title)
+        // jobId was assigned inside the lock; recover it from processMetadata.
+        // (executeInProcessFallback reads _processes to find the placeholder.)
+        return executeInProcessFallback(jobIdPlaceholder(targetFile), type, targetFile, title, block)
+    }
 
-        // Operasi dengan lambda block selalu dieksekusi in-process agar closure dan context UI berjalan
-        return executeInProcessFallback(jobId, type, targetFile, title, block)
+    /**
+     * Returns the jobId we just reserved inside fileLocks, by looking up
+     * the QUEUED placeholder we inserted in [executeProcess].
+     */
+    private fun jobIdPlaceholder(targetFile: String): String {
+        return _processes.value.firstOrNull {
+            it.targetFile == targetFile && it.status == ProcessStatus.QUEUED
+        }?.id ?: UUID.randomUUID().toString()
     }
 
     /**
      * Mengajukan JobRequest lengkap secara langsung ke WorkerService.
      */
     suspend fun submitJobRequest(request: JobRequest, title: String? = null): Result<JobResult> {
+        // CRITICAL: busy-check AND register must happen inside the same
+        // fileLocks.withLock block — see executeProcess for the rationale.
         val busyProcess = fileLocks.withLock {
-            getActiveProcessForFile(request.targetPath)
+            val active = getActiveProcessForFile(request.targetPath)
+            if (active != null) {
+                return@withLock active
+            }
+            val type = parseProcessType(request.type)
+            val jobTitle = title ?: request.parameters["title"] ?: "${type.label}: ${request.targetPath.substringAfterLast('/')}"
+            processMetadata[request.id] = ProcessMetadata(type, request.targetPath, jobTitle)
+            val placeholder = AppProcess(
+                id = request.id,
+                type = type,
+                targetFile = request.targetPath,
+                title = jobTitle,
+                progress = 0f,
+                current = 0,
+                total = 0,
+                status = ProcessStatus.QUEUED,
+                message = "Menunggu antrean..."
+            )
+            _processes.update { it + placeholder }
+            null
         }
 
         if (busyProcess != null) {
@@ -488,26 +542,12 @@ class WorkerProcessRepositoryImpl private constructor(
 
         val type = parseProcessType(request.type)
         val jobTitle = title ?: request.parameters["title"] ?: "${type.label}: ${request.targetPath.substringAfterLast('/')}"
-        processMetadata[request.id] = ProcessMetadata(type, request.targetPath, jobTitle)
 
         val connected = ensureConnected()
         val svc = service
         if (!connected || svc == null) {
             return Result.failure(IllegalStateException("WorkerService tidak dapat dihubungi"))
         }
-
-        val initialProcess = AppProcess(
-            id = request.id,
-            type = type,
-            targetFile = request.targetPath,
-            title = jobTitle,
-            progress = 0f,
-            current = 0,
-            total = 0,
-            status = ProcessStatus.QUEUED,
-            message = "Menunggu antrean..."
-        )
-        _processes.update { it + initialProcess }
 
         val deferred = CompletableDeferred<JobResult>()
         pendingResults[request.id] = deferred

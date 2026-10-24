@@ -255,7 +255,12 @@ class TxdEditorViewModel(
                     }
 
                     val newPixels = IntArray(newBitmap.width * newBitmap.height)
-                    newBitmap.getPixels(newPixels, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                    try {
+                        newBitmap.getPixels(newPixels, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                    } finally {
+                        // Free native bitmap memory immediately (getPixels copied into JVM heap).
+                        newBitmap.recycle()
+                    }
                     TxdStore.replaceTextures(
                         txdFile,
                         listOf(targetEntry.sourceIndex),
@@ -332,7 +337,12 @@ class TxdEditorViewModel(
 
                         if (bmp != null) {
                             val px = IntArray(bmp.width * bmp.height)
-                            bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+                            try {
+                                bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+                            } finally {
+                                // Free native bitmap memory immediately.
+                                bmp.recycle()
+                            }
                             batchIndices.add(entry.sourceIndex)
                             batchImages.add(Triple(px, bmp.width, bmp.height))
                             count++
@@ -414,7 +424,12 @@ class TxdEditorViewModel(
                         if (bitmap == null) continue
 
                         val pixels = IntArray(bitmap.width * bitmap.height)
-                        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                        try {
+                            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                        } finally {
+                            // Free native bitmap memory immediately.
+                            bitmap.recycle()
+                        }
                         names.add(File(imagePath).nameWithoutExtension)
                         batch.add(Triple(pixels, bitmap.width, bitmap.height))
                     }

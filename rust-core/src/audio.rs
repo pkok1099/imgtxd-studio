@@ -58,7 +58,13 @@ pub fn compute_index(osw_bytes: &[u8]) -> Result<Vec<IdxEntry>, String> {
     let mut position: i64 = 0;
     let mut p = cd_offset;
     for _ in 0..total {
-        if p + 46 > osw_bytes.len() || u32le(osw_bytes, p) != 0x0201_4b50 {
+        // Use checked_add so a malicious EOCD with cd_offset = u32::MAX
+        // cannot wrap on 32-bit (where usize == u32) and bypass the bounds
+        // check, leading to an OOB read panic.
+        let Some(p_end) = p.checked_add(46) else {
+            return Err("Direktori pusat ZIP .osw rusak".to_string());
+        };
+        if p_end > osw_bytes.len() || u32le(osw_bytes, p) != 0x0201_4b50 {
             return Err("Direktori pusat ZIP .osw rusak".to_string());
         }
         let compressed_size = u32le(osw_bytes, p + 20) as i64;
@@ -79,7 +85,15 @@ pub fn compute_index(osw_bytes: &[u8]) -> Result<Vec<IdxEntry>, String> {
             });
         }
         position = data_offset + compressed_size;
-        p += 46 + name_len + extra_len + comment_len;
+        // Defensive: p advance must not overflow either.
+        let advance = match (46usize).checked_add(name_len).and_then(|v| v.checked_add(extra_len)).and_then(|v| v.checked_add(comment_len)) {
+            Some(v) => v,
+            None => return Err("Direktori pusat ZIP .osw rusak".to_string()),
+        };
+        p = match p.checked_add(advance) {
+            Some(v) => v,
+            None => return Err("Direktori pusat ZIP .osw rusak".to_string()),
+        };
     }
     Ok(entries)
 }

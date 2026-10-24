@@ -88,7 +88,13 @@ impl TexEncoding {
 /// Decodes one RLE stream. Returns `None` on a truncated/corrupt stream.
 /// Decoded output may exceed the texture's expected size by a few trailing
 /// bytes on some game-built caches; callers should keep the expected prefix.
-pub fn rle_decode(payload: &[u8], seg: usize, indicator: u8) -> Option<Vec<u8>> {
+///
+/// `max_out` caps the decoded output size — every repeat/literal group is
+/// checked against this bound before extending. Without it, a malicious
+/// payload of N bytes can RLE-decode to N×255 bytes (e.g. a 100 MB `.dat`
+/// span would allocate ~25 GB before the post-decode `len < expected`
+/// check could reject it).
+pub fn rle_decode(payload: &[u8], seg: usize, indicator: u8, max_out: usize) -> Option<Vec<u8>> {
     if seg == 0 {
         return None;
     }
@@ -108,11 +114,19 @@ pub fn rle_decode(payload: &[u8], seg: usize, indicator: u8) -> Option<Vec<u8>> 
             }
             let segment = &payload[i..i + seg];
             i += seg;
+            // Bomb guard: count × seg must fit in max_out (and not overflow).
+            let added = count.checked_mul(seg)?;
+            if out.len() + added > max_out {
+                return None;
+            }
             for _ in 0..count {
                 out.extend_from_slice(segment);
             }
         } else {
             if i + seg - 1 > payload.len() {
+                return None;
+            }
+            if out.len() + seg > max_out {
                 return None;
             }
             out.push(b);
@@ -537,6 +551,10 @@ impl TexdbCache {
             payload,
             listing.encoding.segment_size()?,
             (listing.rle_indicator & 0xFF) as u8,
+            // Cap: 12.5% slop + 4 KiB fixed buffer covers the "few trailing
+            // bytes" slop the comment allows on real caches while still
+            // stopping a 255× decompression bomb on malicious payloads.
+            expected + (expected / 8) + 4096,
         )?;
         if decoded.len() < expected {
             return None;
@@ -563,6 +581,7 @@ impl TexdbCache {
                 payload,
                 listing.encoding.segment_size()?,
                 (listing.rle_indicator & 0xFF) as u8,
+                expected + (expected / 8) + 4096,
             )?;
             if decoded_storage.len() < expected {
                 return None;
@@ -1314,6 +1333,7 @@ pub fn decode_pixels_at(
                 payload,
                 listing.encoding.segment_size()?,
                 (listing.rle_indicator & 0xFF) as u8,
+                expected + (expected / 8) + 4096,
             )?;
             if decoded_storage.len() < expected {
                 return None;
@@ -2176,7 +2196,7 @@ mod tests {
             data.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]); // run of 10
         }
         let encoded = rle_encode(&data, seg, 0x09);
-        let decoded = rle_decode(&encoded, seg, 0x09).expect("decode");
+        let decoded = rle_decode(&encoded, seg, 0x09, usize::MAX).expect("decode");
         assert_eq!(decoded, data);
     }
 
@@ -2186,7 +2206,7 @@ mod tests {
         let mut stream = b"ABCD".to_vec();
         stream.extend_from_slice(&[0xFF, 3]);
         stream.extend_from_slice(b"WXYZ");
-        let out = rle_decode(&stream, 4, 0xFF).expect("decode");
+        let out = rle_decode(&stream, 4, 0xFF, usize::MAX).expect("decode");
         assert_eq!(out, b"ABCDWXYZWXYZWXYZ".to_vec());
     }
 

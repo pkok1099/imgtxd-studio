@@ -173,23 +173,36 @@ class JobGuardianReceiver : BroadcastReceiver() {
             else -> return
         }
 
-        // Custom action hanya sah dari aplikasi ini sendiri (semua pengirim
-        // internal memakai setPackage). Receiver memang exported agar
-        // BOOT_COMPLETED selalu terkirim, jadi jalur spoofing oleh app lain
-        // ditutup di sini.
+        // Custom action hanya sah dari aplikasi ini sendiri. Receiver exported
+        // karena BOOT_COMPLETED butuh akses sistem; tanpa filter intent untuk
+        // custom action, app lain masih bisa mengirimnya ke receiver ini via
+        // sendBroadcast(setPackage(...)). Pertahanan utama adalah cross-check
+        // targetPath ke workerDataStore di checkAndTriggerResume — app lain
+        // tidak bisa membaca DataStore privat kita, jadi tidak bisa menyisipkan
+        // targetPath yang cocok.
+        //
+        // Catatan: BroadcastReceiver.getSendingPackage() ada di API 26 tapi
+        // ditandai @SystemApi(MODULE_LIBRARIES) di SDK publik, jadi tidak bisa
+        // dipanggil dari app biasa. Pertahanan kita sepenuhnya pada cross-check.
         if (action == WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS ||
             action == WorkerContracts.ACTION_WATCHDOG_PING
         ) {
-            if (intent.`package` != context.packageName) {
-                Log.w(TAG, "Aksi '$action' dari pengirim asing (package=${intent.`package`}) diabaikan")
-                return
-            }
+            // Cross-check di checkAndTriggerResume menolak targetPath yang tidak
+            // cocok workerDataStore, jadi spoofing dari app lain gagal di sana.
+            // Tidak ada pemeriksaan tambahan di sini karena getSendingPackage()
+            // adalah SystemApi yang tidak accessible.
         }
 
         // goAsync(): pekerjaan async (DataStore IO + cek checkpoint) harus
         // selesai sebelum proses boleh dibunuh sistem. Tanpa goAsync,
         // coroutine di bawah bisa mati bersama proses setelah onReceive
         // selesai sehingga auto-resume kadang tidak pernah jalan.
+        //
+        // Catatan: sebelumnya checkAndTriggerResume membuat CoroutineScope
+        // baru dan fire-and-forget, sehingga pendingResult.finish() sering
+        // dipanggil sebelum DataStore read selesai — kemudian proses dibunuh
+        // dan resume tidak pernah jalan. Sekarang checkAndTriggerResume
+        // adalah suspend fun yang inline ke outer coroutine ini.
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -202,36 +215,45 @@ class JobGuardianReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun checkAndTriggerResume(context: Context, targetPathHint: String?) {
-        val receiverScope = CoroutineScope(Dispatchers.IO)
-        receiverScope.launch {
-            try {
-                var targetPath = targetPathHint
-                if (targetPath.isNullOrEmpty()) {
-                    targetPath = context.workerDataStore.data.map { prefs ->
-                        prefs[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)]
-                    }.first()
+    private suspend fun checkAndTriggerResume(context: Context, targetPathHint: String?) {
+        try {
+            var targetPath = targetPathHint
+            if (targetPath.isNullOrEmpty()) {
+                targetPath = context.workerDataStore.data.map { prefs ->
+                    prefs[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)]
+                }.first()
+            } else {
+                // Cross-check: jika targetPathHint datang dari broadcast extra,
+                // pastikan cocok dengan yang tersimpan di workerDataStore.
+                // Tanpa ini, app lain bisa menyisipkan extra palsu walau
+                // getSendingPackage terlewat (mis. via pendingintent di-share).
+                val stored = context.workerDataStore.data.map { prefs ->
+                    prefs[stringPreferencesKey(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH)]
+                }.first()
+                if (stored.isNullOrEmpty() || stored != targetPath) {
+                    Log.w(TAG, "targetPathHint '$targetPath' tidak cocok workerDataStore; mengabaikan")
+                    return
                 }
+            }
 
-                if (!targetPath.isNullOrEmpty()) {
-                    val hasIncomplete = CheckpointManager.hasIncompleteCheckpoint(targetPath)
-                    if (hasIncomplete) {
-                        Log.i(TAG, "Pekerjaan aktif terdeteksi untuk: $targetPath. Membangunkan WorkerService...")
-                        val serviceIntent = Intent(context, WorkerService::class.java).apply {
-                            this.action = WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS
-                            setPackage(context.packageName)
-                            putExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH, targetPath)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(serviceIntent)
-                        } else {
-                            context.startService(serviceIntent)
-                        }
+            if (!targetPath.isNullOrEmpty()) {
+                val hasIncomplete = CheckpointManager.hasIncompleteCheckpoint(targetPath)
+                if (hasIncomplete) {
+                    Log.i(TAG, "Pekerjaan aktif terdeteksi untuk: $targetPath. Membangunkan WorkerService...")
+                    val serviceIntent = Intent(context, WorkerService::class.java).apply {
+                        this.action = WorkerContracts.ACTION_RESUME_INTERRUPTED_JOBS
+                        setPackage(context.packageName)
+                        putExtra(WorkerContracts.PREF_KEY_ACTIVE_TARGET_PATH, targetPath)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error saat memeriksa pekerjaan untuk resume", e)
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saat memeriksa pekerjaan untuk resume", e)
         }
     }
 }

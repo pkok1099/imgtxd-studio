@@ -185,6 +185,15 @@ fn parse_native_entry(
     let d3d_format = r.i32() as u32;
     let width = r.u16() as usize;
     let height = r.u16() as usize;
+    // Cap texture dimensions: real game TXDs are ≤ 2048×2048 (mobile mods
+    // sometimes 4096). 8192 is the safe upper bound. A malicious TXD with
+    // width=height=65535 (u16::MAX) would request a 16 GiB allocation
+    // downstream in decode_dxt1/decode_etc1 → process abort (panic=abort).
+    if width > 8192 || height > 8192 {
+        return Err(format!(
+            "Dimensi tekstur TXD tidak masuk akal: {width}x{height}"
+        ));
+    }
     let depth = r.u8() as u32;
     let mipmap_count = r.u8() as usize;
     let _raster_type = r.u8();
@@ -201,9 +210,16 @@ fn parse_native_entry(
     if data_size < 0 {
         return Err("Format TXD rusak: ukuran data tekstur negatif".to_string());
     }
-    let mut raw_pixels = vec![0u8; data_size as usize];
-    let to_read = (data_size as usize).min(r.remaining());
-    raw_pixels[..to_read].copy_from_slice(&r.bytes(to_read));
+    // Cap the allocation at the bytes actually remaining in the buffer.
+    // A malicious/corrupt TXD can claim `data_size` up to i32::MAX (≈2 GiB)
+    // while the file contains only a few KB after the size field. Without
+    // this cap, `vec![0u8; data_size as usize]` would attempt a multi-GiB
+    // allocation and abort the process (panic=abort). Real TXDs are
+    // well-formed so `data_size == remaining` and behavior is unchanged.
+    let remaining = r.remaining();
+    let actual = (data_size as usize).min(remaining);
+    let mut raw_pixels = vec![0u8; actual];
+    raw_pixels.copy_from_slice(&r.bytes(actual));
 
     let mut mip_levels = Vec::new();
     let mut level_index = 1;

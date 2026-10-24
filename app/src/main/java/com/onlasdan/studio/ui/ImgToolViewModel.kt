@@ -1033,7 +1033,16 @@ class ImgToolViewModel : ViewModel() {
                     }
 
                     val newPixels = IntArray(newBitmap.width * newBitmap.height)
-                    newBitmap.getPixels(newPixels, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                    try {
+                        newBitmap.getPixels(newPixels, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                    } finally {
+                        // Free native bitmap memory immediately — getPixels has
+                        // copied the pixels into newPixels (an IntArray on the
+                        // JVM heap). Without this, the Bitmap's native backing
+                        // stays live until the next GC pass, which on a large
+                        // batch can mean hundreds of MB held simultaneously.
+                        newBitmap.recycle()
+                    }
                     TxdStore.replaceTextures(
                         tempTxdFile,
                         listOf(targetEntry.sourceIndex),
@@ -1121,7 +1130,12 @@ class ImgToolViewModel : ViewModel() {
 
                             if (newBitmap != null) {
                                 val px = IntArray(newBitmap.width * newBitmap.height)
-                                newBitmap.getPixels(px, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                                try {
+                                    newBitmap.getPixels(px, 0, newBitmap.width, 0, 0, newBitmap.width, newBitmap.height)
+                                } finally {
+                                    // Free native bitmap memory ASAP (see replaceTxdTexture).
+                                    newBitmap.recycle()
+                                }
                                 batchIndices.add(entry.sourceIndex)
                                 batchImages.add(Triple(px, newBitmap.width, newBitmap.height))
                                 replacedCount++
@@ -1208,7 +1222,12 @@ class ImgToolViewModel : ViewModel() {
                         if (bitmap == null) continue
 
                         val pixels = IntArray(bitmap.width * bitmap.height)
-                        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                        try {
+                            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                        } finally {
+                            // Free native bitmap memory ASAP (see replaceTxdTexture).
+                            bitmap.recycle()
+                        }
                         names.add(File(imagePath).nameWithoutExtension)
                         batch.add(Triple(pixels, bitmap.width, bitmap.height))
                     }

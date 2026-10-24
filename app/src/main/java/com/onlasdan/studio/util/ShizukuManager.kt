@@ -93,6 +93,22 @@ object ShizukuManager {
     }
 
     /**
+     * Quotes a string for safe interpolation into a POSIX shell command.
+     *
+     * Wraps the value in single quotes and escapes any embedded single quote via
+     * the standard `''\'''` idiom (close-quote, escaped-quote, reopen-quote).
+     * This is the ONLY safe way to pass an attacker-controlled path into `sh -c`;
+     * double-quote wrapping (`"$path"`) is NOT safe — backticks, `$(...)`, `\`, and
+     * `"` can all break out and run arbitrary commands under Shizuku's UID 2000.
+     *
+     * Example: `shellQuote("a'b")` returns `'a'\''b'` which the shell expands to `a'b`.
+     */
+    fun shellQuote(s: String): String {
+        val escaped = s.replace("'", "'\\''")
+        return "'$escaped'"
+    }
+
+    /**
      * Executes a shell command using Shizuku privileged shell (UID 2000).
      */
     suspend fun exec(command: String): Pair<Int, String> = withContext(Dispatchers.IO) {
@@ -123,8 +139,9 @@ object ShizukuManager {
         if (!hasPermission()) return@withContext result
 
         val cleanPath = dirPath.trimEnd('/')
-        // Use batch stat for instant retrieval of all file metadata in 1 single shell process
-        val (statExit, statOutput) = exec("stat -c '%s|%F|%n' \"$cleanPath\"/* 2>/dev/null")
+        // Use batch stat for instant retrieval of all file metadata in 1 single shell process.
+        // shellQuote prevents command injection if dirPath comes from a malicious VIEW intent.
+        val (statExit, statOutput) = exec("stat -c '%s|%F|%n' ${shellQuote(cleanPath)}/* 2>/dev/null")
         if (statExit == 0 && statOutput.isNotBlank()) {
             for (line in statOutput.lines()) {
                 val parts = line.split('|')
@@ -147,7 +164,7 @@ object ShizukuManager {
             }
         } else {
             // Fallback to ls if stat wildcard matched nothing or failed
-            val (exitCode, output) = exec("ls -1pa \"$cleanPath\"")
+            val (exitCode, output) = exec("ls -1pa ${shellQuote(cleanPath)}")
             if (exitCode == 0 && output.isNotBlank()) {
                 for (line in output.lines()) {
                     val trimmed = line.trim()
@@ -182,7 +199,9 @@ object ShizukuManager {
         val staging = File(destLocalFile.parentFile, destLocalFile.name + ".staging" + System.nanoTime())
         try {
             destLocalFile.parentFile?.mkdirs()
-            val process = newProcess(arrayOf("sh", "-c", "cat \"$sourceRestrictedPath\""))
+            // shellQuote prevents command injection via a crafted sourceRestrictedPath
+            // (e.g. one coming from an exported VIEW intent).
+            val process = newProcess(arrayOf("sh", "-c", "cat ${shellQuote(sourceRestrictedPath)}"))
             staging.outputStream().use { out ->
                 process.inputStream.copyTo(out, bufferSize = 256 * 1024)
             }
@@ -221,10 +240,13 @@ object ShizukuManager {
         try {
             val parentDir = File(destRestrictedPath).parent ?: ""
             if (parentDir.isNotEmpty()) {
-                exec("mkdir -p \"$parentDir\"")
+                exec("mkdir -p ${shellQuote(parentDir)}")
             }
             val stagingPath = destRestrictedPath + ".staging" + System.nanoTime()
-            val command = "cat > \"$stagingPath\" && mv -f \"$stagingPath\" \"$destRestrictedPath\" || { rm -f \"$stagingPath\"; exit 1; }"
+            // shellQuote on every interpolated path — stagingPath and destRestrictedPath
+            // can both contain shell metacharacters if the user picks a file whose name
+            // includes $, `, ", etc.
+            val command = "cat > ${shellQuote(stagingPath)} && mv -f ${shellQuote(stagingPath)} ${shellQuote(destRestrictedPath)} || { rm -f ${shellQuote(stagingPath)}; exit 1; }"
             val process = newProcess(arrayOf("sh", "-c", command))
             sourceLocalFile.inputStream().use { input ->
                 process.outputStream.use { out ->
@@ -245,7 +267,7 @@ object ShizukuManager {
      */
     suspend fun exists(path: String): Boolean = withContext(Dispatchers.IO) {
         if (!hasPermission()) return@withContext false
-        val (exitCode, _) = exec("test -e \"$path\"")
+        val (exitCode, _) = exec("test -e ${shellQuote(path)}")
         exitCode == 0
     }
 
@@ -254,7 +276,7 @@ object ShizukuManager {
      */
     suspend fun mkdirs(path: String): Boolean = withContext(Dispatchers.IO) {
         if (!hasPermission()) return@withContext false
-        val (exitCode, _) = exec("mkdir -p \"$path\"")
+        val (exitCode, _) = exec("mkdir -p ${shellQuote(path)}")
         exitCode == 0
     }
 }

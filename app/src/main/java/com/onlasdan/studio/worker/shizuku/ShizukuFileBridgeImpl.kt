@@ -1,6 +1,7 @@
 package com.onlasdan.studio.worker.shizuku
 
 import android.content.Context
+import com.onlasdan.studio.util.ShizukuManager.shellQuote
 import com.onlasdan.studio.worker.ShizukuFileBridge
 import java.io.File
 import java.io.FileInputStream
@@ -63,7 +64,7 @@ class ShizukuFileBridgeImpl(
                 return null
             }
 
-            val process = WorkerShizukuManager.newProcess(arrayOf("sh", "-c", "cat \"$path\""))
+            val process = WorkerShizukuManager.newProcess(arrayOf("sh", "-c", "cat ${shellQuote(path)}"))
             return ShizukuInputStream(process, process.inputStream)
         } catch (e: Throwable) {
             val unwrapped = WorkerShizukuManager.unwrapException(e)
@@ -101,7 +102,7 @@ class ShizukuFileBridgeImpl(
             // Ensure parent directory exists via Shizuku shell
             val parentPath = file.parent
             if (!parentPath.isNullOrEmpty()) {
-                val (mkdirExit, mkdirErr) = WorkerShizukuManager.exec("mkdir -p \"$parentPath\"")
+                val (mkdirExit, mkdirErr) = WorkerShizukuManager.exec("mkdir -p ${shellQuote(parentPath)}")
                 if (mkdirExit != 0) {
                     throw IOException("Gagal membuat direktori induk $parentPath: $mkdirErr")
                 }
@@ -112,8 +113,11 @@ class ShizukuFileBridgeImpl(
             // truncated by a cat that dies halfway (disconnect, kill, disk full).
             // A non-zero shell exit removes the staging file and is surfaced by
             // ShizukuOutputStream.close() so callers roll back cleanly.
+            //
+            // shellQuote on every interpolated path — prevents command injection
+            // when path contains shell metacharacters (`$`, `\"`, `` ` ``, `;`).
             val stagingPath = "$path.staging" + System.nanoTime()
-            val command = "cat > \"$stagingPath\" && mv -f \"$stagingPath\" \"$path\" || { rm -f \"$stagingPath\"; exit 1; }"
+            val command = "cat > ${shellQuote(stagingPath)} && mv -f ${shellQuote(stagingPath)} ${shellQuote(path)} || { rm -f ${shellQuote(stagingPath)}; exit 1; }"
             val process = WorkerShizukuManager.newProcess(arrayOf("sh", "-c", command))
             return ShizukuOutputStream(process, process.outputStream, path)
         } catch (e: Throwable) {
@@ -138,7 +142,7 @@ class ShizukuFileBridgeImpl(
                 return !file.exists()
             }
 
-            val (exitCode, _) = WorkerShizukuManager.exec("rm -rf \"$path\"")
+            val (exitCode, _) = WorkerShizukuManager.exec("rm -rf ${shellQuote(path)}")
             exitCode == 0
         } catch (e: Throwable) {
             val unwrapped = WorkerShizukuManager.unwrapException(e)
@@ -173,9 +177,9 @@ class ShizukuFileBridgeImpl(
             if (WorkerShizukuManager.isShizukuReady() && srcRestricted && dstRestricted) {
                 val parentPath = dstFile.parent ?: ""
                 if (parentPath.isNotEmpty()) {
-                    WorkerShizukuManager.exec("mkdir -p \"$parentPath\"")
+                    WorkerShizukuManager.exec("mkdir -p ${shellQuote(parentPath)}")
                 }
-                val (cpExit, _) = WorkerShizukuManager.exec("cp -f \"$sourcePath\" \"$destPath\"")
+                val (cpExit, _) = WorkerShizukuManager.exec("cp -f ${shellQuote(sourcePath)} ${shellQuote(destPath)}")
                 if (cpExit == 0 && exists(destPath)) {
                     return true
                 }
@@ -218,7 +222,7 @@ class ShizukuFileBridgeImpl(
                 return file.exists()
             }
 
-            val (exitCode, _) = WorkerShizukuManager.exec("test -e \"$path\"")
+            val (exitCode, _) = WorkerShizukuManager.exec("test -e ${shellQuote(path)}")
             exitCode == 0
         } catch (e: Throwable) {
             val unwrapped = WorkerShizukuManager.unwrapException(e)
@@ -242,14 +246,14 @@ class ShizukuFileBridgeImpl(
                 return if (file.exists()) file.length() else 0L
             }
 
-            val (exitCode, output) = WorkerShizukuManager.exec("stat -c %s \"$path\" 2>/dev/null")
+            val (exitCode, output) = WorkerShizukuManager.exec("stat -c %s ${shellQuote(path)} 2>/dev/null")
             if (exitCode == 0 && output.isNotBlank()) {
                 val parsed = output.lines().firstOrNull()?.trim()?.toLongOrNull()
                 if (parsed != null && parsed >= 0L) return parsed
             }
 
             // Fallback: wc -c < "$path"
-            val (wcExit, wcOutput) = WorkerShizukuManager.exec("wc -c < \"$path\" 2>/dev/null")
+            val (wcExit, wcOutput) = WorkerShizukuManager.exec("wc -c < ${shellQuote(path)} 2>/dev/null")
             if (wcExit == 0 && wcOutput.isNotBlank()) {
                 val parsed = wcOutput.trim().toLongOrNull()
                 if (parsed != null && parsed >= 0L) return parsed

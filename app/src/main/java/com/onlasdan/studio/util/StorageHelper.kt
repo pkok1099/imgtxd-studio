@@ -47,11 +47,28 @@ object StorageHelper {
     /**
      * Copies a content URI (from SAF Storage Access Framework) into a local file
      * in the app's cache directory so that high-performance FileChannel and random-access operations can run.
+     *
+     * SECURITY: `uri.lastPathSegment` is attacker-controlled (any app offering
+     * a content URI can return arbitrary text). We sanitize it to a single
+     * filename component (no `/`, no `..`) before composing under cacheDir —
+     * otherwise a malicious provider could write outside `opened_archives/`
+     * (e.g. `../../databases/main.db`). With MANAGE_EXTERNAL_STORAGE granted,
+     * the app's filesystem reach is broad, so this matters even for cached paths.
      */
     fun copyUriToTempFile(context: Context, uri: Uri, fileName: String? = null): File {
-        val resolvedName = fileName ?: (uri.lastPathSegment?.substringAfterLast('/') ?: "archive.img")
+        val resolvedRaw = fileName ?: (uri.lastPathSegment?.substringAfterLast('/') ?: "archive.img")
+        // Strip path separators and parent references — keep only the last
+        // path component. Also strips leading dots so ".profile" stays in
+        // cacheDir and is not interpreted as a hidden file outside.
+        val safeName = File(resolvedRaw).name.ifBlank { "archive.img" }
+        // Defense-in-depth: reject any name that still resolves outside cacheDir.
         val cacheDir = File(context.cacheDir, "opened_archives").apply { mkdirs() }
-        val tempFile = File(cacheDir, resolvedName)
+        val tempFile = File(cacheDir, safeName)
+        val canonicalCache = cacheDir.canonicalPath
+        val canonicalTemp = tempFile.canonicalPath
+        if (!canonicalTemp.startsWith(canonicalCache + File.separator) && canonicalTemp != canonicalCache) {
+            throw SecurityException("Resolved path escapes cache directory: $canonicalTemp")
+        }
 
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(tempFile).use { output ->

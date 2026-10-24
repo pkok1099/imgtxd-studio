@@ -67,7 +67,21 @@ struct Stats {
     collision: usize,
 }
 
+/// Maximum nesting depth for `walk` / `parse_node`. Real DFFs nest ≤ 6 levels
+/// (CLUMP → FRAME_LIST/GEOMETRY → MATERIAL → TEXTURE → STRING). 32 is well
+/// above any legitimate file while still preventing a 10 000-deep malicious
+/// stack from blowing the native stack (the depth cap in texdb's
+/// `dff_texture_names` is 12; we use 32 here to be conservative).
+const MAX_DFF_DEPTH: usize = 32;
+
 fn walk(data: &[u8], start: usize, end: usize, stats: &mut Stats) {
+    walk_inner(data, start, end, stats, 0)
+}
+
+fn walk_inner(data: &[u8], start: usize, end: usize, stats: &mut Stats, depth: usize) {
+    if depth > MAX_DFF_DEPTH {
+        return;
+    }
     let mut off = start;
     while off + 12 <= end {
         let ty = u32le(data, off);
@@ -122,7 +136,7 @@ fn walk(data: &[u8], start: usize, end: usize, stats: &mut Stats) {
             _ => {}
         }
         if is_container(ty) && size > 0 {
-            walk(data, body, chunk_end, stats);
+            walk_inner(data, body, chunk_end, stats, depth + 1);
         }
         if size == 0 && !is_container(ty) {
             break;
@@ -170,6 +184,15 @@ struct Node {
 }
 
 fn parse_node(data: &[u8], off: usize) -> Option<(Node, usize)> {
+    parse_node_inner(data, off, 0)
+}
+
+fn parse_node_inner(data: &[u8], off: usize, depth: usize) -> Option<(Node, usize)> {
+    // Bail on deeply nested malicious DFFs — prevents stack overflow abort.
+    // Real DFFs nest ≤ 6 levels; 32 is well above any legitimate file.
+    if depth > MAX_DFF_DEPTH {
+        return None;
+    }
     if off + 12 > data.len() {
         return None;
     }
@@ -183,7 +206,7 @@ fn parse_node(data: &[u8], off: usize) -> Option<(Node, usize)> {
         let mut inner = body;
         let mut ok = true;
         while inner < end {
-            match parse_node(data, inner) {
+            match parse_node_inner(data, inner, depth + 1) {
                 Some((child, consumed)) => {
                     children.push(child);
                     inner += consumed;

@@ -73,6 +73,9 @@ class WorkerService : Service() {
 
     private var processingJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    /** Last SystemClock.elapsedRealtime() at which we re-acquired the wake lock.
+     *  Throttle for refreshWakeLock to avoid per-progress-tick Binder IPC. */
+    private var lastWakeLockRefreshMs: Long = 0L
 
     private val notificationManager by lazy {
         getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -576,6 +579,15 @@ class WorkerService : Service() {
 
     @Synchronized
     private fun refreshWakeLock() {
+        // Throttle: PowerManager.acquire is non-reference-counted for this
+        // wakelock (we just slide the timeout forward), but each call still
+        // hits a Binder IPC and may emit a log line. For a 12k-entry export,
+        // calling acquire on every progress tick (>12k/s) is wasted work.
+        // Refresh at most once per 30s; the wakelock itself has a 2-hour
+        // timeout so we always have plenty of headroom.
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWakeLockRefreshMs < 30_000L) return
+        lastWakeLockRefreshMs = now
         try {
             if (wakeLock?.isHeld == true) {
                 wakeLock?.acquire(WAKELOCK_TIMEOUT_MS)
@@ -671,19 +683,6 @@ class WorkerService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "Gagal memproses resume pekerjaan terinterupsi", e)
             }
-        }
-    }
-
-    private fun trySaveCheckpoint(job: JobRequest) {
-        try {
-            val checkpointClass = Class.forName("com.onlasdan.studio.worker.engine.CheckpointManager")
-            val instance = checkpointClass.getDeclaredConstructor().newInstance()
-            val method = checkpointClass.methods.firstOrNull {
-                it.name.contains("Checkpoint", ignoreCase = true)
-            }
-            Log.d(TAG, "CheckpointManager available for job ${job.id}")
-        } catch (_: Throwable) {
-            Log.d(TAG, "CheckpointManager not active or handled directly in JobEngine")
         }
     }
 

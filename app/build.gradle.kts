@@ -24,7 +24,19 @@ android {
         create("release") {
             val keystoreFile = file("studio.keystore")
             if (keystoreFile.exists()) {
-                val pass = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: "onlasdan_studio_key_2026"
+                // SECURITY: previously fell back to a hardcoded password when
+                // the env var was missing, which defeats the entire signing-key
+                // protection if the keystore ever leaks. Now the build fails
+                // loudly if the env var is unset — local devs running
+                // `./gradlew assembleRelease` for the first time must
+                // `export RELEASE_KEYSTORE_PASSWORD=...` once.
+                val pass = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                    ?: error(
+                        "RELEASE_KEYSTORE_PASSWORD env var is required to sign the " +
+                        "release build (studio.keystore found at ${keystoreFile.absolutePath}). " +
+                        "Set it before running assembleRelease / bundleRelease. " +
+                        "Local dev: export RELEASE_KEYSTORE_PASSWORD=<your-keystore-password>"
+                    )
                 storeFile = keystoreFile
                 storePassword = pass
                 keyAlias = "onlasdan"

@@ -684,7 +684,7 @@ fun FilePickerDialog(
                 }
 
                 // File list
-                Box(modifier = Modifier.weight(1f)) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                     } else if (errorMessage != null) {

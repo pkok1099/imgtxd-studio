@@ -171,8 +171,8 @@ fn main() {
         enc_ind.push(255);
         enc_ind.extend_from_slice(&unit);
     }
-    check ^= fnv(&rle_decode(&enc_noise, seg, 0xFF).unwrap_or_default());
-    check ^= fnv(&rle_decode(&enc_runs, seg, 0xFF).unwrap_or_default());
+    check ^= fnv(&rle_decode(&enc_noise, seg, 0xFF, usize::MAX).unwrap_or_default());
+    check ^= fnv(&rle_decode(&enc_runs, seg, 0xFF, usize::MAX).unwrap_or_default());
     bench("rle_encode noisy 2MiB (worst case)", 120.0, 50, || {
         fnv(&rle_encode(&raw_noise, seg, 0xFF))
     });
@@ -180,13 +180,13 @@ fn main() {
         fnv(&rle_encode(&raw_runs, seg, 0xFF))
     });
     bench("rle_decode passthrough ~2MiB", 120.0, 50, || {
-        fnv(&rle_decode(&enc_noise, seg, 0xFF).unwrap_or_default())
+        fnv(&rle_decode(&enc_noise, seg, 0xFF, usize::MAX).unwrap_or_default())
     });
     bench("rle_decode run-heavy -> 2MiB", 120.0, 50, || {
-        fnv(&rle_decode(&enc_runs, seg, 0xFF).unwrap_or_default())
+        fnv(&rle_decode(&enc_runs, seg, 0xFF, usize::MAX).unwrap_or_default())
     });
     bench("rle_decode indicator-heavy -> 2.0MiB", 120.0, 50, || {
-        fnv(&rle_decode(&enc_ind, seg, 0xFF).unwrap_or_default())
+        fnv(&rle_decode(&enc_ind, seg, 0xFF, usize::MAX).unwrap_or_default())
     });
 
     // ---------- D. CRC32 (informational; game never reads) ----------

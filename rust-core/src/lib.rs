@@ -20,6 +20,12 @@ use jni::objects::{JByteArray, JClass, JIntArray, JObject, JObjectArray, JString
 use jni::sys::{jboolean, jint, jintArray, jobjectArray, jstring};
 use jni::JNIEnv;
 
+/// Hard cap on texture dimensions accepted from JNI callers.
+/// 16384 × 16384 × 4 bytes = 1 GiB — comfortably above any realistic mobile
+/// texture (≤ 4096 × 4096) while still preventing 2³¹ × 2³¹ allocation-DoS
+/// panics from a malicious Kotlin caller passing `Int.MAX_VALUE`.
+const MAX_TEXTURE_DIM: jint = 16_384;
+
 fn jstring_to_string(env: &mut JNIEnv, s: &JString) -> String {
     env.get_string(s)
         .map(|js| js.to_string_lossy().into_owned())
@@ -38,6 +44,11 @@ fn report_string(env: &mut JNIEnv, result: Result<String, String>) -> jstring {
 
 fn int_array_to_vec(env: &mut JNIEnv, array: &JIntArray) -> Option<Vec<u32>> {
     let len = env.get_array_length(array).ok()?;
+    // Defensive: get_array_length returns jint; reject negatives so a JVM
+    // bug or proxy can never become a giant usize allocation.
+    if len < 0 {
+        return None;
+    }
     let mut buf = vec![0i32; len as usize];
     env.get_int_array_region(array, 0, &mut buf).ok()?;
     Some(buf.iter().map(|&v| v as u32).collect())
@@ -78,7 +89,14 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeDecodeDxt1
     height: jint,
 ) -> jintArray {
     let bytes = env.convert_byte_array(&data).unwrap_or_default();
-    let pixels = codec::dxt::decode_dxt1(&bytes, width.max(0) as usize, height.max(0) as usize);
+    // Reject invalid dimensions before decode_dxt1 can `width * height`-
+    // allocate on a malicious jint (up to 2_147_483_647). codec::dxt uses
+    // usize arithmetic; on 32-bit this would wrap and on 64-bit it would
+    // request a 2^63-byte allocation and abort (panic=abort).
+    if width <= 0 || height <= 0 || width > MAX_TEXTURE_DIM || height > MAX_TEXTURE_DIM {
+        return std::ptr::null_mut();
+    }
+    let pixels = codec::dxt::decode_dxt1(&bytes, width as usize, height as usize);
     vec_to_int_array(&mut env, &pixels)
 }
 
@@ -95,7 +113,19 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeMipmapHalf
     let Some(px) = int_array_to_vec(&mut env, &pixels) else {
         return std::ptr::null_mut();
     };
-    let img = mipmap::PixelImage::new(px, width.max(0) as usize, height.max(0) as usize);
+    // Validate dimensions and pixel count BEFORE handing them to
+    // PixelImage::new, which `assert!`s on bad input. Because panic=abort,
+    // an invalid combination (e.g. width=0, or px.len() != w*h) would
+    // kill the whole app, not just this call.
+    if width <= 0 || height <= 0 || width > MAX_TEXTURE_DIM || height > MAX_TEXTURE_DIM {
+        return std::ptr::null_mut();
+    }
+    let expected = (width as usize).checked_mul(height as usize);
+    match expected {
+        Some(n) if n == px.len() => {}
+        _ => return std::ptr::null_mut(),
+    }
+    let img = mipmap::PixelImage::new(px, width as usize, height as usize);
     let f = match filter {
         0 => mipmap::MipFilter::Nearest,
         2 => mipmap::MipFilter::Bilinear,
@@ -133,12 +163,25 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbImpor
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let count = env.get_array_length(&names).unwrap_or(0);
+    if count < 0 {
+        return report_string(&mut env, Err("array nama kosong/tidak valid".to_string()));
+    }
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
     for i in 0..count {
+        // CRITICAL: free each iteration's local refs explicitly. Without
+        // this, a batch import of >512 textures overflows the JVM local-ref
+        // table and aborts the process. Pattern: get_object_array_element
+        // returns a new local ref each call; we wrap it in an owned JString /
+        // JByteArray, use it, then move it into delete_local_ref which deletes
+        // the underlying local ref.
         let Ok(name_obj) = env.get_object_array_element(&names, i) else { continue };
-        let name = jstring_to_string(&mut env, &JString::from(name_obj));
+        let js = JString::from(name_obj);
+        let name = jstring_to_string(&mut env, &js);
+        let _ = env.delete_local_ref(js);
         let Ok(png_obj) = env.get_object_array_element(&pngs, i) else { continue };
-        let bytes = env.convert_byte_array(JByteArray::from(png_obj)).unwrap_or_default();
+        let jba = JByteArray::from(png_obj);
+        let bytes = env.convert_byte_array(&jba).unwrap_or_default();
+        let _ = env.delete_local_ref(jba);
         if !bytes.is_empty() {
             images.push((name, bytes));
         }
@@ -190,7 +233,12 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbTextu
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    match texdb::decode_pixels_at(std::path::Path::new(&dir_path), &cache_name, index.max(0) as usize) {
+    // Negative index means "nothing selected" in the UI; reject instead of
+    // silently falling back to texture 0 via `index.max(0)`.
+    if index < 0 {
+        return std::ptr::null_mut();
+    }
+    match texdb::decode_pixels_at(std::path::Path::new(&dir_path), &cache_name, index as usize) {
         Some((w, h, _enc, pixels)) => {
             let mut out = Vec::with_capacity(2 + pixels.len());
             out.push(w as u32);
@@ -708,6 +756,9 @@ fn int_arrays_to_images(
     heights: &JIntArray,
 ) -> Option<Vec<(Vec<u32>, usize, usize)>> {
     let count = env.get_array_length(pixels_list).ok()?;
+    if count < 0 {
+        return None;
+    }
     let w = int_array_to_vec(env, widths)?;
     let h = int_array_to_vec(env, heights)?;
     if w.len() != count as usize || h.len() != count as usize {
@@ -715,9 +766,12 @@ fn int_arrays_to_images(
     }
     let mut images = Vec::with_capacity(count as usize);
     for i in 0..count {
-        let obj = env.get_object_array_element(pixels_list, i).ok()?;
-        let arr = JIntArray::from(obj);
-        let px = int_array_to_vec(env, &arr)?;
+        // Free the per-iteration local ref so large batch imports don't
+        // overflow the JVM local-ref table.
+        let Ok(obj) = env.get_object_array_element(pixels_list, i) else { continue };
+        let jia = JIntArray::from(obj);
+        let px = int_array_to_vec(env, &jia)?;
+        let _ = env.delete_local_ref(jia);
         images.push((px, w[i as usize] as usize, h[i as usize] as usize));
     }
     Some(images)
@@ -839,12 +893,19 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdAddText
         let count = env
             .get_array_length(&names)
             .map_err(|_| "array nama tidak valid".to_string())?;
+        if count < 0 {
+            return Err("array nama tidak valid".to_string());
+        }
         let mut name_vec: Vec<String> = Vec::with_capacity(count as usize);
         for i in 0..count {
             let obj = env
                 .get_object_array_element(&names, i)
                 .map_err(|_| "array nama tidak valid".to_string())?;
-            name_vec.push(jstring_to_string(&mut env, &JString::from(obj)));
+            // Delete the local ref each iteration; without this, a >512-texture
+            // batch import overflows the JVM local-ref table.
+            let js = JString::from(obj);
+            name_vec.push(jstring_to_string(&mut env, &js));
+            let _ = env.delete_local_ref(js);
         }
         let images = int_arrays_to_images(&mut env, &pixels_list, &widths, &heights)
             .ok_or_else(|| "array gambar tidak valid".to_string())?;
@@ -884,7 +945,13 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeEncodeDxt1
         Some(v) => v,
         None => return std::ptr::null_mut(),
     };
-    let data = codec::dxt::encode_dxt1(&px, width.max(0) as usize, height.max(0) as usize);
+    // Reject invalid dimensions before encode_dxt1 can allocate (mirrors
+    // nativeDecodeDxt1 / nativeMipmapHalf). Without this a malicious jint
+    // width/height can abort the process via OOM.
+    if width <= 0 || height <= 0 || width > MAX_TEXTURE_DIM || height > MAX_TEXTURE_DIM {
+        return std::ptr::null_mut();
+    }
+    let data = codec::dxt::encode_dxt1(&px, width as usize, height as usize);
     let out = match env.new_byte_array(data.len() as jint) {
         Ok(a) => a,
         Err(_) => return std::ptr::null_mut(),
@@ -961,9 +1028,14 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbExtra
 ) -> jstring {
     let dir_str = jstring_to_string(&mut env, &dir);
     let dest_str = jstring_to_string(&mut env, &dest);
+    // Negative index means "nothing selected"; reject instead of silently
+    // extracting texture 0.
+    if index < 0 {
+        return report_string(&mut env, Err("indeks tidak valid".to_string()));
+    }
     let result = texdb::extract_raw_span(
         std::path::Path::new(&dir_str),
-        index.max(0) as usize,
+        index as usize,
         std::path::Path::new(&dest_str),
     );
     report_string(&mut env, result)
@@ -1032,15 +1104,19 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeIdeScanPat
     paths: JObjectArray,
 ) -> jobjectArray {
     let count = env.get_array_length(&paths).unwrap_or(0);
+    if count < 0 {
+        return string_array(&mut env, &["ERROR\tarray path tidak valid".to_string()]);
+    }
     let mut files: Vec<std::path::PathBuf> = Vec::with_capacity(count as usize);
     for i in 0..count {
         let Ok(obj) = env.get_object_array_element(&paths, i) else {
             continue;
         };
-        files.push(std::path::PathBuf::from(jstring_to_string(
-            &mut env,
-            &JString::from(obj),
-        )));
+        // Delete the local ref each iteration; prevents JVM local-ref table
+        // overflow on large .ide scan lists.
+        let js = JString::from(obj);
+        files.push(std::path::PathBuf::from(jstring_to_string(&mut env, &js)));
+        let _ = env.delete_local_ref(js);
     }
     let index = ide::parse_files(&files);
     string_array(&mut env, &ide::wire_lines(&index))
