@@ -552,7 +552,27 @@ class WorkerProcessRepositoryImpl private constructor(
         val deferred = CompletableDeferred<JobResult>()
         pendingResults[request.id] = deferred
 
+        // Bersihkan permission SAF persistable jika ada URI yang dipinjam untuk job ini
+        request.parameters["sourceUri"]?.let { uriStr ->
+            try {
+                com.onlasdan.studio.util.UriPermissionHelper.releasePersistablePermissionSafely(
+                    context,
+                    android.net.Uri.parse(uriStr)
+                )
+            } catch (_: Throwable) {}
+        }
+
         return try {
+            // Otomatis minta persistable permission jika source berupa content URI
+            request.parameters["sourceUri"]?.let { uriStr ->
+                try {
+                    com.onlasdan.studio.util.UriPermissionHelper.takePersistablePermissionSafely(
+                        context,
+                        android.net.Uri.parse(uriStr)
+                    )
+                } catch (_: Throwable) {}
+            }
+
             svc.submitJob(request)
             val result = deferred.await()
             Result.success(result)
@@ -563,6 +583,14 @@ class WorkerProcessRepositoryImpl private constructor(
             Result.failure(e)
         } finally {
             pendingResults.remove(request.id)
+            request.parameters["sourceUri"]?.let { uriStr ->
+                try {
+                    com.onlasdan.studio.util.UriPermissionHelper.releasePersistablePermissionSafely(
+                        context,
+                        android.net.Uri.parse(uriStr)
+                    )
+                } catch (_: Throwable) {}
+            }
         }
     }
 

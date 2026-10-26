@@ -1217,6 +1217,18 @@ pub fn add_in_file(
     Ok((added, overwritten))
 }
 
+/// Creates a new empty TXD dictionary file on disk.
+/// Default rw_version is RW_VERSION_SA (0x1803FFFF) if 0 passed.
+pub fn create_empty_file(path: &std::path::Path, rw_version: u32) -> Result<(), String> {
+    let version = if rw_version == 0 {
+        RW_VERSION_SA
+    } else {
+        rw_version
+    };
+    let bytes = build_to_bytes(&[], version);
+    crate::fsutil::write_atomic(path, &bytes).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

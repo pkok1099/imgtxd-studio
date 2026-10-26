@@ -18,6 +18,17 @@ class ImgTxdStudioApp : Application() {
         super.onCreate()
         Log.d(TAG, "Inisialisasi ImgTxdStudioApp")
 
+        // Lewati inisialisasi lifecycle UI jika berjalan di proses background :worker
+        val processName = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            getProcessName()
+        } else {
+            ""
+        }
+        if (processName.endsWith(":worker")) {
+            Log.d(TAG, "Running in :worker process, skipping UI lifecycle tracking")
+            return
+        }
+
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
                 startedActivityCount++

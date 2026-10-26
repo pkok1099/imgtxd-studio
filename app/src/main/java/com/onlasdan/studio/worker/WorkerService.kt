@@ -40,7 +40,8 @@ class WorkerService : Service() {
     companion object {
         private const val TAG = "WorkerService"
         private const val WAKELOCK_TAG = "ImgTxdStudio:WorkerWakeLock"
-        private const val WAKELOCK_TIMEOUT_MS = 2 * 60 * 60 * 1000L // 2 hours safety limit
+        // Timeout per-item / batch kecil (10 menit) untuk mencegah kebocoran wakelock permanen
+        private const val WAKELOCK_TIMEOUT_MS = 10 * 60 * 1000L
 
         @Volatile
         var customJobEngine: JobEngine? = null
@@ -146,6 +147,16 @@ class WorkerService : Service() {
         override fun registerCallback(callback: IWorkerCallback?) {
             if (callback != null) {
                 callbacks.register(callback)
+                // Segera kirimkan snapshot status antrean terkini saat UI melakukan bind / register
+                try {
+                    val snapshots = getActiveJobsInternal()
+                    if (snapshots.isNotEmpty()) {
+                        callback.onQueueChanged(snapshots)
+                        snapshots.lastOrNull()?.let { callback.onProgress(it) }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Gagal mengirimkan initial snapshot ke callback", e)
+                }
             }
         }
 
@@ -185,6 +196,31 @@ class WorkerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Muat sisa antrean persisten dari disk jika ada pekerjaan yang belum tuntas
+        serviceScope.launch {
+            try {
+                val pendingJobs = com.onlasdan.studio.worker.queue.PersistentJobQueue.getInstance(applicationContext).loadQueue()
+                for (pJob in pendingJobs) {
+                    synchronized(queueLock) {
+                        if (jobQueue.none { it.id == pJob.request.id } && currentJob?.id != pJob.request.id) {
+                            jobQueue.addLast(pJob.request)
+                            activeJobProgressMap[pJob.request.id] = JobProgress(
+                                id = pJob.request.id,
+                                percent = if (pJob.totalItems > 0) pJob.currentItemIndex.toFloat() / pJob.totalItems else 0f,
+                                currentItem = pJob.currentItemIndex,
+                                totalItems = pJob.totalItems,
+                                status = "QUEUED",
+                                message = "Resumed from persistent queue"
+                            )
+                        }
+                    }
+                }
+                startProcessingIfNeeded()
+            } catch (e: Exception) {
+                Log.w(TAG, "Gagal memuat antrean persisten saat onStartCommand", e)
+            }
+        }
+
         if (intent != null) {
             when (intent.action) {
                 WorkerContracts.ACTION_CANCEL_JOB -> {
@@ -266,6 +302,13 @@ class WorkerService : Service() {
             currentItemName = null,
             message = "Waiting in queue..."
         )
+
+        // Simpan ke PersistentJobQueue di disk
+        try {
+            com.onlasdan.studio.worker.queue.PersistentJobQueue.getInstance(applicationContext).enqueue(request)
+        } catch (e: Exception) {
+            Log.w(TAG, "Gagal menambahkan job ke PersistentJobQueue disk", e)
+        }
 
         synchronized(queueLock) {
             jobQueue.addLast(request)
@@ -461,6 +504,13 @@ class WorkerService : Service() {
                         activeJobProgressMap.remove(nextRequest.id)
                     }
 
+                    // Hapus job dari PersistentJobQueue jika selesai atau gagal
+                    try {
+                        com.onlasdan.studio.worker.queue.PersistentJobQueue.getInstance(applicationContext).removeJob(nextRequest.id)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Gagal menghapus job dari PersistentJobQueue", e)
+                    }
+
                     notifyFinished(result)
                     notifyQueueChanged()
 
@@ -617,7 +667,7 @@ class WorkerService : Service() {
             isTimingOut = true
         }
 
-        Log.w(TAG, "System timeout triggered for startId: $startId, fgsType: $fgsType. Starting session cycling to reset system quota...")
+        Log.w(TAG, "System timeout triggered for startId: $startId, fgsType: $fgsType. Stopping cleanly per Android policy...")
         processingJob?.cancel()
 
         val active = currentJob
@@ -633,15 +683,19 @@ class WorkerService : Service() {
                 com.onlasdan.studio.worker.engine.CheckpointManager.markInterrupted(active.targetPath)
             } catch (_: Throwable) {}
 
-            // Jadwalkan auto-resume segera via AlarmManager untuk me-reset kuota latar belakang Android
-            JobGuardianReceiver.scheduleImmediateResume(applicationContext, 3000L, active.targetPath)
-
-            val cyclingProgress = JobProgress(
+            val interruptedProgress = JobProgress(
                 id = activeId,
                 status = "INTERRUPTED",
-                message = "Memperbarui siklus latar belakang (me-reset kuota sistem Android)..."
+                message = "Batas waktu sistem tercapai. Ketuk untuk melanjutkan pekerjaan."
             )
-            notifyProgress(cyclingProgress)
+            notifyProgress(interruptedProgress)
+
+            // Kirim notifikasi user: tidak me-restart FGS otomatis dari background.
+            // Resume hanya dipicu saat pengguna mengetuk notifikasi / membuka UI.
+            WorkerNotificationHelper.sendFailedNotification(
+                this@WorkerService,
+                "Batas waktu latar belakang tercapai. Buka aplikasi untuk melanjutkan."
+            )
         }
 
         synchronized(queueLock) {

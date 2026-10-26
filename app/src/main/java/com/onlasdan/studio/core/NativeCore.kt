@@ -44,6 +44,7 @@ object NativeCore {
     private external fun nativeImgRename(path: String, dir: String?, index: Int, newName: String): String?
     private external fun nativeImgRebuild(path: String, dir: String?): Array<String>?
     private external fun nativeTxdList(path: String): Array<String>?
+    private external fun nativeTxdCreate(path: String, rwVersion: Int): String?
     private external fun nativeTxdTexturePixels(path: String, index: Int): IntArray?
     private external fun nativeTxdReplaceTextures(
         path: String, indices: IntArray, pixelsList: Array<IntArray>,
@@ -398,6 +399,17 @@ object NativeCore {
     fun encodeDxt1(pixels: IntArray, width: Int, height: Int): ByteArray? = if (isAvailable) {
         try {
             nativeEncodeDxt1(pixels, width, height)
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /** Creates a new empty TXD dictionary file at [path]. Returns "OK created" or "ERROR <msg>". */
+    fun txdCreate(path: String, rwVersion: Int = 0): String? = if (isAvailable) {
+        try {
+            nativeTxdCreate(path, rwVersion)
         } catch (_: Throwable) {
             null
         }

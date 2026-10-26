@@ -39,6 +39,8 @@ fun QuickMenuBottomSheet(
     onOpenHistory: () -> Unit = {},
     onFixAudio: () -> Unit = {},
     onOpenTexdbCache: () -> Unit = {},
+    onOpenTxdEditor: () -> Unit = {},
+    onCreateNewTxd: () -> Unit = {},
     onInspectDff: () -> Unit = {},
     onVerifyArchive: () -> Unit = {},
     onGameAudit: () -> Unit = {},
@@ -91,10 +93,10 @@ fun QuickMenuBottomSheet(
                 }
             }
 
-            // Group: NAVIGASI & BERKAS
+            // Group: NAVIGATION & GAME ENGINES
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "NAVIGATION & FILES",
+                    text = "PRIMARY TOOLS & ARCHIVES",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -108,7 +110,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.FolderOpen,
                             title = "Open IMG Archive",
-                            subtitle = "Pick an .img archive file from storage",
+                            subtitle = "Buka arsip .img (GTA SA / VC / III) untuk modifikasi model & tekstur",
                             onClick = {
                                 onDismissRequest()
                                 onOpenArchive()
@@ -116,19 +118,29 @@ fun QuickMenuBottomSheet(
                         )
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         QuickMenuItem(
-                            icon = Icons.Outlined.Layers,
-                            title = "Texdb",
-                            subtitle = "Browse and edit GTA texture caches (texdb) - pick the cache FOLDER",
+                            icon = Icons.Outlined.Image,
+                            title = "TXD Editor (View & Edit)",
+                            subtitle = "Buka dan edit file .txd (lihat tekstur, replace, tambah gambar, ekstrak PNG)",
                             onClick = {
                                 onDismissRequest()
-                                onOpenTexdbCache()
+                                onOpenTxdEditor()
+                            }
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        QuickMenuItem(
+                            icon = Icons.Outlined.CreateNewFolder,
+                            title = "TXD Maker (Buat TXD Baru)",
+                            subtitle = "Buat arsip kamus tekstur .txd baru dari awal untuk modding",
+                            onClick = {
+                                onDismissRequest()
+                                onCreateNewTxd()
                             }
                         )
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         QuickMenuItem(
                             icon = Icons.Outlined.ViewInAr,
-                            title = "Inspect DFF",
-                            subtitle = "Model structure report (RW version, geometry, textures) + rename textures inside DFF",
+                            title = "DFF View & Inspector",
+                            subtitle = "Inspeksi model 3D .dff (struktur RW, mesh, daftar tekstur & rename)",
                             onClick = {
                                 onDismissRequest()
                                 onInspectDff()
@@ -136,9 +148,36 @@ fun QuickMenuBottomSheet(
                         )
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         QuickMenuItem(
+                            icon = Icons.Outlined.Layers,
+                            title = "Texdb Cache Browser",
+                            subtitle = "Buka folder cache tekstur Android (texdb: gta3, gta_int, txd, player)",
+                            onClick = {
+                                onDismissRequest()
+                                onOpenTexdbCache()
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Group: MODDING & UTILITIES
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "MODDING UTILITIES",
+                    style = SectionHeaderStyle,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        QuickMenuItem(
                             icon = Icons.Outlined.Checklist,
                             title = "Game Texture Audit",
-                            subtitle = "Find missing & unused textures across the game folder (DFF vs texdb cache)",
+                            subtitle = "Audit tekstur hilang & tak terpakai di folder game (DFF vs texdb)",
                             onClick = {
                                 onDismissRequest()
                                 onGameAudit()
@@ -148,7 +187,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.FileCopy,
                             title = "Paste Mod Data Lines",
-                            subtitle = "Paste handling.cfg / vehicles.ide / carcols.dat lines from a mod's readme into the game file",
+                            subtitle = "Tempel baris data mod (handling.cfg / vehicles.ide / carcols.dat)",
                             onClick = {
                                 onDismissRequest()
                                 onDataLines()
@@ -158,7 +197,7 @@ fun QuickMenuBottomSheet(
                         QuickMenuItem(
                             icon = Icons.Outlined.Audiotrack,
                             title = "Fix SA Audio (.osw)",
-                            subtitle = "Rebuild the .idx for a modified .osw audio archive",
+                            subtitle = "Rebuild index .idx untuk arsip audio .osw yang dimodifikasi",
                             onClick = {
                                 onDismissRequest()
                                 onFixAudio()
@@ -166,9 +205,9 @@ fun QuickMenuBottomSheet(
                         )
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         QuickMenuItem(
-                            icon = Icons.Outlined.FileCopy,
-                            title = "Export from Multiple TXDs",
-                            subtitle = "Export all textures from multiple .txd files at once",
+                            icon = Icons.Outlined.Collections,
+                            title = "Export Multiple TXD",
+                            subtitle = "Ekstrak massal seluruh tekstur dari banyak file .txd sekaligus",
                             onClick = {
                                 onDismissRequest()
                                 onExportMultipleTxd()

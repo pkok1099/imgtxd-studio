@@ -282,7 +282,7 @@ fun TxdEditorScreen(
         ),
         ContextualDockItem(
             id = "more",
-            icon = Icons.Outlined.MoreHoriz,
+            icon = Icons.Outlined.Settings,
             contentDescription = "Opsi lainnya",
             onClick = { showMoreActionsSheet = true }
         )
@@ -369,7 +369,7 @@ fun TxdEditorScreen(
         )
     }
 
-    // 2. Sheet "Lainnya"
+    // 2. Sheet "Lainnya" (Contextual TXD Options)
     if (showMoreActionsSheet) {
         MoreActionsBottomSheet(
             onDismissRequest = { showMoreActionsSheet = false },
@@ -380,22 +380,7 @@ fun TxdEditorScreen(
             onToggleTxdViewMode = { toggleViewMode() },
             onAddTextures = if (onAddTextures != null) ({ showAddTexturesPicker = true }) else null,
             onExportAll = { showExportAllPicker = true },
-            onOpenWindowMode = { onOpenWindowMode?.invoke() },
-            onOpenSettings = {
-                if (onOpenSettings != null) onOpenSettings()
-                else showSettingsDialog = true
-            },
-            onOpenRuntimeSettings = {
-                showMoreActionsSheet = false
-                showRuntimeSettingsSheet = true
-            },
-            onOpenAbout = { onOpenAbout?.invoke() },
-            onCloseFile = { onClose() },
-            onOpenShizuku = {
-                if (!ShizukuManager.hasPermission()) {
-                    ShizukuManager.requestPermission()
-                }
-            }
+            onCloseFile = { onClose() }
         )
     }
 

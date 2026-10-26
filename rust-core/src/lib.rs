@@ -91,9 +91,19 @@ fn int_array_to_vec(env: &mut JNIEnv, array: &JIntArray) -> Option<Vec<u32>> {
     if len < 0 {
         return None;
     }
-    let mut buf = vec![0i32; len as usize];
+    let ulen = len as usize;
+    let mut buf = Vec::new();
+    if buf.try_reserve_exact(ulen).is_err() {
+        return None;
+    }
+    buf.resize(ulen, 0i32);
     env.get_int_array_region(array, 0, &mut buf).ok()?;
-    Some(buf.iter().map(|&v| v as u32).collect())
+    let mut out = Vec::new();
+    if out.try_reserve_exact(ulen).is_err() {
+        return None;
+    }
+    out.extend(buf.iter().map(|&v| v as u32));
+    Some(out)
 }
 
 fn vec_to_int_array(env: &mut JNIEnv, data: &[u32]) -> jintArray {
@@ -1006,6 +1016,24 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdAddText
             "added={added} overwritten={overwritten} total={total}"
         ))
     })();
+    report_string(&mut env, result)
+}
+
+/// Creates a new empty TXD dictionary file at `path`.
+/// Returns "OK" or "ERROR <msg>".
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdCreate(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+    rw_version: jint,
+) -> jstring {
+    let path_str = jstring_to_string(&mut env, &path);
+    let result = txd::create_empty_file(
+        std::path::Path::new(&path_str),
+        rw_version as u32,
+    )
+    .map(|_| "created".to_string());
     report_string(&mut env, result)
 }
 

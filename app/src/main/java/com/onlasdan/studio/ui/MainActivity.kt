@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -58,7 +59,6 @@ import com.onlasdan.studio.ui.framework.ContextualDockItem
 import com.onlasdan.studio.ui.framework.ContextualPillDock
 import com.onlasdan.studio.ui.sheets.AboutBottomSheet
 import com.onlasdan.studio.ui.sheets.ImgEntryBottomSheet
-import com.onlasdan.studio.ui.sheets.ModloaderSheet
 import com.onlasdan.studio.ui.sheets.MoreActionsBottomSheet
 import com.onlasdan.studio.ui.sheets.OperationsHistorySheet
 import com.onlasdan.studio.ui.sheets.ProcessDetailBottomSheet
@@ -373,15 +373,14 @@ fun MainScreen(
     // Sub-sheets & Dialogs
     var selectedImgEntryForSheet by remember { mutableStateOf<ImgEntry?>(null) }
     var showMoreActionsSheet by rememberSaveable { mutableStateOf(false) }
-    var showModloaderSheet by rememberSaveable { mutableStateOf(false) }
-    var showIdeFolderPicker by remember { mutableStateOf(false) }
-    var showLoaderFilePicker by remember { mutableStateOf(false) }
     var showQuickMenuSheet by rememberSaveable { mutableStateOf(false) }
     var showHistorySheet by rememberSaveable { mutableStateOf(false) }
     var showMultiTxdPicker by remember { mutableStateOf(false) }
     var showOswPicker by remember { mutableStateOf(false) }
     var showTexdbPicker by remember { mutableStateOf(false) }
     var showDffInspectPicker by remember { mutableStateOf(false) }
+    var showOpenTxdPicker by remember { mutableStateOf(false) }
+    var showCreateTxdDialog by remember { mutableStateOf(false) }
     var imgVerifyReport by remember { mutableStateOf<String?>(null) }
     var showAuditFolderPicker by remember { mutableStateOf(false) }
     var auditReport by remember { mutableStateOf<String?>(null) }
@@ -471,7 +470,6 @@ fun MainScreen(
     // BACK NAVIGATION RULES (Priority 1 -> 5)
     val isAnySheetOpen = selectedImgEntryForSheet != null ||
             showMoreActionsSheet ||
-            showModloaderSheet ||
             showQuickMenuSheet ||
             showSettingsSheet ||
             showAboutSheet ||
@@ -490,7 +488,6 @@ fun MainScreen(
             // Rule 1: Sheet terbuka -> tutup sheet
             selectedProcessForDetail != null -> selectedProcessForDetail = null
             selectedImgEntryForSheet != null -> selectedImgEntryForSheet = null
-            showModloaderSheet -> showModloaderSheet = false
             showMoreActionsSheet -> showMoreActionsSheet = false
             showQuickMenuSheet -> showQuickMenuSheet = false
             showSettingsSheet -> showSettingsSheet = false
@@ -512,7 +509,13 @@ fun MainScreen(
                 showBusyProcessDialog = true
             }
 
-            // Rule 4: Navigasi hierarkis berkas
+            // Rule 4: Navigasi hierarkis berkas & layar
+            activeDockTab == "settings" -> {
+                activeDockTab = "home"
+            }
+            activeDockTab == "history" -> {
+                activeDockTab = "home"
+            }
             activeDockTab == "txd" -> {
                 if (uiState.activeTxdSourceEntry != null) {
                     // TXD dibuka dari dalam IMG -> kembali ke IMG (TIDAK menutup TXD dari memori)
@@ -538,9 +541,77 @@ fun MainScreen(
             id = "home",
             icon = Icons.Outlined.Home,
             contentDescription = "Beranda",
-            isSelected = true,
+            isSelected = activeDockTab == "home",
             onClick = {
-                coroutineScope.launch { homeListState.animateScrollToItem(0) }
+                if (activeDockTab != "home") {
+                    activeDockTab = "home"
+                } else {
+                    coroutineScope.launch { homeListState.animateScrollToItem(0) }
+                }
+            }
+        ),
+        ContextualDockItem(
+            id = "archive",
+            icon = Icons.Outlined.FolderOpen,
+            contentDescription = "IMG Archive",
+            showDotBadge = isImgOpen,
+            isSelected = activeDockTab == "archive",
+            onClick = {
+                if (isImgOpen) {
+                    activeDockTab = "archive"
+                } else {
+                    showOpenArchivePicker = true
+                }
+            }
+        ),
+        ContextualDockItem(
+            id = "txd",
+            icon = Icons.Outlined.Layers,
+            contentDescription = "Texdb",
+            showDotBadge = isAnyTxdOpen,
+            isSelected = activeDockTab == "txd",
+            onClick = {
+                if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
+                    activeDockTab = "txd"
+                } else if (isExternalTxdOpen) {
+                    val intent = Intent(context, TxdEditorActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                } else {
+                    showTexdbPicker = true
+                }
+            }
+        ),
+        ContextualDockItem(
+            id = "history",
+            icon = Icons.Outlined.History,
+            contentDescription = "Operations History",
+            isSelected = activeDockTab == "history",
+            onClick = {
+                activeDockTab = "history"
+            }
+        ),
+        ContextualDockItem(
+            id = "settings",
+            icon = Icons.Outlined.Settings,
+            contentDescription = "Settings",
+            isSelected = activeDockTab == "settings",
+            onClick = {
+                activeDockTab = "settings"
+            }
+        )
+    )
+
+    // DOCK ITEMS: HISTORY SCREEN
+    val historyDockItems = listOf(
+        ContextualDockItem(
+            id = "home",
+            icon = Icons.Outlined.Home,
+            contentDescription = "Beranda",
+            isSelected = false,
+            onClick = {
+                activeDockTab = "home"
             }
         ),
         ContextualDockItem(
@@ -575,20 +646,80 @@ fun MainScreen(
             }
         ),
         ContextualDockItem(
-            id = "recent",
+            id = "history",
             icon = Icons.Outlined.History,
-            contentDescription = "Recent files",
+            contentDescription = "Operations History",
+            isSelected = true,
+            onClick = { /* Already on history */ }
+        ),
+        ContextualDockItem(
+            id = "settings",
+            icon = Icons.Outlined.Settings,
+            contentDescription = "Settings",
+            isSelected = false,
             onClick = {
-                coroutineScope.launch { homeListState.animateScrollToItem(2) }
+                activeDockTab = "settings"
+            }
+        )
+    )
+
+    // DOCK ITEMS: SETTINGS SCREEN
+    val settingsDockItems = listOf(
+        ContextualDockItem(
+            id = "home",
+            icon = Icons.Outlined.Home,
+            contentDescription = "Beranda",
+            isSelected = false,
+            onClick = {
+                activeDockTab = "home"
             }
         ),
         ContextualDockItem(
-            id = "menu",
-            icon = Icons.Outlined.MoreHoriz,
-            contentDescription = "App menu & options",
+            id = "archive",
+            icon = Icons.Outlined.FolderOpen,
+            contentDescription = "IMG Archive",
+            showDotBadge = isImgOpen,
             onClick = {
-                showQuickMenuSheet = true
+                if (isImgOpen) {
+                    activeDockTab = "archive"
+                } else {
+                    showOpenArchivePicker = true
+                }
             }
+        ),
+        ContextualDockItem(
+            id = "txd",
+            icon = Icons.Outlined.Layers,
+            contentDescription = "Texdb",
+            showDotBadge = isAnyTxdOpen,
+            onClick = {
+                if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
+                    activeDockTab = "txd"
+                } else if (isExternalTxdOpen) {
+                    val intent = Intent(context, TxdEditorActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                } else {
+                    showTexdbPicker = true
+                }
+            }
+        ),
+        ContextualDockItem(
+            id = "history",
+            icon = Icons.Outlined.History,
+            contentDescription = "Operations History",
+            isSelected = false,
+            onClick = {
+                activeDockTab = "history"
+            }
+        ),
+        ContextualDockItem(
+            id = "settings",
+            icon = Icons.Outlined.Settings,
+            contentDescription = "Settings",
+            isSelected = true,
+            onClick = { /* Already on settings */ }
         )
     )
 
@@ -623,7 +754,7 @@ fun MainScreen(
         ),
         ContextualDockItem(
             id = "more",
-            icon = Icons.Outlined.MoreHoriz,
+            icon = Icons.Outlined.Settings,
             contentDescription = "Opsi lainnya",
             onClick = { showMoreActionsSheet = true }
         )
@@ -710,18 +841,23 @@ fun MainScreen(
                                 showOpenArchivePicker = true
                             }
                         },
-                        onOpenTxd = {
-                            if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
-                                activeDockTab = "txd"
-                            } else if (isExternalTxdOpen) {
-                                val intent = Intent(context, TxdEditorActivity::class.java).apply {
-                                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
-                                }
-                                context.startActivity(intent)
-                            } else {
-                                showTexdbPicker = true
-                            }
+                        onOpenTxdEditor = {
+                            showOpenTxdPicker = true
                         },
+                        onCreateNewTxd = {
+                            showCreateTxdDialog = true
+                        },
+                        onInspectDff = {
+                            showDffInspectPicker = true
+                        },
+                        onOpenTexdb = {
+                            showTexdbPicker = true
+                        },
+                        onGameAudit = { showAuditFolderPicker = true },
+                        onDataLines = { showDataFilePicker = true },
+                        onFixAudio = { showOswPicker = true },
+                        onExportMultipleTxd = { showMultiTxdPicker = true },
+                        onOpenHistory = { activeDockTab = "history" },
                         onOpenRecent = { item ->
                             if (item.type == LauncherFileType.FOLDER) {
                                 openTexdbFolder(item.path, item.isShizuku)
@@ -750,6 +886,38 @@ fun MainScreen(
                         modifier = Modifier.align(Alignment.BottomCenter)
                     )
                 }
+            }
+
+            "history" -> {
+                OperationsHistoryScreen(
+                    dockItems = historyDockItems,
+                    isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
+                    onShizukuClick = {
+                        if (!ShizukuManager.isShizukuAvailable()) {
+                            Toast.makeText(context, "Shizuku service not detected. Open the Shizuku app first.", Toast.LENGTH_LONG).show()
+                        } else if (!ShizukuManager.hasPermission()) {
+                            ShizukuManager.requestPermission()
+                        } else {
+                            Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+            }
+
+            "settings" -> {
+                SettingsScreen(
+                    dockItems = settingsDockItems,
+                    isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
+                    onShizukuClick = {
+                        if (!ShizukuManager.isShizukuAvailable()) {
+                            Toast.makeText(context, "Shizuku service not detected. Open the Shizuku app first.", Toast.LENGTH_LONG).show()
+                        } else if (!ShizukuManager.hasPermission()) {
+                            ShizukuManager.requestPermission()
+                        } else {
+                            Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
             }
 
             "archive" -> {
@@ -917,7 +1085,7 @@ fun MainScreen(
         )
     }
 
-    // 2. Sheet "Lainnya" untuk IMG
+    // 2. Sheet "Lainnya" untuk IMG (Contextual IMG Archive Options)
     if (showMoreActionsSheet) {
         MoreActionsBottomSheet(
             onDismissRequest = { showMoreActionsSheet = false },
@@ -933,22 +1101,6 @@ fun MainScreen(
                 showMoreActionsSheet = false
                 showRebuildDialog = true
             },
-            onOpenWindowMode = {
-                showMoreActionsSheet = false
-                showSettingsSheet = true
-            },
-            onOpenSettings = {
-                showMoreActionsSheet = false
-                showSettingsSheet = true
-            },
-            onOpenRuntimeSettings = {
-                showMoreActionsSheet = false
-                showRuntimeSettingsSheet = true
-            },
-            onOpenAbout = {
-                showMoreActionsSheet = false
-                showAboutSheet = true
-            },
             onCloseFile = {
                 showMoreActionsSheet = false
                 if (uiState.hasUnsavedChanges) {
@@ -957,76 +1109,6 @@ fun MainScreen(
                     viewModel.closeArchive()
                     activeDockTab = "home"
                 }
-            },
-            onOpenShizuku = {
-                if (!ShizukuManager.isShizukuAvailable()) {
-                    Toast.makeText(context, "Shizuku service not detected.", Toast.LENGTH_SHORT).show()
-                } else if (!ShizukuManager.hasPermission()) {
-                    ShizukuManager.requestPermission()
-                } else {
-                    Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
-                }
-            },
-            onOpenModloader = {
-                showMoreActionsSheet = false
-                showModloaderSheet = true
-            }
-        )
-    }
-
-    // 2b. Sheet Modloader (IPC ke plugin di dalam game)
-    LaunchedEffect(showModloaderSheet) {
-        if (showModloaderSheet) viewModel.loadLoaderIdeIndex(context)
-    }
-    if (showModloaderSheet) {
-        ModloaderSheet(
-            onDismissRequest = { showModloaderSheet = false },
-            hasArchive = uiState.archive != null,
-            modelEntries = uiState.entries.filter {
-                it.cleanName.endsWith(".dff", ignoreCase = true) ||
-                    it.cleanName.endsWith(".txd", ignoreCase = true)
-            },
-            selectedEntry = uiState.loaderSelectedEntry,
-            selectedFile = uiState.loaderSelectedFile,
-            modelIdText = uiState.loaderModelId,
-            modelIdHint = uiState.loaderModelIdHint,
-            ideModelCount = uiState.loaderIdeIndex?.modelCount,
-            ideBusy = uiState.loaderIdeBusy,
-            connected = uiState.loaderConnected,
-            busy = uiState.loaderBusy,
-            feedback = uiState.loaderFeedback,
-            onCheckConnection = { viewModel.checkLoaderConnection() },
-            onSelectEntry = { viewModel.selectLoaderEntry(it) },
-            onPickFile = { showLoaderFilePicker = true },
-            onModelIdChange = { viewModel.setLoaderModelId(it) },
-            onScanIde = { showIdeFolderPicker = true },
-            onSubstitute = { viewModel.substituteLoaderEntry(context) },
-            onReload = { viewModel.reloadLoaderModel() }
-        )
-    }
-
-    // 2b2. IDE index scan: pick the game's data folder (files/ or files/data/)
-    if (showIdeFolderPicker) {
-        FilePickerDialog(
-            title = "Pick Game Data Folder (contains .ide files)",
-            mode = PickerMode.PICK_FOLDER,
-            onDismissRequest = { showIdeFolderPicker = false },
-            onFileSelected = { path, isShizuku ->
-                showIdeFolderPicker = false
-                viewModel.scanLoaderIdeIndex(context, path, isShizuku)
-            }
-        )
-    }
-
-    // 2b3. Modloader loose payload: pick a standalone .dff/.txd file
-    if (showLoaderFilePicker) {
-        FilePickerDialog(
-            title = stringResource(R.string.modloader_pick_file_title),
-            mode = PickerMode.PICK_FILE,
-            onDismissRequest = { showLoaderFilePicker = false },
-            onFileSelected = { path, isShizuku ->
-                showLoaderFilePicker = false
-                viewModel.selectLoaderFileFromPicker(context, path, isShizuku)
             }
         )
     }
@@ -1043,9 +1125,11 @@ fun MainScreen(
             onSelectAll = { viewModel.selectAll() },
             onOpenSettings = { showSettingsSheet = true },
             onExportMultipleTxd = { showMultiTxdPicker = true },
-            onOpenHistory = { showHistorySheet = true },
+            onOpenHistory = { activeDockTab = "history" },
             onFixAudio = { showOswPicker = true },
             onOpenTexdbCache = { showTexdbPicker = true },
+            onOpenTxdEditor = { showOpenTxdPicker = true },
+            onCreateNewTxd = { showCreateTxdDialog = true },
             onInspectDff = { showDffInspectPicker = true },
             onVerifyArchive = {
                 val imgPath = uiState.archive?.imgFile?.absolutePath
@@ -1170,6 +1254,83 @@ fun MainScreen(
                     putExtra(DffInspectorActivity.EXTRA_IS_SHIZUKU, isShizuku)
                 }
                 context.startActivity(intent)
+            }
+        )
+    }
+
+    // 3b2c. TXD Editor: pick a .txd file, open TxdEditorActivity
+    if (showOpenTxdPicker) {
+        FilePickerDialog(
+            title = "Pilih File .txd",
+            mode = PickerMode.PICK_FILE,
+            onDismissRequest = { showOpenTxdPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showOpenTxdPicker = false
+                val intent = Intent(context, TxdEditorActivity::class.java).apply {
+                    putExtra(WindowLauncher.EXTRA_FILE_PATH, path)
+                    putExtra("is_shizuku", isShizuku)
+                }
+                context.startActivity(intent)
+            }
+        )
+    }
+
+    // 3b2d. TXD Maker: dialog pembuatan file TXD baru
+    if (showCreateTxdDialog) {
+        var newTxdName by remember { mutableStateOf("") }
+        var selectedVersion by remember { mutableStateOf(0x1803FFFF) } // RW_VERSION_SA
+        AlertDialog(
+            onDismissRequest = { showCreateTxdDialog = false },
+            title = { Text("TXD Maker - Buat TXD Baru") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Masukkan nama file TXD baru. File akan dibuat di folder cache/dokumen dan otomatis dibuka di TXD Editor.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = newTxdName,
+                        onValueChange = { newTxdName = it },
+                        label = { Text("Nama File (contoh: new_textures.txd)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanName = if (newTxdName.endsWith(".txd", ignoreCase = true)) {
+                            newTxdName.trim()
+                        } else {
+                            "${newTxdName.trim()}.txd"
+                        }
+                        if (cleanName.isNotBlank() && cleanName != ".txd") {
+                            showCreateTxdDialog = false
+                            val targetFile = File(context.cacheDir, cleanName)
+                            val res = NativeCore.txdCreate(targetFile.absolutePath, selectedVersion)
+                            if (res != null && res.startsWith("OK")) {
+                                Toast.makeText(context, "TXD baru dibuat: $cleanName", Toast.LENGTH_SHORT).show()
+                                val intent = Intent(context, TxdEditorActivity::class.java).apply {
+                                    putExtra(WindowLauncher.EXTRA_FILE_PATH, targetFile.absolutePath)
+                                    putExtra("is_shizuku", false)
+                                }
+                                context.startActivity(intent)
+                            } else {
+                                Toast.makeText(context, "Gagal membuat TXD: $res", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    enabled = newTxdName.isNotBlank()
+                ) {
+                    Text("Buat & Buka")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateTxdDialog = false }) {
+                    Text("Batal")
+                }
             }
         )
     }
@@ -1499,7 +1660,15 @@ private fun HomeScreen(
     onGrantStorage: () -> Unit,
     recentFiles: List<RecentFileItem>,
     onOpenImg: () -> Unit,
-    onOpenTxd: () -> Unit,
+    onOpenTxdEditor: () -> Unit,
+    onCreateNewTxd: () -> Unit,
+    onInspectDff: () -> Unit,
+    onOpenTexdb: () -> Unit,
+    onGameAudit: () -> Unit,
+    onDataLines: () -> Unit,
+    onFixAudio: () -> Unit,
+    onExportMultipleTxd: () -> Unit,
+    onOpenHistory: () -> Unit,
     onOpenRecent: (RecentFileItem) -> Unit
 ) {
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -1560,7 +1729,7 @@ private fun HomeScreen(
             }
         }
 
-        // Hero Card
+        // Hero Card & App Title
         item(key = "home_hero_card") {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1569,20 +1738,20 @@ private fun HomeScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
+                            .size(60.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.FolderOpen,
                             contentDescription = null,
-                            modifier = Modifier.size(36.dp),
+                            modifier = Modifier.size(32.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -1594,53 +1763,135 @@ private fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Open and manage .img archives and .txd textures. Compatible with Grand Theft Auto (SA, VC, III) and Bully. Direct Android/data access via Shizuku, no root!",
+                        text = "Archive manager & texture editor for GTA (SA, VC, III) & Bully. High-speed Rust core with direct Shizuku support.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
-                    Text(
-                        text = "Not affiliated with Rockstar Games / Take-Two.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center
+                }
+            }
+        }
+
+        // Section: PRIMARY TOOLS & EDITORS
+        item(key = "home_core_tools_header") {
+            Text(
+                text = "PRIMARY TOOLS & EDITORS",
+                style = SectionHeaderStyle,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+            )
+        }
+
+        item(key = "home_core_tools_grid") {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Row 1: Primary actions (Open IMG & TXD Editor)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FeatureActionCard(
+                        title = "Open IMG Archive",
+                        subtitle = "Buka & kelola arsip .img",
+                        icon = Icons.Outlined.FolderOpen,
+                        modifier = Modifier.weight(1f),
+                        isPrimary = true,
+                        onClick = onOpenImg
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Button(
-                            onClick = onOpenImg,
-                            shape = CircleShape,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            )
-                        ) {
-                            Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Open IMG", fontWeight = FontWeight.SemiBold)
-                        }
-                        OutlinedButton(
-                            onClick = onOpenTxd,
-                            shape = CircleShape,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            )
-                        ) {
-                            Icon(Icons.Outlined.Palette, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Texdb", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                    FeatureActionCard(
+                        title = "TXD Editor",
+                        subtitle = "Edit, tambah & ekstrak tekstur",
+                        icon = Icons.Outlined.Image,
+                        modifier = Modifier.weight(1f),
+                        isPrimary = true,
+                        onClick = onOpenTxdEditor
+                    )
+                }
+
+                // Row 2: Secondary creation & inspection (TXD Maker, DFF View, Texdb)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FeatureActionCard(
+                        title = "TXD Maker",
+                        subtitle = "Buat TXD baru",
+                        icon = Icons.Outlined.CreateNewFolder,
+                        modifier = Modifier.weight(1f),
+                        onClick = onCreateNewTxd
+                    )
+                    FeatureActionCard(
+                        title = "DFF View",
+                        subtitle = "Inspeksi 3D mesh",
+                        icon = Icons.Outlined.ViewInAr,
+                        modifier = Modifier.weight(1f),
+                        onClick = onInspectDff
+                    )
+                    FeatureActionCard(
+                        title = "Texdb Cache",
+                        subtitle = "Browser texdb",
+                        icon = Icons.Outlined.Layers,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenTexdb
+                    )
+                }
+            }
+        }
+
+        // Section: MODDING & UTILITIES
+        item(key = "home_modding_header") {
+            Text(
+                text = "MODDING & UTILITIES",
+                style = SectionHeaderStyle,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+            )
+        }
+
+        item(key = "home_modding_tools_grid") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    HomeToolRow(
+                        title = "Game Texture Audit",
+                        subtitle = "Audit tekstur hilang & tak terpakai (DFF vs texdb)",
+                        icon = Icons.Outlined.Checklist,
+                        onClick = onGameAudit
+                    )
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    HomeToolRow(
+                        title = "Paste Mod Data Lines",
+                        subtitle = "Tempel handling.cfg, vehicles.ide & carcols.dat otomatis",
+                        icon = Icons.Outlined.FileCopy,
+                        onClick = onDataLines
+                    )
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    HomeToolRow(
+                        title = "Fix SA Audio (.osw)",
+                        subtitle = "Rebuild index .idx untuk audio game yang dimodifikasi",
+                        icon = Icons.Outlined.Audiotrack,
+                        onClick = onFixAudio
+                    )
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    HomeToolRow(
+                        title = "Export Multiple TXD",
+                        subtitle = "Ekstrak massal seluruh tekstur dari folder/banyak TXD",
+                        icon = Icons.Outlined.Collections,
+                        onClick = onExportMultipleTxd
+                    )
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    HomeToolRow(
+                        title = "Operations History",
+                        subtitle = "Buka log dan ringkasan riwayat operasi background",
+                        icon = Icons.Outlined.History,
+                        onClick = onOpenHistory
+                    )
                 }
             }
         }
@@ -1651,7 +1902,7 @@ private fun HomeScreen(
                 text = "RECENT FILES",
                 style = SectionHeaderStyle,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp)
             )
         }
 
@@ -1711,6 +1962,131 @@ private fun HomeScreen(
             )
     )
 }
+}
+
+@Composable
+private fun FeatureActionCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    isPrimary: Boolean = false,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPrimary) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            }
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (isPrimary) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            else MaterialTheme.colorScheme.outlineVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .background(
+                        if (isPrimary) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (isPrimary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeToolRow(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.size(18.dp)
+        )
+    }
 }
 
 @Composable

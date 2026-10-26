@@ -26,9 +26,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.PhotoSizeSelectActual
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ViewCompact
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,6 +48,7 @@ import com.onlasdan.studio.ui.framework.ArchiveScreen
 import com.onlasdan.studio.ui.framework.ContextualDockItem
 import com.onlasdan.studio.ui.framework.ContextualPillDock
 import com.onlasdan.studio.ui.components.BusySheet
+import com.onlasdan.studio.ui.sheets.TexdbMoreActionsBottomSheet
 import com.onlasdan.studio.ui.components.ChoiceSheet
 import com.onlasdan.studio.ui.components.ConfirmSheet
 import com.onlasdan.studio.ui.components.InputSheet
@@ -137,6 +138,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
     var showTxdPicker by remember { mutableStateOf(false) }
     var showDffPicker by remember { mutableStateOf(false) }
     var pendingImport by remember { mutableStateOf<Pair<List<Pair<String, ByteArray>>, Boolean>?>(null) }
+    var showImportSourceSheet by remember { mutableStateOf(false) }
     var showFormatSheet by remember { mutableStateOf(false) }
     var importFormat by remember { mutableStateOf(0) }
     var busyText by remember { mutableStateOf<String?>(null) }
@@ -381,7 +383,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
                         icon = Icons.Outlined.Add,
                         contentDescription = "Import",
                         isEnabled = loadedCache != null,
-                        onClick = { showFormatSheet = true }
+                        onClick = { showImportSourceSheet = true }
                     ),
                     ContextualDockItem(
                         id = "view",
@@ -397,7 +399,7 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
                     ),
                     ContextualDockItem(
                         id = "more",
-                        icon = Icons.Outlined.MoreHoriz,
+                        icon = Icons.Outlined.Settings,
                         contentDescription = "More Options",
                         isEnabled = loadedCache != null,
                         onClick = { menuOpen = true }
@@ -419,63 +421,56 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
     )
 
     if (menuOpen) {
-        val menuChoices = buildList {
-            add(SheetChoice("From Images") { showFormatSheet = true })
-            add(SheetChoice("From TXD Archives") { showTxdPicker = true })
-            add(
-                SheetChoice("Rebuild Cache") {
-                    if (cacheDirPath != null) {
-                        busyText = "Rebuilding cache…"
-                        scope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                NativeCore.texdbRebuildCache(cacheDirPath)
+        TexdbMoreActionsBottomSheet(
+            onDismissRequest = { menuOpen = false },
+            folderName = File(cacheDirPath ?: "").name.ifBlank { "Texdb Cache" },
+            onImportImages = { showFormatSheet = true },
+            onImportTxd = { showTxdPicker = true },
+            onRebuildCache = {
+                if (cacheDirPath != null) {
+                    busyText = "Rebuilding cache…"
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            NativeCore.texdbRebuildCache(cacheDirPath)
+                        }
+                        busyText = null
+                        when {
+                            result == null -> toast("Rust engine unavailable")
+                            result.startsWith("OK") -> {
+                                toast("Rebuild done: ${result.removePrefix("OK ").replace(";", " · ")}")
+                                reload()
                             }
-                            busyText = null
-                            when {
-                                result == null -> toast("Rust engine unavailable")
-                                result.startsWith("OK") -> {
-                                    toast("Rebuild done: ${result.removePrefix("OK ").replace(";", " · ")}")
-                                    reload()
-                                }
-                                else -> toast("Rebuild failed: ${result.removePrefix("ERROR ")}")
-                            }
+                            else -> toast("Rebuild failed: ${result.removePrefix("ERROR ")}")
                         }
                     }
                 }
-            )
-            add(SheetChoice("Repack to DXT") { repackTarget = 0 })
-            add(SheetChoice("Repack to ETC") { repackTarget = 1 })
-            add(SheetChoice("Repack to Raw (565/4444)") { repackTarget = 2 })
-            add(SheetChoice("Check DFF") { showDffPicker = true })
-            if (gameDirPath != null) {
-                add(
-                    SheetChoice("Apply to Game Folder") {
-                        busyText = "Copying cache to game folder…"
-                        scope.launch {
-                            val (code, _) = withContext(Dispatchers.IO) {
-                                ShizukuManager.exec(
-                                    "cp -r \"$cacheDirPath/.\" \"$gameDirPath/\""
-                                )
-                            }
-                            busyText = null
-                            if (code == 0) toast("Cache applied to game folder")
-                            else toast("Apply to game folder failed (code $code)")
+            },
+            onRepackDxt = { repackTarget = 0 },
+            onRepackEtc = { repackTarget = 1 },
+            onRepackRaw = { repackTarget = 2 },
+            onCheckDff = { showDffPicker = true },
+            onApplyToGame = if (gameDirPath != null) {
+                {
+                    busyText = "Copying cache to game folder…"
+                    scope.launch {
+                        val (code, _) = withContext(Dispatchers.IO) {
+                            ShizukuManager.exec(
+                                "cp -r \"$cacheDirPath/.\" \"$gameDirPath/\""
+                            )
                         }
+                        busyText = null
+                        if (code == 0) toast("Cache applied to game folder")
+                        else toast("Apply to game folder failed (code $code)")
                     }
-                )
-            }
-            add(SheetChoice("Cache Info") { infoOpen = true })
-            add(SheetChoice("Sort by Name" + if (sortMode == 0) " ✓" else "") { sortMode = 0 })
-            add(SheetChoice("Sort by Size" + if (sortMode == 1) " ✓" else "") { sortMode = 1 })
-            add(SheetChoice("Sort by Dimensions" + if (sortMode == 2) " ✓" else "") { sortMode = 2 })
-            if (categories.size > 1) {
-                add(SheetChoice("Category: ${categoryFilter ?: "All"}") { showCategorySheet = true })
-            }
-        }
-        ChoiceSheet(
-            title = "Cache Texdb",
-            choices = menuChoices,
-            onDismissRequest = { menuOpen = false }
+                }
+            } else null,
+            onCacheInfo = { infoOpen = true },
+            onSelectCategory = if (categories.size > 1) {
+                { showCategorySheet = true }
+            } else null,
+            categoryName = categoryFilter,
+            sortMode = sortMode,
+            onSetSortMode = { sortMode = it }
         )
     }
 
@@ -752,6 +747,21 @@ Row {
                     }
                 }
             }
+        )
+    }
+
+    if (showImportSourceSheet) {
+        ChoiceSheet(
+            title = "Import Source",
+            choices = listOf(
+                SheetChoice("From TXD Archives") {
+                    showTxdPicker = true
+                },
+                SheetChoice("From Images") {
+                    showFormatSheet = true
+                }
+            ),
+            onDismissRequest = { showImportSourceSheet = false }
         )
     }
 

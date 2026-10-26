@@ -47,6 +47,27 @@ impl PixelImage {
             height,
         }
     }
+
+    /// Safely allocates a zeroed PixelImage using `try_reserve` to avoid crashing
+    /// the host process on extreme dimensions (e.g. 8192x8192 requiring 256MB).
+    pub fn try_new_zeroed(width: usize, height: usize) -> Result<Self, String> {
+        if width == 0 || height == 0 {
+            return Err(format!("invalid dimensions {width}x{height}"));
+        }
+        let total = width.checked_mul(height).ok_or_else(|| {
+            format!("dimensions overflow: {width}x{height}")
+        })?;
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(total).map_err(|e| {
+            format!("out of native memory allocating {total} pixels ({width}x{height}): {e}")
+        })?;
+        pixels.resize(total, 0u32);
+        Ok(Self {
+            pixels,
+            width,
+            height,
+        })
+    }
 }
 
 fn pack(a: u32, r: u32, g: u32, b: u32) -> u32 {

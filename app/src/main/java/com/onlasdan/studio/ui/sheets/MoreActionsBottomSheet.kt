@@ -14,14 +14,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.onlasdan.studio.R
 import com.onlasdan.studio.ui.FloatingSheet
 import com.onlasdan.studio.ui.theme.SectionHeaderStyle
-import com.onlasdan.studio.ui.theme.SemanticColors
 
+/**
+ * Contextual More Actions Sheet for active files (IMG Archive or TXD Editor).
+ * Strictly contains file-specific operations (no general system/settings shortcuts).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MoreActionsBottomSheet(
@@ -35,13 +36,7 @@ fun MoreActionsBottomSheet(
     isLargeImage: Boolean = false,
     onToggleTxdViewMode: (() -> Unit)? = null,
     onAddTextures: (() -> Unit)? = null,
-    onOpenWindowMode: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenRuntimeSettings: () -> Unit = {},
-    onOpenAbout: () -> Unit,
-    onCloseFile: () -> Unit,
-    onOpenShizuku: () -> Unit,
-    onOpenModloader: (() -> Unit)? = null
+    onCloseFile: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -55,10 +50,10 @@ fun MoreActionsBottomSheet(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header: Judul Sheet
+            // Header: Judul Sheet & Nama File
             Column {
                 Text(
-                    text = "Menu & File Options",
+                    text = if (isTxd) "TXD Options" else "IMG Archive Options",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -70,10 +65,10 @@ fun MoreActionsBottomSheet(
                 )
             }
 
-            // Grup: OPERASI BERKAS
+            // Grup: OPERASI BERKAS SPESIFIK
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "FILE OPERATIONS",
+                    text = if (isTxd) "TXD TEXTURE ACTIONS" else "ARCHIVE ACTIONS",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -88,7 +83,7 @@ fun MoreActionsBottomSheet(
                         MoreActionRow(
                             icon = Icons.Outlined.FileDownload,
                             title = if (isTxd) "Ekspor Semua PNG" else "Export All Files",
-                            subtitle = "Extract everything to storage",
+                            subtitle = if (isTxd) "Extract all textures to storage as PNG" else "Extract all archive entries to storage",
                             onClick = {
                                 onDismissRequest()
                                 onExportAll()
@@ -150,96 +145,10 @@ fun MoreActionsBottomSheet(
                 }
             }
 
-            // Grup: SISTEM & INTEGRASI
+            // Grup: KELUAR & TUTUP BERKAS
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "SISTEM & INTEGRASI",
-                    style = SectionHeaderStyle,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        MoreActionRow(
-                            icon = Icons.Outlined.Bolt,
-                            title = "Shizuku Status & Access",
-                            subtitle = "Kelola izin akses folder Android/data",
-                            onClick = {
-                                onDismissRequest()
-                                onOpenShizuku()
-                            }
-                        )
-
-                        if (onOpenModloader != null) {
-                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                            MoreActionRow(
-                                icon = Icons.Outlined.SportsEsports,
-                                title = stringResource(R.string.modloader_title),
-                                subtitle = stringResource(R.string.modloader_menu_subtitle),
-                                onClick = {
-                                    onDismissRequest()
-                                    onOpenModloader()
-                                }
-                            )
-                        }
-
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                        MoreActionRow(
-                            icon = Icons.Outlined.Layers,
-                            title = "Window Mode",
-                            subtitle = "Configure multi-window or single-window",
-                            onClick = {
-                                onDismissRequest()
-                                onOpenWindowMode()
-                            }
-                        )
-
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                        MoreActionRow(
-                            icon = Icons.Outlined.Settings,
-                            title = "Settings",
-                            subtitle = "Configure theme & app preferences",
-                            onClick = {
-                                onDismissRequest()
-                                onOpenSettings()
-                            }
-                        )
-
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                        MoreActionRow(
-                            icon = Icons.Outlined.Memory,
-                            title = "Runtime Process Settings",
-                            subtitle = "Service latar belakang & anggaran RAM",
-                            isEnabled = true,
-                            onClick = {
-                                onDismissRequest()
-                                onOpenRuntimeSettings()
-                            }
-                        )
-
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                        MoreActionRow(
-                            icon = Icons.Outlined.Info,
-                            title = "About",
-                            subtitle = "Version & license info",
-                            onClick = {
-                                onDismissRequest()
-                                onOpenAbout()
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Grup: KELUAR & TUTUP
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "MANAJEMEN SESI",
+                    text = "SESSION MANAGEMENT",
                     style = SectionHeaderStyle,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -253,7 +162,7 @@ fun MoreActionsBottomSheet(
                     MoreActionRow(
                         icon = Icons.Outlined.Close,
                         title = "Close File",
-                        subtitle = if (isFileBusy) "Waiting for process to finish..." else "Close file and go back home",
+                        subtitle = if (isFileBusy) "Waiting for process to finish..." else "Close file and return to Home",
                         iconTint = if (isFileBusy) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                         isEnabled = !isFileBusy,
                         onClick = {
@@ -268,7 +177,7 @@ fun MoreActionsBottomSheet(
 }
 
 @Composable
-private fun MoreActionRow(
+fun MoreActionRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
