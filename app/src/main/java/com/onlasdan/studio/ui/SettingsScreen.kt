@@ -396,7 +396,7 @@ fun SettingsScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = "v3.3.1 • High-speed Rust core & open-source licenses",
+                                        text = "v3.4.1 • High-speed Rust core & open-source licenses",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
