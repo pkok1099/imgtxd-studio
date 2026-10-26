@@ -351,7 +351,9 @@ fun MainScreen(
     val currentProcess by ProcessRepositoryLocator.get(context).currentProcess.collectAsState()
     val recentFiles by AppSettings.getRecentFilesFlow(context).collectAsState(initial = emptyList())
     val isExternalTxdOpen by ActiveSessionManager.isTxdOpen.collectAsState()
-    val isAnyTxdOpen = uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty() || isExternalTxdOpen
+    val isTexdbOpen by ActiveSessionManager.isTexdbOpen.collectAsState()
+    val activeTexdbDir by ActiveSessionManager.activeTexdbDir.collectAsState()
+    val isAnyTxdOpen = uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty() || isExternalTxdOpen || isTexdbOpen
 
     // Tabs: "home", "archive", "txd"
     var activeDockTab by rememberSaveable { mutableStateOf(if (uiState.archive != null) "archive" else "home") }
@@ -573,6 +575,11 @@ fun MainScreen(
             onClick = {
                 if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
                     activeDockTab = "txd"
+                } else if (isTexdbOpen) {
+                    val intent = Intent(context, TexdbBrowserActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    context.startActivity(intent)
                 } else if (isExternalTxdOpen) {
                     val intent = Intent(context, TxdEditorActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
@@ -635,6 +642,11 @@ fun MainScreen(
             onClick = {
                 if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
                     activeDockTab = "txd"
+                } else if (isTexdbOpen) {
+                    val intent = Intent(context, TexdbBrowserActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    context.startActivity(intent)
                 } else if (isExternalTxdOpen) {
                     val intent = Intent(context, TxdEditorActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK
@@ -695,6 +707,11 @@ fun MainScreen(
             onClick = {
                 if (uiState.isTxdViewerOpen || uiState.txdEntries.isNotEmpty()) {
                     activeDockTab = "txd"
+                } else if (isTexdbOpen) {
+                    val intent = Intent(context, TexdbBrowserActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    context.startActivity(intent)
                 } else if (isExternalTxdOpen) {
                     val intent = Intent(context, TxdEditorActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK

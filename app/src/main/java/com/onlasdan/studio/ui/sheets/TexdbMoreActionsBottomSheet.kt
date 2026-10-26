@@ -39,7 +39,8 @@ fun TexdbMoreActionsBottomSheet(
     onSelectCategory: (() -> Unit)? = null,
     categoryName: String? = null,
     sortMode: Int,
-    onSetSortMode: (Int) -> Unit
+    onSetSortMode: (Int) -> Unit,
+    onCloseCache: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -253,6 +254,27 @@ fun TexdbMoreActionsBottomSheet(
                             }
                         )
                     }
+                }
+            }
+
+            // Grup: CLOSE CACHE (jika diberikan)
+            if (onCloseCache != null) {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    MoreActionRow(
+                        icon = Icons.Outlined.Close,
+                        title = "Close Cache",
+                        subtitle = "Close this Texdb cache and release memory",
+                        iconTint = MaterialTheme.colorScheme.error,
+                        onClick = {
+                            onDismissRequest()
+                            onCloseCache()
+                        }
+                    )
                 }
             }
         }

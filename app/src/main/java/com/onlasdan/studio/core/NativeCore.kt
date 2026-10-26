@@ -33,6 +33,7 @@ object NativeCore {
     private external fun nativeTexdbAddAlias(dir: String, targetIndex: Int, aliasName: String): String?
     private external fun nativeTexdbRepackCache(dir: String, target: Int): String?
     private external fun nativeDffInspect(path: String): String?
+    private external fun nativeDffExtractMesh(path: String): ByteArray?
     private external fun nativeImgVerify(path: String): String?
     private external fun nativeImgIsVer2(path: String): Boolean
     private external fun nativeImgList(path: String, dir: String?): Array<String>?
@@ -208,6 +209,17 @@ object NativeCore {
     fun dffInspect(path: String): String? = if (isAvailable) {
         try {
             nativeDffInspect(path)
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /** Extracts 3D mesh packet from a DFF model for OpenGL rendering. */
+    fun dffExtractMesh(path: String): ByteArray? = if (isAvailable) {
+        try {
+            nativeDffExtractMesh(path)
         } catch (_: Throwable) {
             null
         }

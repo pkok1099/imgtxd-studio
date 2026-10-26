@@ -21,6 +21,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.ViewInAr
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -46,6 +49,8 @@ import com.onlasdan.studio.ui.framework.ToolPageScaffold
 import com.onlasdan.studio.ui.components.BusySheet
 import com.onlasdan.studio.ui.components.InputSheet
 import com.onlasdan.studio.ui.theme.ImgToolTheme
+import com.onlasdan.studio.ui.view3d.Dff3dMesh
+import com.onlasdan.studio.ui.view3d.Dff3dViewport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -101,6 +106,8 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
     var busyText by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<String?>(null) }
     var tick by remember { mutableStateOf(0) }
+    var mesh3d by remember { mutableStateOf<Dff3dMesh?>(null) }
+    var is3dViewMode by remember { mutableStateOf(true) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
 
@@ -148,6 +155,14 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
             }
             else -> error = result.removePrefix("ERROR ")
         }
+
+        // Extract 3D Mesh in background
+        withContext(Dispatchers.IO) {
+            val meshBytes = NativeCore.dffExtractMesh(path)
+            if (meshBytes != null) {
+                mesh3d = Dff3dMesh.fromBytes(meshBytes)
+            }
+        }
     }
 
     fun applyToOriginal() {
@@ -183,6 +198,12 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
                 onClick = onBack
             ),
             ContextualDockItem(
+                id = "mode",
+                icon = if (is3dViewMode) Icons.Outlined.Info else Icons.Outlined.ViewInAr,
+                contentDescription = if (is3dViewMode) "Info & Textures" else "3D Viewport",
+                onClick = { is3dViewMode = !is3dViewMode }
+            ),
+            ContextualDockItem(
                 id = "apply",
                 icon = Icons.Outlined.Save,
                 contentDescription = "Apply to Original Location",
@@ -191,35 +212,54 @@ private fun DffInspectorScreen(sourcePath: String?, isShizuku: Boolean, onBack: 
             )
         )
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 108.dp)
-        ) {
-            when {
-                error != null -> Text("Can't inspect DFF: $error")
-                report == null -> CircularProgressIndicator()
-                else -> {
-                    Text(
-                        text = report!!.substringBefore("Tekstur dirujuk"),
-                        fontFamily = FontFamily.Monospace
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (is3dViewMode) {
+                if (mesh3d != null) {
+                    Dff3dViewport(
+                        mesh = mesh3d,
+                        modifier = Modifier.fillMaxSize().padding(bottom = 90.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Referenced textures (${textures.size}) - tap to rename inside the DFF:",
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    textures.forEach { name ->
-                        ListItem(
-                            headlineContent = { Text(name) },
-                            modifier = Modifier.clickable { renameTarget = name }
-                        )
-                        HorizontalDivider()
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        if (error != null) {
+                            Text("3D mesh unavailable: $error")
+                        } else {
+                            CircularProgressIndicator()
+                        }
                     }
-                    Text(
-                        "Renaming keeps a full <name>.dff.bak backup next to the file (one-time, original).",
-                        modifier = Modifier.padding(top = 12.dp)
-                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 108.dp)
+                ) {
+                    when {
+                        error != null -> Text("Can't inspect DFF: $error")
+                        report == null -> CircularProgressIndicator()
+                        else -> {
+                            Text(
+                                text = report!!.substringBefore("Tekstur dirujuk"),
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "Referenced textures (${textures.size}) - tap to rename inside the DFF:",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            textures.forEach { name ->
+                                ListItem(
+                                    headlineContent = { Text(name) },
+                                    modifier = Modifier.clickable { renameTarget = name }
+                                )
+                                HorizontalDivider()
+                            }
+                            Text(
+                                "Renaming keeps a full <name>.dff.bak backup next to the file (one-time, original).",
+                                modifier = Modifier.padding(top = 12.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

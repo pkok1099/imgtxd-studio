@@ -20,6 +20,15 @@ object ActiveSessionManager {
     private val _activeImgName = MutableStateFlow<String?>(null)
     val activeImgName = _activeImgName.asStateFlow()
 
+    private val _isTexdbOpen = MutableStateFlow(false)
+    val isTexdbOpen = _isTexdbOpen.asStateFlow()
+
+    private val _activeTexdbDir = MutableStateFlow<String?>(null)
+    val activeTexdbDir = _activeTexdbDir.asStateFlow()
+
+    private val _activeTexdbGameDir = MutableStateFlow<String?>(null)
+    val activeTexdbGameDir = _activeTexdbGameDir.asStateFlow()
+
     fun setTxdActive(name: String, path: String? = null) {
         _isTxdOpen.value = true
         _activeTxdName.value = name
@@ -40,5 +49,17 @@ object ActiveSessionManager {
     fun setImgClosed() {
         _isImgOpen.value = false
         _activeImgName.value = null
+    }
+
+    fun setTexdbActive(dir: String, gameDir: String? = null) {
+        _isTexdbOpen.value = true
+        _activeTexdbDir.value = dir
+        _activeTexdbGameDir.value = gameDir
+    }
+
+    fun setTexdbClosed() {
+        _isTexdbOpen.value = false
+        _activeTexdbDir.value = null
+        _activeTexdbGameDir.value = null
     }
 }

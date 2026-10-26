@@ -1,5 +1,6 @@
 package com.onlasdan.studio.ui
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
@@ -88,14 +89,34 @@ class TexdbBrowserActivity : ComponentActivity() {
         AppSettings.init(this)
         val dirPath = intent.getStringExtra(EXTRA_CACHE_DIR)
         val gameDir = intent.getStringExtra(EXTRA_GAME_DIR)
+        if (dirPath != null) {
+            com.onlasdan.studio.util.ActiveSessionManager.setTexdbActive(dirPath, gameDir)
+        }
         setContent {
             ImgToolTheme {
                 TexdbBrowserScreen(
                     cacheDirPath = dirPath,
                     gameDirPath = gameDir,
-                    onBack = { finish() }
+                    onBack = {
+                        // Kembali ke Home tanpa membunuh proses cache (tetap persisten di memori)
+                        val homeIntent = Intent(this, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        startActivity(homeIntent)
+                    },
+                    onClose = {
+                        com.onlasdan.studio.util.ActiveSessionManager.setTexdbClosed()
+                        finish()
+                    }
                 )
             }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) {
+            com.onlasdan.studio.util.ActiveSessionManager.setTexdbClosed()
         }
     }
 
@@ -122,7 +143,12 @@ private data class WizardOptions(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBack: () -> Unit) {
+private fun TexdbBrowserScreen(
+    cacheDirPath: String?,
+    gameDirPath: String?,
+    onBack: () -> Unit,
+    onClose: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var cache by remember { mutableStateOf<TexdbCache?>(null) }
@@ -470,7 +496,8 @@ private fun TexdbBrowserScreen(cacheDirPath: String?, gameDirPath: String?, onBa
             } else null,
             categoryName = categoryFilter,
             sortMode = sortMode,
-            onSetSortMode = { sortMode = it }
+            onSetSortMode = { sortMode = it },
+            onCloseCache = onClose
         )
     }
 

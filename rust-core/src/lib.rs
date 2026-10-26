@@ -458,6 +458,36 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeDffInspect
     }
 }
 
+/// Extracts 3D mesh data (vertices, normals, UVs, indices) from a DFF file for OpenGL rendering.
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeDffExtractMesh(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jni::sys::jbyteArray {
+    let path_str = jstring_to_string(&mut env, &path);
+    let bytes_res = std::fs::read(&path_str);
+    let mesh_opt = match bytes_res {
+        Ok(ref data) => dff::parse_dff_mesh(data),
+        Err(_) => None,
+    };
+    match mesh_opt {
+        Some(mesh) => {
+            let serialized = dff::mesh_to_bytes(&mesh);
+            let out = match env.new_byte_array(serialized.len() as jint) {
+                Ok(a) => a,
+                Err(_) => return std::ptr::null_mut(),
+            };
+            let as_i8: Vec<jni::sys::jbyte> = serialized.iter().map(|&b| b as jni::sys::jbyte).collect();
+            if env.set_byte_array_region(&out, 0, &as_i8).is_err() {
+                return std::ptr::null_mut();
+            }
+            out.into_raw()
+        }
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// Renames a texture reference inside a DFF file (with .dff.bak backup).
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeDffRenameTexture(
