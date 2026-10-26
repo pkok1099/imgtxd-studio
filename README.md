@@ -10,13 +10,13 @@
 > **Modern, high-performance, and open-source `.img` archive & `.txd` texture dictionary editor for Android (Android 12 – 16, API 31–36).**  
 > Direct alternative to legacy PC IMG Tool and TXD Tool on mobile, powered by a **native Rust engine**, **Jetpack Compose Material 3**, and **Shizuku privileged storage access**.
 
-[⬇️ **Download Latest APK (v3.3.0)**](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.3.0) • [📦 All Releases](https://github.com/pkok1099/imgtxd-studio/releases) • [✨ Features](#-features) • [🎯 Supported Games](#-supported-games) • [🛠️ Build](#️-building-from-source)
+[⬇️ **Download Latest APK (v3.4.1)**](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.4.1) • [📦 All Releases](https://github.com/pkok1099/imgtxd-studio/releases) • [✨ Features](#-features) • [🎯 Supported Games](#-supported-games) • [🛠️ Build](#️-building-from-source)
 
 ## ⬇️ Download
 
 | Channel | Version | Direct APK download | Release notes |
 |---|---|---|---|
-| Stable | v3.3.0 | [GTA_Img_Studio.apk](https://github.com/pkok1099/imgtxd-studio/releases/download/v3.3.0/GTA_Img_Studio.apk) (4.5 MB) | [v3.3.0](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.3.0) |
+| Stable | v3.4.1 | [GTA_Img_Studio.apk](https://github.com/pkok1099/imgtxd-studio/releases/download/v3.4.1/GTA_Img_Studio.apk) (~4.2 MB) | [v3.4.1](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.4.1) |
 
 ---
 
@@ -27,6 +27,7 @@ Modding RenderWare games like **GTA San Andreas** on newer Android versions (And
 **ImgTxd Studio** solves this completely:
 - 🚀 **Full `.img` Archive Tool:** Add, replace, extract, rename, delete, and rebuild `.img` archives (VER1 & VER2).
 - 🎨 **RenderWare `.txd` Texture Studio:** View, replace, and export textures directly inside `.img` files or standalone `.txd` files (DXT1/3/5, ETC1, 16/24/32-bit).
+- 🧊 **3D Model Viewport (`.dff`):** Interactive hardware-accelerated OpenGL ES 2.0 viewport for 3D RenderWare models with 360° rotation, pan, zoom, wireframe toggle, and texture renaming.
 - ⚡ **Seamless `Android/data` Access via Shizuku:** No PC or root required to edit game textures or files directly.
 - 🪟 **Multi-Window Support:** Open `.img` and `.txd` simultaneously side-by-side or in floating windows.
 
@@ -40,8 +41,9 @@ Every byte of format work in ImgTxd Studio is done by a **native Rust core** (`r
 - **TXD dictionaries** — parse/build, DXT1/3/5 + ETC1 + paletted/16/24/32-bit decode, mipmap generation, and texture replace/create.
 - **Texture caches (texdb)** — SA/VC `.txt`/`.toc`/`.dat`/`.tmb` read, import, and rebuild. Every write re-synchronizes each variant's `.tmb`, so caches produced by the app stay valid in the original TXD Tool (verified with a checker replicating TXD Tool's own corruption rules).
 - **Audio index repair** — `.osw`/`.idx` consistency fixes.
+- **DFF 3D model parsing** — fast native RenderWare chunk extraction (Clump, Frame hierarchy, Geometry, BinMesh strips/lists) and texture renaming.
 
-Correctness is pinned by **70 Rust unit tests** plus byte-exact golden checks: rebuilt archives and caches are hash-identical to reference outputs, and codec/resampler changes must reproduce identical FNV hashes before they ship.
+Correctness is pinned by **121 Rust unit tests** plus byte-exact golden checks: rebuilt archives and caches are hash-identical to reference outputs, and codec/resampler changes must reproduce identical FNV hashes before they ship.
 
 Measured on the development VM against the previous engine, on a real GTA SA Lite dataset (`gta3.img` — 283 MB, 13,557 entries; texdb cache — 12,445 textures):
 
@@ -101,6 +103,12 @@ ImgTxd Studio supports games and engines utilizing RenderWare binary formats and
   - **Extract / Batch Extract:** Extract individual files or select multiple entries to export.
   - **Rename & Delete:** Edit file headers or batch-remove entries.
   - **Rebuild & Compact:** Repack active entries into a contiguous gap-free layout to reclaim dead storage space.
+
+- **Interactive 3D Model Viewport (OpenGL ES 2.0):**
+  - **Hardware-Accelerated 3D Preview:** Render `.dff` models directly on mobile with full vertex normals and diffuse/ambient lighting.
+  - **Intuitive Touch Controls:** Dedicated mode buttons for orbiting/rotating (360°) and panning (moving), along with zoom (+ / -) controls.
+  - **Wireframe Mode:** Inspect underlying polygon topologies with instant wireframe-to-shaded toggle.
+  - **In-File Texture Renaming:** Seamlessly rename referenced texture names inside DFF models with automatic `.dff.bak` backups.
 
 - **Modern Android Architecture:**
   - Kotlin + Jetpack Compose & Material 3 for the UI, native Rust for the entire format engine.
