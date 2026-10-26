@@ -16,14 +16,34 @@ fn main() {
     let dir = Path::new(&arg);
     let before = names(dir);
     println!("entries before: {}", before.len());
-    println!("rename: {}", rename_texture(dir, "txd", 0, &format!("{}_renamed", before[0])).unwrap());
-    println!("alias: {}", add_alias(dir, "txd", 1, "zz_test_alias").unwrap());
+    println!(
+        "rename: {}",
+        rename_texture(dir, "txd", 0, &format!("{}_renamed", before[0])).unwrap()
+    );
+    println!(
+        "alias: {}",
+        add_alias(dir, "txd", 1, "zz_test_alias").unwrap()
+    );
     println!("count after alias: {}", names(dir).len());
     println!("repack ETC: {}", repack_cache(dir, "txd", 1).unwrap());
     let c = TexdbCache::load(dir, "txd").unwrap();
-    println!("etc entries now: {}", c.listings.iter().flatten().filter(|l| l.encoding == TexEncoding::Etc1).count());
+    println!(
+        "etc entries now: {}",
+        c.listings
+            .iter()
+            .flatten()
+            .filter(|l| l.encoding == TexEncoding::Etc1)
+            .count()
+    );
     println!("repack DXT: {}", repack_cache(dir, "txd", 0).unwrap());
     println!("delete: {}", delete_textures(dir, "txd", &[0]).unwrap());
     println!("entries after: {}", names(dir).len());
-    println!("decode check: {}", TexdbCache::load(dir, "txd").unwrap().decode_pixels(0).map(|p| p.len()).unwrap_or(0));
+    println!(
+        "decode check: {}",
+        TexdbCache::load(dir, "txd")
+            .unwrap()
+            .decode_pixels(0)
+            .map(|p| p.len())
+            .unwrap_or(0)
+    );
 }

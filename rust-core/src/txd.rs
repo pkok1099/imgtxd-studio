@@ -121,20 +121,28 @@ impl<'a> Reader<'a> {
     }
     fn i32(&mut self) -> i32 {
         let v = i32::from_le_bytes(
-            self.buf[self.pos..self.pos + 4].try_into().unwrap_or([0; 4]),
+            self.buf[self.pos..self.pos + 4]
+                .try_into()
+                .unwrap_or([0; 4]),
         );
         self.pos += 4;
         v
     }
     fn u16(&mut self) -> u16 {
         let v = u16::from_le_bytes(
-            self.buf[self.pos..self.pos + 2].try_into().unwrap_or([0; 2]),
+            self.buf[self.pos..self.pos + 2]
+                .try_into()
+                .unwrap_or([0; 2]),
         );
         self.pos += 2;
         v
     }
     fn u8(&mut self) -> u8 {
-        let v = if self.pos < self.buf.len() { self.buf[self.pos] } else { 0 };
+        let v = if self.pos < self.buf.len() {
+            self.buf[self.pos]
+        } else {
+            0
+        };
         self.pos += 1;
         v
     }
@@ -160,18 +168,35 @@ fn clean_name(raw: &str) -> String {
     }
 }
 
-/// Parses one TEXTURE_NATIVE entry (the native chunk header is already
-/// consumed; `r` is positioned at the inner struct chunk). Shared verbatim
-/// by `parse` and the targeted single-texture scan `decode_entry_pixels_at`.
-fn parse_native_entry(
-    r: &mut Reader,
-    slot_index: usize,
-    native_size: i32,
-) -> Result<TxdTexture, String> {
-    let data_len = r.buf.len();
-    let native_start = r.pos;
-    let native_end = (native_start + native_size.max(0) as usize).min(data_len);
+/// Header fields of one TEXTURE_NATIVE entry, valid up to (and including)
+/// the level-0 data size. Split from the payload reader so listing paths can
+/// test parseability cheaply: the only two failure sites of an entry live in
+/// the header (the dimension cap and a negative data size) — everything
+/// after that is infallible by construction.
+struct NativeEntryHeader {
+    /// End of the inner struct chunk (upper bound of the mip loop).
+    inner_end: usize,
+    platform_id: u32,
+    filter_flags: u32,
+    name: String,
+    mask_name: String,
+    raster_format: u32,
+    d3d_format: u32,
+    width: usize,
+    height: usize,
+    depth: u32,
+    mipmap_count: usize,
+    palette: Option<Vec<u8>>,
+    /// Validated level-0 data size (was ≥ 0 on the wire).
+    data_size: u32,
+}
 
+/// Reads and validates the fixed part of a TEXTURE_NATIVE entry. On success
+/// the reader is positioned right before the level-0 pixel data; on failure
+/// it sits at an arbitrary offset inside the entry (callers re-seek via the
+/// native chunk size).
+fn parse_native_header(r: &mut Reader) -> Result<NativeEntryHeader, String> {
+    let data_len = r.buf.len();
     let _inner_id = r.i32();
     let inner_size = r.i32();
     let _inner_version = r.i32();
@@ -186,10 +211,11 @@ fn parse_native_entry(
     let width = r.u16() as usize;
     let height = r.u16() as usize;
     // Cap texture dimensions: real game TXDs are ≤ 2048×2048 (mobile mods
-    // sometimes 4096). 8192 is the safe upper bound. A malicious TXD with
+    // sometimes 4096). Same bound as texdb::MAX_TEXDB_DIM — one shared
+    // constant keeps every parser honest. A malicious TXD with
     // width=height=65535 (u16::MAX) would request a 16 GiB allocation
     // downstream in decode_dxt1/decode_etc1 → process abort (panic=abort).
-    if width > 8192 || height > 8192 {
+    if width > crate::texdb::MAX_TEXDB_DIM || height > crate::texdb::MAX_TEXDB_DIM {
         return Err(format!(
             "Dimensi tekstur TXD tidak masuk akal: {width}x{height}"
         ));
@@ -200,6 +226,8 @@ fn parse_native_entry(
     let _compression = r.u8();
 
     let has_palette = raster_format & FORMAT_PAL8 != 0 || depth == 8;
+    // Same presence rule as the Kotlin parser: the palette counts as present
+    // only when all 1024 bytes actually fit in the file.
     let palette = if has_palette && r.pos + 1024 <= data_len {
         Some(r.bytes(1024))
     } else {
@@ -210,23 +238,52 @@ fn parse_native_entry(
     if data_size < 0 {
         return Err("Format TXD rusak: ukuran data tekstur negatif".to_string());
     }
+
+    Ok(NativeEntryHeader {
+        inner_end,
+        platform_id,
+        filter_flags,
+        name,
+        mask_name,
+        raster_format,
+        d3d_format,
+        width,
+        height,
+        depth,
+        mipmap_count,
+        palette,
+        data_size: data_size as u32,
+    })
+}
+
+/// Copies the pixel payload after a validated header. Infallible by
+/// construction: the data size is clamped to the bytes actually remaining
+/// (DoS cap, see below), mip sizes are bounds-checked, and the trailing
+/// extension walk is clamped — mirroring the Kotlin parser, which also
+/// degrades to zero-filled/truncated data in exactly these spots.
+fn parse_native_payload(
+    r: &mut Reader,
+    h: NativeEntryHeader,
+    native_end: usize,
+    slot_index: usize,
+) -> TxdTexture {
+    let data_len = r.buf.len();
     // Cap the allocation at the bytes actually remaining in the buffer.
     // A malicious/corrupt TXD can claim `data_size` up to i32::MAX (≈2 GiB)
     // while the file contains only a few KB after the size field. Without
     // this cap, `vec![0u8; data_size as usize]` would attempt a multi-GiB
     // allocation and abort the process (panic=abort). Real TXDs are
     // well-formed so `data_size == remaining` and behavior is unchanged.
-    let remaining = r.remaining();
-    let actual = (data_size as usize).min(remaining);
+    let actual = (h.data_size as usize).min(r.remaining());
     let mut raw_pixels = vec![0u8; actual];
     raw_pixels.copy_from_slice(&r.bytes(actual));
 
     let mut mip_levels = Vec::new();
     let mut level_index = 1;
-    while level_index < mipmap_count && r.pos + 4 <= inner_end && r.pos + 4 <= data_len {
+    while level_index < h.mipmap_count && r.pos + 4 <= h.inner_end && r.pos + 4 <= data_len {
         let level_size = r.i32();
         if level_size < 0
-            || r.pos + level_size as usize > inner_end
+            || r.pos + level_size as usize > h.inner_end
             || r.pos + level_size as usize > data_len
         {
             break;
@@ -235,8 +292,8 @@ fn parse_native_entry(
         level_index += 1;
     }
 
-    if r.pos < inner_end {
-        r.seek(inner_end);
+    if r.pos < h.inner_end {
+        r.seek(h.inner_end);
     }
     if r.pos < native_end {
         if r.remaining() >= 12 {
@@ -250,21 +307,39 @@ fn parse_native_entry(
         }
     }
 
-    Ok(TxdTexture {
-        name: if name.is_empty() { format!("texture_{slot_index}") } else { name },
-        mask_name,
-        width,
-        height,
-        depth,
-        raster_format,
-        d3d_format,
-        filter_flags,
-        platform_id,
+    TxdTexture {
+        name: if h.name.is_empty() {
+            format!("texture_{slot_index}")
+        } else {
+            h.name
+        },
+        mask_name: h.mask_name,
+        width: h.width,
+        height: h.height,
+        depth: h.depth,
+        raster_format: h.raster_format,
+        d3d_format: h.d3d_format,
+        filter_flags: h.filter_flags,
+        platform_id: h.platform_id,
         raw_pixels,
-        palette,
-        mipmap_count: mipmap_count.max(1),
+        palette: h.palette,
+        mipmap_count: h.mipmap_count.max(1),
         mip_levels,
-    })
+    }
+}
+
+/// Parses one TEXTURE_NATIVE entry (the native chunk header is already
+/// consumed; `r` is positioned at the inner struct chunk). Shared verbatim
+/// by `parse` and the targeted single-texture scan `decode_entry_pixels_at`.
+fn parse_native_entry(
+    r: &mut Reader,
+    slot_index: usize,
+    native_size: i32,
+) -> Result<TxdTexture, String> {
+    let native_start = r.pos;
+    let native_end = (native_start + native_size.max(0) as usize).min(r.buf.len());
+    let header = parse_native_header(r)?;
+    Ok(parse_native_payload(r, header, native_end, slot_index))
 }
 
 fn parse_header(data: &[u8]) -> Result<(Reader<'_>, usize, u32), String> {
@@ -295,7 +370,10 @@ fn parse_header(data: &[u8]) -> Result<(Reader<'_>, usize, u32), String> {
     Ok((r, count, rw_version))
 }
 
-/// Parses a whole TXD file (port of `TxdParser.parse`).
+/// Parses a whole TXD file (port of `TxdParser.parse`). All-or-nothing per
+/// dictionary: one unparseable entry fails the file. This strictness is the
+/// contract for every write path (a rebuild that silently drops entries
+/// would lose data); listing/preview use `parse_lenient` instead.
 pub fn parse(data: &[u8]) -> Result<TxdFile, String> {
     let (mut r, count, rw_version) = parse_header(data)?;
     let mut entries = Vec::with_capacity(count);
@@ -303,24 +381,76 @@ pub fn parse(data: &[u8]) -> Result<TxdFile, String> {
         if r.remaining() < 12 {
             break;
         }
+        let before = r.pos;
         let native_id = r.i32() as u32;
         let native_size = r.i32();
         let _native_version = r.i32();
+        let native_start = r.pos;
+        let native_end = (native_start + native_size.max(0) as usize).min(data.len());
         if native_id != CHUNK_TEXTURE_NATIVE {
-            let next = (r.pos as i64 + native_size as i64).min(data.len() as i64);
-            r.seek(next.max(0) as usize);
-            continue;
+            r.seek(native_end);
+        } else {
+            entries.push(parse_native_entry(&mut r, i, native_size)?);
         }
-        entries.push(parse_native_entry(&mut r, i, native_size)?);
+        // A crafted size field pointing at/before its own header would make
+        // the walk revisit the same bytes forever — stop instead of hanging
+        // the caller (previously a negative size could even seek backward).
+        if r.pos <= before {
+            break;
+        }
     }
-    Ok(TxdFile { textures: entries, rw_version })
+    Ok(TxdFile {
+        textures: entries,
+        rw_version,
+    })
+}
+
+/// Like `parse`, but a TEXTURE_NATIVE entry whose header cannot be parsed is
+/// skipped instead of failing the whole dictionary. For listing/preview only:
+/// write paths keep the strict all-or-nothing `parse`, because a rebuild that
+/// silently drops entries would lose data. The file header itself must still
+/// be valid — a broken root/struct chunk stays a hard error, so the UI can
+/// tell "not a TXD" apart from "one bad texture".
+pub fn parse_lenient(data: &[u8]) -> Result<TxdFile, String> {
+    let (mut r, count, rw_version) = parse_header(data)?;
+    let mut entries = Vec::with_capacity(count);
+    for i in 0..count {
+        if r.remaining() < 12 {
+            break;
+        }
+        let before = r.pos;
+        let native_id = r.i32() as u32;
+        let native_size = r.i32();
+        let _native_version = r.i32();
+        let native_start = r.pos;
+        let native_end = (native_start + native_size.max(0) as usize).min(data.len());
+        if native_id != CHUNK_TEXTURE_NATIVE {
+            r.seek(native_end);
+        } else {
+            match parse_native_header(&mut r) {
+                Ok(header) => entries.push(parse_native_payload(&mut r, header, native_end, i)),
+                // Unparseable entry: skip its whole native chunk and keep
+                // listing the healthy majority.
+                Err(_) => r.seek(native_end),
+            }
+        }
+        // Same forward-progress guarantee as `parse`.
+        if r.pos <= before {
+            break;
+        }
+    }
+    Ok(TxdFile {
+        textures: entries,
+        rw_version,
+    })
 }
 
 /// Targeted single-texture scan: walks only the chunk headers and copies
 /// just texture `index`'s payload, instead of materializing every entry's
-/// pixel data like `parse` does. Identical results to
-/// `parse(path)?.textures.get(index)` + `decode_pixels` for well-formed
-/// files, at a fraction of the cost on large dictionaries.
+/// pixel data like `parse` does. The index space matches `parse_lenient`
+/// (an entry whose header cannot be parsed consumes no index), so results
+/// equal `parse_lenient(path)?.textures.get(index)` + `decode_pixels` for
+/// well-formed files, at a fraction of the cost on large dictionaries.
 pub fn decode_entry_pixels_at(path: &std::path::Path, index: usize) -> Option<Vec<u32>> {
     let data = std::fs::read(path).ok()?;
     let (mut r, count, _rw_version) = parse_header(&data).ok()?;
@@ -329,23 +459,33 @@ pub fn decode_entry_pixels_at(path: &std::path::Path, index: usize) -> Option<Ve
         if r.remaining() < 12 {
             break;
         }
+        let before = r.pos;
         let native_id = r.i32() as u32;
         let native_size = r.i32();
         let _native_version = r.i32();
+        let native_start = r.pos;
+        let native_end = (native_start + native_size.max(0) as usize).min(data.len());
         if native_id != CHUNK_TEXTURE_NATIVE {
-            let next = (r.pos as i64 + native_size as i64).min(data.len() as i64);
-            r.seek(next.max(0) as usize);
-            continue;
+            r.seek(native_end);
+        } else {
+            // Unparseable headers consume no index (same space as
+            // parse_lenient); both paths below skip the whole chunk.
+            if let Ok(header) = parse_native_header(&mut r) {
+                if produced == index {
+                    let entry = parse_native_payload(&mut r, header, native_end, produced);
+                    return decode_pixels(&entry);
+                }
+                produced += 1;
+            }
+            // Not the requested texture (or unparseable): skip its whole
+            // native chunk — the position a full `parse_native_entry` would
+            // land on after walking the entry.
+            r.seek(native_end);
         }
-        if produced == index {
-            let entry = parse_native_entry(&mut r, produced, native_size).ok()?;
-            return decode_pixels(&entry);
+        // Same forward-progress guarantee as `parse`.
+        if r.pos <= before {
+            break;
         }
-        produced += 1;
-        // Not the requested texture: skip its whole native chunk (the same
-        // position `parse_native_entry` would land on after walking it).
-        let next = (r.pos as i64 + native_size as i64).min(data.len() as i64);
-        r.seek(next.max(0) as usize);
     }
     None
 }
@@ -354,6 +494,13 @@ pub fn parse_file(path: &std::path::Path) -> Result<TxdFile, String> {
     let data = std::fs::read(path)
         .map_err(|e| format!("File TXD tidak ditemukan: {} ({e})", path.display()))?;
     parse(&data)
+}
+
+/// Lenient counterpart of `parse_file` (see `parse_lenient`).
+pub fn parse_file_lenient(path: &std::path::Path) -> Result<TxdFile, String> {
+    let data = std::fs::read(path)
+        .map_err(|e| format!("File TXD tidak ditemukan: {} ({e})", path.display()))?;
+    parse_lenient(&data)
 }
 
 // ---------------------------------------------------------------------------
@@ -370,13 +517,21 @@ fn latin1_bytes(s: &str) -> Vec<u8> {
     s.chars()
         .map(|c| {
             let v = c as u32;
-            if v <= 0xFF { v as u8 } else { b'?' }
+            if v <= 0xFF {
+                v as u8
+            } else {
+                b'?'
+            }
         })
         .collect()
 }
 
 fn build_native_chunk(entry: &TxdTexture, rw_version: u32) -> Vec<u8> {
-    let has_palette = entry.palette.as_ref().map(|p| p.len() == 1024).unwrap_or(false);
+    let has_palette = entry
+        .palette
+        .as_ref()
+        .map(|p| p.len() == 1024)
+        .unwrap_or(false);
     let palette_size = if has_palette { 1024 } else { 0 };
     let mip_data_size: usize = entry.mip_levels.iter().map(|l| 4 + l.len()).sum();
     let inner_size = 88 + palette_size + 4 + entry.raw_pixels.len() + mip_data_size;
@@ -401,6 +556,12 @@ fn build_native_chunk(entry: &TxdTexture, rw_version: u32) -> Vec<u8> {
     st.extend_from_slice(&mask_bytes);
     st.extend_from_slice(&(entry.raster_format as i32).to_le_bytes());
     st.extend_from_slice(&(entry.d3d_format as i32).to_le_bytes());
+    // Dimension sources are all capped (txd::parse and JNI/PNG entry points
+    // ≤ 16384), so the u16 disk fields must never wrap. Guard the invariant.
+    debug_assert!(
+        entry.width <= u16::MAX as usize && entry.height <= u16::MAX as usize,
+        "texture dimension exceeds the u16 disk field"
+    );
     st.extend_from_slice(&(entry.width as u16).to_le_bytes());
     st.extend_from_slice(&(entry.height as u16).to_le_bytes());
     st.push(entry.depth as u8);
@@ -422,10 +583,36 @@ fn build_native_chunk(entry: &TxdTexture, rw_version: u32) -> Vec<u8> {
     out
 }
 
+/// The TXD struct chunk stores the texture count in a u16 field, so a
+/// dictionary can never hold more than 65535 entries (same limit as the
+/// reference modding tooling). Writes enforce this instead of wrapping.
+pub const MAX_TXD_ENTRIES: usize = u16::MAX as usize;
+
+/// Rejects dictionary sizes the u16 on-disk count field cannot represent.
+fn check_entry_count(n: usize) -> Result<(), String> {
+    if n > MAX_TXD_ENTRIES {
+        Err(format!(
+            "Jumlah tekstur melebihi batas format TXD ({MAX_TXD_ENTRIES})"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Serializes textures into a TXD file (port of `TxdBuilder.buildToBytes`).
+///
+/// The struct-chunk count field is u16: callers must keep
+/// `entries.len() <= MAX_TXD_ENTRIES` (production write paths go through
+/// `check_entry_count`; the debug assert catches dev-tool misuse).
 pub fn build_to_bytes(entries: &[TxdTexture], rw_version: u32) -> Vec<u8> {
-    let native_chunks: Vec<Vec<u8>> =
-        entries.iter().map(|e| build_native_chunk(e, rw_version)).collect();
+    debug_assert!(
+        entries.len() <= MAX_TXD_ENTRIES,
+        "TXD entry count exceeds the u16 disk field"
+    );
+    let native_chunks: Vec<Vec<u8>> = entries
+        .iter()
+        .map(|e| build_native_chunk(e, rw_version))
+        .collect();
     let total_native: usize = native_chunks.iter().map(|c| c.len()).sum();
     let root_size = 16 + total_native;
 
@@ -456,10 +643,7 @@ pub fn decode_dxt3(data: &[u8], width: usize, height: usize) -> Vec<u32> {
         decode_dxt3_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
         return pixels;
     }
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let workers = crate::parallel::inner_workers(4);
     let rows_per_band = blocks_y.div_ceil(workers).max(4);
     std::thread::scope(|s| {
         let mut rest: &mut [u32] = &mut pixels;
@@ -493,6 +677,16 @@ fn decode_dxt3_band(
     let y0 = (by_start * 4).min(height);
     let band_y = y0 * width;
     let mut offset = by_start * blocks_x * 16;
+    let aligned = width.is_multiple_of(4) && height.is_multiple_of(4);
+    // Aligned bands take the vectorized whole-band path (bit-identical to
+    // the scalar expansion below — differential-tested per random blocks).
+    if aligned
+        && crate::codec::simd::dxt::dxt3_band(
+            data, width, blocks_x, by_start, by_end, pixels, band_y,
+        )
+    {
+        return;
+    }
     let mut palette = [0u32; 4];
     for by in by_start..by_end {
         for bx in 0..blocks_x {
@@ -508,9 +702,8 @@ fn decode_dxt3_band(
             palette[1] = rgb565_to_argb(c1 as u32, 255);
             palette[2] = interpolate_color(palette[0], palette[1], 2, 1, 3);
             palette[3] = interpolate_color(palette[0], palette[1], 1, 2, 3);
-            let lookup = u32::from_le_bytes(
-                data[color_offset + 4..color_offset + 8].try_into().unwrap(),
-            );
+            let lookup =
+                u32::from_le_bytes(data[color_offset + 4..color_offset + 8].try_into().unwrap());
             for py in 0..4 {
                 let y = by * 4 + py;
                 if y >= height {
@@ -687,89 +880,39 @@ impl MipFilter {
     }
 }
 
-fn pack(a: u32, r: u32, g: u32, b: u32) -> u32 {
-    ((a & 0xFF) << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
-}
-
-fn sample_nearest(
-    src: &[u32], sw: usize, sh: usize, x: usize, y: usize, dw: usize, dh: usize,
-) -> u32 {
-    let sx = (((2 * x + 1) * sw) / (2 * dw)).min(sw - 1);
-    let sy = (((2 * y + 1) * sh) / (2 * dh)).min(sh - 1);
-    src[sy * sw + sx]
-}
-
-fn sample_box(
-    src: &[u32], sw: usize, sh: usize, x: usize, y: usize, dw: usize, dh: usize,
-) -> u32 {
-    let x0 = (x * sw) / dw;
-    let x1 = (((x + 1) * sw) / dw).max(x0 + 1).min(sw);
-    let y0 = (y * sh) / dh;
-    let y1 = (((y + 1) * sh) / dh).max(y0 + 1).min(sh);
-    let (mut sa, mut sr, mut sg, mut sb, mut count) = (0u32, 0u32, 0u32, 0u32, 0u32);
-    for sy in y0..y1 {
-        for sx in x0..x1 {
-            let p = src[sy * sw + sx];
-            sa += (p >> 24) & 0xFF;
-            sr += (p >> 16) & 0xFF;
-            sg += (p >> 8) & 0xFF;
-            sb += p & 0xFF;
-            count += 1;
-        }
-    }
-    pack(sa / count, sr / count, sg / count, sb / count)
-}
-
-fn sample_bilinear(
-    src: &[u32], sw: usize, sh: usize, x: usize, y: usize, dw: usize, dh: usize,
-) -> u32 {
-    let gx = (x as f64 + 0.5) * sw as f64 / dw as f64 - 0.5;
-    let gy = (y as f64 + 0.5) * sh as f64 / dh as f64 - 0.5;
-    let x0 = (gx.floor() as i64).clamp(0, sw as i64 - 1) as usize;
-    let y0 = (gy.floor() as i64).clamp(0, sh as i64 - 1) as usize;
-    let x1 = (x0 + 1).min(sw - 1);
-    let y1 = (y0 + 1).min(sh - 1);
-    let fx = (gx - x0 as f64).clamp(0.0, 1.0);
-    let fy = (gy - y0 as f64).clamp(0.0, 1.0);
-    let c00 = src[y0 * sw + x0];
-    let c10 = src[y0 * sw + x1];
-    let c01 = src[y1 * sw + x0];
-    let c11 = src[y1 * sw + x1];
-    let mix = |channel: u32| -> u32 {
-        let v00 = ((c00 >> channel) & 0xFF) as f64;
-        let v10 = ((c10 >> channel) & 0xFF) as f64;
-        let v01 = ((c01 >> channel) & 0xFF) as f64;
-        let v11 = ((c11 >> channel) & 0xFF) as f64;
-        let top = v00 + (v10 - v00) * fx;
-        let bottom = v01 + (v11 - v01) * fx;
-        ((top + (bottom - top) * fy) as i64).clamp(0, 255) as u32
-    };
-    pack(mix(24), mix(16), mix(8), mix(0))
-}
-
 /// Resamples to exactly `dw` x `dh` (port of `MipmapGenerator.resample`).
+///
+/// Routes to the shared optimized kernels in [`crate::mipmap::resample_px`]:
+/// precomputed per-axis tables instead of per-pixel f64 divide/floor, the
+/// vectorized exact-2:1 Box 2x2 kernel (SSSE3/NEON), and row-band
+/// parallelism for large outputs. The per-pixel math of those kernels is
+/// expression-for-expression identical to the former inline samplers (same
+/// taps, same weight products, same summation order, same truncation toward
+/// zero), so outputs are bit-identical; `resample_matches_reference_random`
+/// and `resample_2x1_large_matches_reference` lock this against the original
+/// per-pixel algorithm, kept verbatim in the tests.
 pub fn resample(
-    src: &[u32], sw: usize, sh: usize, dw: usize, dh: usize, filter: MipFilter,
+    src: &[u32],
+    sw: usize,
+    sh: usize,
+    dw: usize,
+    dh: usize,
+    filter: MipFilter,
 ) -> Vec<u32> {
-    if sw == dw && sh == dh {
-        return src.to_vec();
-    }
-    let mut out = vec![0u32; dw * dh];
-    for y in 0..dh {
-        for x in 0..dw {
-            out[y * dw + x] = match filter {
-                MipFilter::Nearest => sample_nearest(src, sw, sh, x, y, dw, dh),
-                MipFilter::Box => sample_box(src, sw, sh, x, y, dw, dh),
-                MipFilter::Bilinear => sample_bilinear(src, sw, sh, x, y, dw, dh),
-            };
-        }
-    }
-    out
+    let filter = match filter {
+        MipFilter::Nearest => crate::mipmap::MipFilter::Nearest,
+        MipFilter::Box => crate::mipmap::MipFilter::Box,
+        MipFilter::Bilinear => crate::mipmap::MipFilter::Bilinear,
+    };
+    crate::mipmap::resample_px(src, sw, sh, dw, dh, filter)
 }
 
 /// One halving step (port of `MipmapGenerator.downscaleHalf`).
 pub fn downscale_half(
-    src: &[u32], sw: usize, sh: usize, filter: MipFilter,
+    src: &[u32],
+    sw: usize,
+    sh: usize,
+    filter: MipFilter,
 ) -> (Vec<u32>, usize, usize) {
     let dw = (sw / 2).max(1);
     let dh = (sh / 2).max(1);
@@ -791,7 +934,10 @@ pub fn resized_dimensions(width: usize, height: usize, max_dimension: usize) -> 
 
 /// Reduce-to-fit; the Kotlin default resample filter for this op is BILINEAR.
 pub fn reduce_to_fit(
-    src: &[u32], sw: usize, sh: usize, max_dimension: usize,
+    src: &[u32],
+    sw: usize,
+    sh: usize,
+    max_dimension: usize,
 ) -> (Vec<u32>, usize, usize) {
     let (nw, nh) = resized_dimensions(sw, sh, max_dimension);
     if nw == sw && nh == sh {
@@ -803,7 +949,10 @@ pub fn reduce_to_fit(
 /// Full mip chain below the source (ports of `generateChain`). Each level
 /// is produced from the previous one without an extra per-level clone.
 pub fn generate_chain(
-    src: &[u32], sw: usize, sh: usize, filter: MipFilter,
+    src: &[u32],
+    sw: usize,
+    sh: usize,
+    filter: MipFilter,
 ) -> Vec<(Vec<u32>, usize, usize)> {
     let mut levels: Vec<(Vec<u32>, usize, usize)> = Vec::new();
     loop {
@@ -834,7 +983,11 @@ pub struct ImportOptions {
 
 impl Default for ImportOptions {
     fn default() -> Self {
-        Self { generate_mipmaps: false, mip_filter: MipFilter::Box, max_dimension: None }
+        Self {
+            generate_mipmaps: false,
+            mip_filter: MipFilter::Box,
+            max_dimension: None,
+        }
     }
 }
 
@@ -987,10 +1140,16 @@ pub fn replace_in_file(
             .get_mut(idx)
             .ok_or_else(|| "Indeks tekstur di luar jangkauan".to_string())?;
         let (px, w, h) = &images[k];
+        // Validate before the encoders index pixels[y * width + x]: a bad
+        // (w, h, len) triple must be a clean error, not an OOB abort
+        // (panic=abort). Mirrors the JNI-side image_dims_ok contract.
+        if *w == 0 || *h == 0 || px.len() != w.checked_mul(*h).unwrap_or(0) {
+            return Err("Dimensi gambar tidak cocok dengan jumlah piksel".to_string());
+        }
         replace_texture(entry, px, *w, *h, as_dxt1, options);
     }
     let bytes = build_to_bytes(&txd.textures, txd.rw_version);
-    std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+    crate::fsutil::write_atomic(path, &bytes).map_err(|e| e.to_string())?;
     Ok(format!("{} tekstur diganti", indices.len()))
 }
 
@@ -1016,6 +1175,13 @@ pub fn add_in_file(
     let mut txd = parse_file(path)?;
     let mut added = 0usize;
     let mut overwritten = 0usize;
+    // Validate every image up front (see replace_in_file): the encoders
+    // index pixels[y * width + x] and would abort on a bad triple.
+    for (px, w, h) in images {
+        if *w == 0 || *h == 0 || px.len() != w.checked_mul(*h).unwrap_or(0) {
+            return Err("Dimensi gambar tidak cocok dengan jumlah piksel".to_string());
+        }
+    }
     for (k, desired) in names.iter().enumerate() {
         let (px, w, h) = &images[k];
         let existing = txd
@@ -1028,21 +1194,25 @@ pub fn add_in_file(
                 overwritten += 1;
             }
             Some(_) => {
-                let all_names: Vec<String> =
-                    txd.textures.iter().map(|e| e.name.clone()).collect();
+                let all_names: Vec<String> = txd.textures.iter().map(|e| e.name.clone()).collect();
                 let unique = unique_name(&all_names, desired);
-                txd.textures.push(create_entry(&unique, px, *w, *h, None, options));
+                txd.textures
+                    .push(create_entry(&unique, px, *w, *h, None, options));
                 added += 1;
             }
             None => {
-                txd.textures.push(create_entry(desired, px, *w, *h, None, options));
+                txd.textures
+                    .push(create_entry(desired, px, *w, *h, None, options));
                 added += 1;
             }
         }
     }
     if added + overwritten > 0 {
+        // The u16 count field on disk cannot represent more entries — a
+        // rebuild past 65535 would wrap silently and corrupt the header.
+        check_entry_count(txd.textures.len())?;
         let bytes = build_to_bytes(&txd.textures, txd.rw_version);
-        std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+        crate::fsutil::write_atomic(path, &bytes).map_err(|e| e.to_string())?;
     }
     Ok((added, overwritten))
 }
@@ -1052,7 +1222,10 @@ mod tests {
     use super::*;
 
     fn entry(name: &str) -> TxdTexture {
-        TxdTexture { name: name.to_string(), ..TxdTexture::default() }
+        TxdTexture {
+            name: name.to_string(),
+            ..TxdTexture::default()
+        }
     }
 
     #[test]
@@ -1101,6 +1274,146 @@ mod tests {
         let src = vec![0xFF000000, 0xFF0000FE];
         let out = resample(&src, 2, 1, 1, 1, MipFilter::Bilinear);
         assert_eq!(out, vec![0xFF00007F]);
+    }
+
+    // ----- Reference: the pre-pass-11 per-pixel samplers, kept verbatim to
+    // lock the routed mipmap kernels bit-for-bit against the original
+    // algorithm (same taps, weights, summation order, truncation). -----
+
+    fn ref_resample(
+        src: &[u32],
+        sw: usize,
+        sh: usize,
+        dw: usize,
+        dh: usize,
+        filter: MipFilter,
+    ) -> Vec<u32> {
+        let sample = |x: usize, y: usize| -> u32 {
+            match filter {
+                MipFilter::Nearest => {
+                    let sx = (((2 * x + 1) * sw) / (2 * dw)).min(sw - 1);
+                    let sy = (((2 * y + 1) * sh) / (2 * dh)).min(sh - 1);
+                    src[sy * sw + sx]
+                }
+                MipFilter::Box => {
+                    let x0 = (x * sw) / dw;
+                    let x1 = (((x + 1) * sw) / dw).max(x0 + 1).min(sw);
+                    let y0 = (y * sh) / dh;
+                    let y1 = (((y + 1) * sh) / dh).max(y0 + 1).min(sh);
+                    let (mut sa, mut sr, mut sg, mut sb, mut count) =
+                        (0u32, 0u32, 0u32, 0u32, 0u32);
+                    for sy in y0..y1 {
+                        for sx in x0..x1 {
+                            let p = src[sy * sw + sx];
+                            sa += (p >> 24) & 0xFF;
+                            sr += (p >> 16) & 0xFF;
+                            sg += (p >> 8) & 0xFF;
+                            sb += p & 0xFF;
+                            count += 1;
+                        }
+                    }
+                    ((sa / count) << 24) | ((sr / count) << 16) | ((sg / count) << 8) | (sb / count)
+                }
+                MipFilter::Bilinear => {
+                    let gx = (x as f64 + 0.5) * sw as f64 / dw as f64 - 0.5;
+                    let gy = (y as f64 + 0.5) * sh as f64 / dh as f64 - 0.5;
+                    let x0 = (gx.floor() as i64).clamp(0, sw as i64 - 1) as usize;
+                    let y0 = (gy.floor() as i64).clamp(0, sh as i64 - 1) as usize;
+                    let x1 = (x0 + 1).min(sw - 1);
+                    let y1 = (y0 + 1).min(sh - 1);
+                    let fx = (gx - x0 as f64).clamp(0.0, 1.0);
+                    let fy = (gy - y0 as f64).clamp(0.0, 1.0);
+                    let c00 = src[y0 * sw + x0];
+                    let c10 = src[y0 * sw + x1];
+                    let c01 = src[y1 * sw + x0];
+                    let c11 = src[y1 * sw + x1];
+                    let mix = |channel: u32| -> u32 {
+                        let v00 = ((c00 >> channel) & 0xFF) as f64;
+                        let v10 = ((c10 >> channel) & 0xFF) as f64;
+                        let v01 = ((c01 >> channel) & 0xFF) as f64;
+                        let v11 = ((c11 >> channel) & 0xFF) as f64;
+                        let top = v00 + (v10 - v00) * fx;
+                        let bottom = v01 + (v11 - v01) * fx;
+                        ((top + (bottom - top) * fy) as i64).clamp(0, 255) as u32
+                    };
+                    (mix(24) << 24) | (mix(16) << 16) | (mix(8) << 8) | mix(0)
+                }
+            }
+        };
+        let mut out = vec![0u32; dw * dh];
+        for (i, or) in out.iter_mut().enumerate() {
+            *or = sample(i % dw, i / dw);
+        }
+        out
+    }
+
+    struct R11(u32);
+    impl R11 {
+        fn next(&mut self) -> u32 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            self.0 = x;
+            x
+        }
+    }
+
+    #[test]
+    fn resample_matches_reference_random() {
+        let mut r = R11(0x005E_ED11);
+        let mut src: Vec<u32> = Vec::new();
+        for case in 0..48u32 {
+            let mut sw = 1 + (r.next() as usize % 48);
+            let mut sh = 1 + (r.next() as usize % 48);
+            let mut dw = 1 + (r.next() as usize % 48);
+            let mut dh = 1 + (r.next() as usize % 48);
+            match case % 5 {
+                0 => {
+                    dw = sw;
+                    dh = sh; // equal dims (fast-path copy)
+                }
+                1 => {
+                    sw = dw * 2;
+                    sh = dh * 2; // exact 2:1 downscale
+                }
+                2 => {
+                    dw = sw * 2;
+                    dh = sh * 2; // exact 2x upscale
+                }
+                _ => {}
+            }
+            src.clear();
+            src.extend((0..sw * sh).map(|_| r.next()));
+            for f in [MipFilter::Nearest, MipFilter::Box, MipFilter::Bilinear] {
+                let got = resample(&src, sw, sh, dw, dh, f);
+                let want = ref_resample(&src, sw, sh, dw, dh, f);
+                assert_eq!(got, want, "case {case}: {sw}x{sh}->{dw}x{dh} {f:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn resample_2x1_large_matches_reference() {
+        // dst 1024x512 = 524288 px >= PARALLEL_MIN_PX_FAST_KERNEL: locks the
+        // routed path through row-band dispatch + the vectorized exact-2:1
+        // kernel at scale.
+        let mut r = R11(0x0000_AB11);
+        let (sw, sh, dw, dh) = (2048usize, 1024usize, 1024usize, 512usize);
+        let src: Vec<u32> = (0..sw * sh).map(|_| r.next()).collect();
+        for f in [MipFilter::Box, MipFilter::Bilinear] {
+            let got = resample(&src, sw, sh, dw, dh, f);
+            let want = ref_resample(&src, sw, sh, dw, dh, f);
+            assert_eq!(got, want, "{f:?}");
+        }
+        // Odd dst width in the exact-2:1 case: SIMD pair loop + scalar tail.
+        let (sw, sh, dw, dh) = (50usize, 30usize, 25usize, 15usize);
+        let src: Vec<u32> = (0..sw * sh).map(|_| r.next()).collect();
+        for f in [MipFilter::Box, MipFilter::Bilinear] {
+            let got = resample(&src, sw, sh, dw, dh, f);
+            let want = ref_resample(&src, sw, sh, dw, dh, f);
+            assert_eq!(got, want, "odd dst {f:?}");
+        }
     }
 
     #[test]
@@ -1161,5 +1474,111 @@ mod tests {
         assert_eq!(e2.d3d_format, 0);
         assert_eq!(e2.raster_format, FORMAT_8888);
         assert_eq!(e2.raw_pixels.len(), 64);
+    }
+
+    #[test]
+    fn lenient_parse_skips_unparseable_entries() {
+        let mut good_a = entry("alpha");
+        good_a.width = 4;
+        good_a.height = 4;
+        good_a.depth = 32;
+        good_a.raw_pixels = vec![0x11; 64];
+        // Header-only corruption: a claimed dimension above MAX_TEXDB_DIM is
+        // rejected by parse_native_header before any payload is touched.
+        let mut bad = entry("bad");
+        bad.width = 65535;
+        bad.height = 1;
+        bad.depth = 32;
+        bad.raw_pixels = vec![0; 4];
+        let mut good_b = entry("beta");
+        good_b.width = 2;
+        good_b.height = 2;
+        good_b.depth = 32;
+        good_b.raw_pixels = vec![0x22; 16];
+
+        let bytes = build_to_bytes(&[good_a, bad, good_b], RW_VERSION_SA);
+        assert!(parse(&bytes).is_err(), "strict parse must still refuse");
+        let lenient = parse_lenient(&bytes).expect("lenient parse");
+        let names: Vec<&str> = lenient.textures.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn decode_entry_pixels_at_matches_lenient_index_space() {
+        let mut good_a = entry("alpha");
+        good_a.width = 2;
+        good_a.height = 2;
+        good_a.depth = 32;
+        good_a.raw_pixels = vec![0x11; 16];
+        let mut bad = entry("bad");
+        bad.width = 65535;
+        bad.height = 1;
+        bad.depth = 32;
+        bad.raw_pixels = vec![0; 4];
+        let mut good_b = entry("beta");
+        good_b.width = 2;
+        good_b.height = 2;
+        good_b.depth = 32;
+        good_b.raw_pixels = vec![0x22; 16];
+        let bytes = build_to_bytes(&[good_a, bad, good_b], RW_VERSION_SA);
+
+        let path =
+            std::env::temp_dir().join(format!("imgtxd-txd-lenient-{}.txd", std::process::id()));
+        std::fs::write(&path, &bytes).expect("write temp txd");
+
+        let lenient = parse_lenient(&bytes).expect("lenient parse");
+        assert_eq!(
+            decode_entry_pixels_at(&path, 0),
+            decode_pixels(&lenient.textures[0])
+        );
+        // The malformed middle entry consumes no index: slot 1 is "beta".
+        assert_eq!(
+            decode_entry_pixels_at(&path, 1),
+            decode_pixels(&lenient.textures[1])
+        );
+        assert_eq!(decode_entry_pixels_at(&path, 2), None);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn entry_count_guard_enforces_u16_disk_field() {
+        assert!(check_entry_count(MAX_TXD_ENTRIES - 1).is_ok());
+        assert!(check_entry_count(MAX_TXD_ENTRIES).is_ok());
+        assert!(check_entry_count(MAX_TXD_ENTRIES + 1).is_err());
+    }
+
+    #[test]
+    fn add_in_file_rejects_beyond_u16_entry_limit() {
+        // A dictionary already at the format limit must refuse one more
+        // entry instead of wrapping the u16 count field on disk.
+        let entries: Vec<TxdTexture> = (0..MAX_TXD_ENTRIES)
+            .map(|i| {
+                let mut e = entry(&format!("t{i}"));
+                e.width = 2;
+                e.height = 2;
+                e.depth = 32;
+                e.raw_pixels = vec![0; 16];
+                e
+            })
+            .collect();
+        let bytes = build_to_bytes(&entries, RW_VERSION_SA);
+        let path =
+            std::env::temp_dir().join(format!("imgtxd-txd-limit-{}.txd", std::process::id()));
+        std::fs::write(&path, &bytes).expect("write temp txd");
+
+        let err = add_in_file(
+            &path,
+            &["newone".to_string()],
+            &[(vec![0xFF00_FF00; 4], 2, 2)],
+            ConflictPolicy::JustAdd,
+            &ImportOptions::default(),
+        )
+        .expect_err("must reject beyond the format limit");
+        assert!(err.contains("65535"), "unexpected error: {err}");
+
+        // The guard fires before any write: the dictionary on disk is intact.
+        let after = parse(&std::fs::read(&path).expect("read back")).expect("parse");
+        assert_eq!(after.textures.len(), MAX_TXD_ENTRIES);
+        std::fs::remove_file(&path).ok();
     }
 }

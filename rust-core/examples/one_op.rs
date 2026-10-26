@@ -22,8 +22,18 @@ fn main() {
     let dir = PathBuf::from(std::env::args().nth(2).expect("dir"));
     let png = std::env::args().nth(3).map(|p| std::fs::read(p).unwrap());
     let result = match op.as_str() {
-        "import_add" => import_textures(&dir, "txd", &[("zz_new_texture".to_string(), png.unwrap())], &opts(ConflictPolicy::JustAdd)),
-        "import_overwrite" => import_textures(&dir, "txd", &[("gunshell".to_string(), png.unwrap())], &opts(ConflictPolicy::Overwrite)),
+        "import_add" => import_textures(
+            &dir,
+            "txd",
+            &[("zz_new_texture".to_string(), png.unwrap())],
+            &opts(ConflictPolicy::JustAdd),
+        ),
+        "import_overwrite" => import_textures(
+            &dir,
+            "txd",
+            &[("gunshell".to_string(), png.unwrap())],
+            &opts(ConflictPolicy::Overwrite),
+        ),
         "delete" => delete_textures(&dir, "txd", &[0]),
         "rebuild" => rebuild_cache(&dir, "txd"),
         "repack_etc" => repack_cache(&dir, "txd", 1),

@@ -97,12 +97,24 @@ fn bench_quote_tokens(rest: &str) -> Vec<String> {
 }
 
 fn main() {
-    let dir = PathBuf::from(std::env::args().nth(1).expect("usage: real_prof <bench_dir>"));
+    let dir = PathBuf::from(
+        std::env::args()
+            .nth(1)
+            .expect("usage: real_prof <bench_dir>"),
+    );
     println!("=== real_prof: {}", dir.display());
 
     // ---------- 1. IMG archive ----------
     let img_path = dir.join("gta3.img");
-    println!("\n[IMG] {} ({})", img_path.display(), fmt_bytes(std::fs::metadata(&img_path).map(|m| m.len() as usize).unwrap_or(0)));
+    println!(
+        "\n[IMG] {} ({})",
+        img_path.display(),
+        fmt_bytes(
+            std::fs::metadata(&img_path)
+                .map(|m| m.len() as usize)
+                .unwrap_or(0)
+        )
+    );
     let t = Instant::now();
     let archive = ImgArchive::open(&img_path, None).expect("open gta3.img");
     println!(
@@ -111,8 +123,16 @@ fn main() {
         ms(t),
         archive.entries.len()
     );
-    let n_txd = archive.entries.iter().filter(|e| e.clean_name().ends_with(".txd")).count();
-    let n_dff = archive.entries.iter().filter(|e| e.clean_name().ends_with(".dff")).count();
+    let n_txd = archive
+        .entries
+        .iter()
+        .filter(|e| e.clean_name().ends_with(".txd"))
+        .count();
+    let n_dff = archive
+        .entries
+        .iter()
+        .filter(|e| e.clean_name().ends_with(".dff"))
+        .count();
     let txd_idx: Vec<usize> = archive
         .entries
         .iter()
@@ -160,10 +180,17 @@ fn main() {
 
     let t = Instant::now();
     let report = verify_archive(&img_path, None);
-    println!("verify_archive (full scan): {:.1} ms | {}", ms(t), report.replace('\n', " "));
+    println!(
+        "verify_archive (full scan): {:.1} ms | {}",
+        ms(t),
+        report.replace('\n', " ")
+    );
 
     // ---------- 2. TXD parse + decode ----------
-    println!("\n[TXD] parse + decode of {} real TXD from the img", txd_buffers.len());
+    println!(
+        "\n[TXD] parse + decode of {} real TXD from the img",
+        txd_buffers.len()
+    );
     let t = Instant::now();
     let mut parsed = 0usize;
     let mut tex_count = 0usize;
@@ -201,7 +228,11 @@ fn main() {
         ms(t),
         cache.variant,
         cache.manifest.len(),
-        fmt_bytes(cache.raw_listing(cache.manifest.len() / 2).map_or(0, |b| b.len()))
+        fmt_bytes(
+            cache
+                .raw_listing(cache.manifest.len() / 2)
+                .map_or(0, |b| b.len())
+        )
     );
     let t = Instant::now();
     let desc = describe_cache(&cache_dir).expect("describe");
@@ -257,7 +288,13 @@ fn main() {
     let mut enc_mix: Vec<(String, usize)> = Vec::new();
     for &i in &sample {
         if let Some(l) = cache.listings[i].as_ref() {
-            let key = format!("{:?} rle={} {}x{}", l.encoding, l.rle_indicator > 0, l.width, l.height);
+            let key = format!(
+                "{:?} rle={} {}x{}",
+                l.encoding,
+                l.rle_indicator > 0,
+                l.width,
+                l.height
+            );
             match enc_mix.iter_mut().find(|(k, _)| *k == key) {
                 Some((_, c)) => *c += 1,
                 None => enc_mix.push((key, 1)),
@@ -290,8 +327,15 @@ fn main() {
     let txt_path = cache_dir.join(format!("{cname}.txt"));
     let t = Instant::now();
     let text = std::fs::read_to_string(&txt_path).expect("read manifest");
-    println!("\n[BREAKDOWN] decode_pixels_at per-call stages (cache {:?}):", cname);
-    println!("  read_to_string manifest ({}): {:.1} ms", fmt_bytes(text.len()), ms(t));
+    println!(
+        "\n[BREAKDOWN] decode_pixels_at per-call stages (cache {:?}):",
+        cname
+    );
+    println!(
+        "  read_to_string manifest ({}): {:.1} ms",
+        fmt_bytes(text.len()),
+        ms(t)
+    );
     let t = Instant::now();
     let mut count = 0usize;
     let mut target_line: Option<&str> = None;
@@ -316,9 +360,14 @@ fn main() {
         ms(t)
     );
     let t = Instant::now();
-    let toc_bytes = std::fs::read(cache_dir.join(format!("{cname}.{}.toc", cache.variant))).expect("toc");
+    let toc_bytes =
+        std::fs::read(cache_dir.join(format!("{cname}.{}.toc", cache.variant))).expect("toc");
     let _ = toc_bytes.len();
-    println!("  read toc ({}): {:.1} ms", fmt_bytes(toc_bytes.len()), ms(t));
+    println!(
+        "  read toc ({}): {:.1} ms",
+        fmt_bytes(toc_bytes.len()),
+        ms(t)
+    );
     // Current path cost estimate: manifest full parse = read + walk + parse.
     // Time parse-equivalent by re-walking with a local quote_tokens replica
     // (mirrors texdb::quote_tokens; measurement only).
@@ -329,7 +378,9 @@ fn main() {
         if !line.starts_with('"') {
             continue;
         }
-        let Some(end) = line[1..].find('"') else { continue };
+        let Some(end) = line[1..].find('"') else {
+            continue;
+        };
         parse_cost += line.len();
         for token in bench_quote_tokens(&line[1 + end + 1..]) {
             if token.contains('=') {

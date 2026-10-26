@@ -331,14 +331,21 @@ pub fn rename_texture(data: &[u8], old: &str, new: &str) -> Result<Vec<u8>, Stri
 
 /// File-level rename: keeps a pristine `<file>.bak` next to the original on
 /// first use, then writes the renamed bytes back. Returns a report line.
-pub fn rename_texture_in_file(path: &std::path::Path, old: &str, new: &str) -> Result<String, String> {
+pub fn rename_texture_in_file(
+    path: &std::path::Path,
+    old: &str,
+    new: &str,
+) -> Result<String, String> {
     let data = std::fs::read(path).map_err(|e| e.to_string())?;
     let out = rename_texture(&data, old, new)?;
     let bak = path.with_extension("dff.bak");
     if !bak.exists() {
         std::fs::write(&bak, &data).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, &out).map_err(|e| e.to_string())?;
+    // Atomic write-back: the .bak preserves the original, and temp+rename
+    // guarantees the target is either the old or the new file — never a
+    // truncated DFF from a kill/power loss mid-write.
+    crate::fsutil::write_atomic(path, &out).map_err(|e| e.to_string())?;
     Ok(format!("renamed={old}->{new};backup={}", bak.display()))
 }
 
@@ -368,10 +375,18 @@ mod tests {
         for v in [0u32, 3, 4, 1] {
             gstruct.extend_from_slice(&v.to_le_bytes());
         }
-        let geometry_body = [chunk(CH_STRUCT, &gstruct), chunk(CH_MATERIAL_LIST, &chunk(CH_STRUCT, &[1, 0, 0, 0])), material]
-            .concat();
+        let geometry_body = [
+            chunk(CH_STRUCT, &gstruct),
+            chunk(CH_MATERIAL_LIST, &chunk(CH_STRUCT, &[1, 0, 0, 0])),
+            material,
+        ]
+        .concat();
         let geometry = chunk(CH_GEOMETRY, &geometry_body);
-        let clump_body = [chunk(CH_STRUCT, &[1, 0, 0, 0]), chunk(CH_GEOMETRY_LIST, &geometry)].concat();
+        let clump_body = [
+            chunk(CH_STRUCT, &[1, 0, 0, 0]),
+            chunk(CH_GEOMETRY_LIST, &geometry),
+        ]
+        .concat();
         chunk(CH_CLUMP, &clump_body)
     }
 
@@ -380,7 +395,10 @@ mod tests {
         let dff = synthetic_dff();
         let report = inspect_dff(&dff);
         assert!(report.contains("3.6.0.3"), "{report}");
-        assert!(report.contains("Geometri: 1 (4 vertex, 3 segitiga)"), "{report}");
+        assert!(
+            report.contains("Geometri: 1 (4 vertex, 3 segitiga)"),
+            "{report}"
+        );
         assert!(report.contains("Tekstur dirujuk: 1"), "{report}");
         assert!(report.contains("mytex"), "{report}");
     }

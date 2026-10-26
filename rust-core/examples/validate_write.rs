@@ -28,6 +28,11 @@ fn main() {
         copy.display()
     );
     for e in &reopened.entries {
-        println!("E {}|{}|{}", e.clean_name(), e.offset_sectors, e.size_sectors);
+        println!(
+            "E {}|{}|{}",
+            e.clean_name(),
+            e.offset_sectors,
+            e.size_sectors
+        );
     }
 }

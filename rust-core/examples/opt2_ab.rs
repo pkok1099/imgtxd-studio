@@ -10,13 +10,21 @@ fn lcg_image(w: usize, h: usize, seed: u64, mode: u32) -> Vec<u32> {
     let mut s = seed;
     let mut px = Vec::with_capacity(w * h);
     for _ in 0..w * h {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let r = (s >> 33) as u32 & 0xFF;
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let g = (s >> 33) as u32 & 0xFF;
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let b = (s >> 33) as u32 & 0xFF;
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let a = (s >> 33) as u32 & 0xFF;
         let p = match mode {
             0 => 0xFF00_0000 | (r << 16) | (g << 8) | b,
@@ -84,24 +92,29 @@ fn main() {
             let src = PixelImage::new(px, *sw, *sh);
             let out = resample(&src, *dw, *dh, *filter);
             assert_eq!((out.width, out.height), (*dw, *dh));
-            println!(
-                "{fname:<9} {sname:<22} fnv1a={:016x}",
-                hash_px(&out.pixels)
-            );
+            println!("{fname:<9} {sname:<22} fnv1a={:016x}", hash_px(&out.pixels));
         }
     }
     // gradient source (smooth) exercises different code paths than noise
     for (fname, filter) in FILTERS {
         let src = PixelImage::new(gradient(300, 200), 300, 200);
         let out = resample(&src, 150, 100, *filter);
-        println!("{fname:<9} grad300x200->150x100    fnv1a={:016x}", hash_px(&out.pixels));
+        println!(
+            "{fname:<9} grad300x200->150x100    fnv1a={:016x}",
+            hash_px(&out.pixels)
+        );
     }
 
     println!("=== encode_dxt A/B checksums ===");
     let dxt_cases: Vec<(&str, Vec<u32>, usize, usize)> = vec![
         ("grad1024", gradient(1024, 1024), 1024, 1024),
         ("noise512", lcg_image(512, 512, 0xDEAD_BEEF, 0), 512, 512),
-        ("alpha512", lcg_image(512, 512, 0x0123_4567_89AB_CDEF, 3), 512, 512),
+        (
+            "alpha512",
+            lcg_image(512, 512, 0x0123_4567_89AB_CDEF, 3),
+            512,
+            512,
+        ),
         ("quant192", lcg_image(192, 192, 0x1234_5678, 1), 192, 192),
         ("solid64", vec![0xFF35_689B; 64 * 64], 64, 64),
         ("odd5x3", gradient(5, 3), 5, 3),
@@ -110,11 +123,7 @@ fn main() {
     for (name, px, w, h) in &dxt_cases {
         let e1 = encode_dxt1(px, *w, *h);
         let e5 = encode_dxt5(px, *w, *h);
-        println!(
-            "{name:<10} dxt1={:016x} dxt5={:016x}",
-            hash(&e1),
-            hash(&e5)
-        );
+        println!("{name:<10} dxt1={:016x} dxt5={:016x}", hash(&e1), hash(&e5));
     }
 
     println!("=== encode_etc1 regression ===");

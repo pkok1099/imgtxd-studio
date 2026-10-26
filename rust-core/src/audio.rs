@@ -86,7 +86,11 @@ pub fn compute_index(osw_bytes: &[u8]) -> Result<Vec<IdxEntry>, String> {
         }
         position = data_offset + compressed_size;
         // Defensive: p advance must not overflow either.
-        let advance = match (46usize).checked_add(name_len).and_then(|v| v.checked_add(extra_len)).and_then(|v| v.checked_add(comment_len)) {
+        let advance = match (46usize)
+            .checked_add(name_len)
+            .and_then(|v| v.checked_add(extra_len))
+            .and_then(|v| v.checked_add(comment_len))
+        {
             Some(v) => v,
             None => return Err("Direktori pusat ZIP .osw rusak".to_string()),
         };
@@ -196,8 +200,16 @@ mod tests {
         assert_eq!(
             entries,
             vec![
-                IdxEntry { name: "a.txt".into(), data_offset: 35, compressed_size: 5 },
-                IdxEntry { name: "dir/b.bin".into(), data_offset: 113, compressed_size: 3 },
+                IdxEntry {
+                    name: "a.txt".into(),
+                    data_offset: 35,
+                    compressed_size: 5
+                },
+                IdxEntry {
+                    name: "dir/b.bin".into(),
+                    data_offset: 113,
+                    compressed_size: 3
+                },
             ]
         );
         assert_eq!(idx_bytes(&entries).len(), 4 + 15 + 19);

@@ -95,7 +95,7 @@ fn main() {
             // DXT3 block = 8 alpha bytes + DXT1 block
             let b1 = encode_dxt1(&px, sz, sz);
             let mut out = Vec::with_capacity(b1.len() * 2);
-            for blk in b1.chunks_exact(8) {
+            for blk in b1.as_chunks::<8>().0 {
                 let mut r = Rng(0xD3 ^ (blk[0] as u32));
                 for i in 0..8 {
                     out.push(((r.next() & 0xFF) as u8) ^ (i as u8 * 17));
@@ -191,7 +191,9 @@ fn main() {
 
     // ---------- D. CRC32 (informational; game never reads) ----------
     println!("--- D. CRC32 ---");
-    bench("crc32_ieee 2MiB", 120.0, 50, || crc32_ieee(&raw_noise) as u64);
+    bench("crc32_ieee 2MiB", 120.0, 50, || {
+        crc32_ieee(&raw_noise) as u64
+    });
 
     // ---------- E. pixel -> byte conversions (import helpers) ----------
     println!("--- E. pixel-to-byte conversions 512x512 ---");

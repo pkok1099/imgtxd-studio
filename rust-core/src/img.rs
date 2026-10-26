@@ -33,7 +33,11 @@ pub struct ImgEntry {
 
 impl ImgEntry {
     pub fn new(offset_sectors: u32, size_sectors: u32, name: &str) -> Self {
-        Self { offset_sectors, size_sectors, name: name.to_string() }
+        Self {
+            offset_sectors,
+            size_sectors,
+            name: name.to_string(),
+        }
     }
 
     /// Name up to the first NUL byte (Kotlin `computeCleanName`).
@@ -57,9 +61,15 @@ fn sectors_for(len: u64) -> u32 {
     len.div_ceil(SECTOR_SIZE) as u32
 }
 
+/// Encodes an IMG entry name into the fixed 24-byte directory field.
+///
+/// Encoding is one char → one byte (ISO-8859-1; chars > 0xFF become '?', the
+/// same replacement the old Kotlin charset encoder produced), so truncating
+/// by **chars** (`take(NAME_SIZE)`) is also truncating by output **bytes**:
+/// the field can never overflow, and a multibyte UTF-8 input still fills all
+/// 24 slots instead of wasting two bytes per char. Names in practice are
+/// ASCII, where this is a plain byte copy.
 fn encode_name(name: &str, out: &mut [u8; NAME_SIZE]) {
-    // ISO-8859-1: Kotlin chars > 0xFF are replaced by '?' by the charset encoder;
-    // names in practice are ASCII. Bytes below map 1:1 for 0x00..=0xFF.
     for (i, ch) in name.chars().take(NAME_SIZE).enumerate() {
         let c = ch as u32;
         out[i] = if c <= 0xFF { c as u8 } else { b'?' };
@@ -77,7 +87,11 @@ fn parse_entries(buf: &[u8], count: usize) -> Vec<ImgEntry> {
         let offset = u32::from_le_bytes(buf[base..base + 4].try_into().unwrap());
         let size = u32::from_le_bytes(buf[base + 4..base + 8].try_into().unwrap());
         let name = decode_name(&buf[base + 8..base + 8 + NAME_SIZE]);
-        entries.push(ImgEntry { offset_sectors: offset, size_sectors: size, name });
+        entries.push(ImgEntry {
+            offset_sectors: offset,
+            size_sectors: size,
+            name,
+        });
     }
     entries
 }
@@ -156,7 +170,10 @@ impl ImgArchive {
             }
             let need = 8 + count as usize * ENTRY_SIZE;
             if file_len < need as u64 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "VER2 directory truncated"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "VER2 directory truncated",
+                ));
             }
             let mut dir_buf = vec![0u8; count as usize * ENTRY_SIZE];
             f.read_exact(&mut dir_buf).map_err(|e| {
@@ -195,10 +212,19 @@ impl ImgArchive {
         }
     }
 
-    pub fn create_empty(img_file: &Path, version: ImgVersion, dir_file: Option<&Path>) -> io::Result<Self> {
+    pub fn create_empty(
+        img_file: &Path,
+        version: ImgVersion,
+        dir_file: Option<&Path>,
+    ) -> io::Result<Self> {
         match version {
             ImgVersion::Ver2 => {
-                let mut f = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(img_file)?;
+                let mut f = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(img_file)?;
                 f.write_all(VER2_MAGIC)?;
                 f.write_all(&0u32.to_le_bytes())?;
                 Ok(Self {
@@ -212,12 +238,26 @@ impl ImgArchive {
                 let resolved = match dir_file {
                     Some(d) => d.to_path_buf(),
                     None => {
-                        let stem = img_file.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-                        img_file.parent().unwrap_or(Path::new(".")).join(format!("{stem}.dir"))
+                        let stem = img_file
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or_default();
+                        img_file
+                            .parent()
+                            .unwrap_or(Path::new("."))
+                            .join(format!("{stem}.dir"))
                     }
                 };
-                OpenOptions::new().write(true).create(true).truncate(true).open(img_file)?;
-                OpenOptions::new().write(true).create(true).truncate(true).open(&resolved)?;
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(img_file)?;
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&resolved)?;
                 Ok(Self {
                     img_file: img_file.to_path_buf(),
                     dir_file: Some(resolved),
@@ -256,7 +296,10 @@ impl ImgArchive {
                         self.move_entry_to_end(first_idx)?;
                     }
                 }
-                let mut f = OpenOptions::new().read(true).write(true).open(&self.img_file)?;
+                let mut f = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&self.img_file)?;
                 f.seek(SeekFrom::Start(0))?;
                 f.write_all(VER2_MAGIC)?;
                 f.write_all(&(self.entries.len() as u32).to_le_bytes())?;
@@ -265,16 +308,27 @@ impl ImgArchive {
             }
             ImgVersion::Ver1 => {
                 let dir = self.dir_file.as_ref().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "Missing .dir file for VER1 archive")
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "Missing .dir file for VER1 archive",
+                    )
                 })?;
-                std::fs::write(dir, entries_to_bytes(&self.entries))
+                // Atomic: a torn .dir write loses the index of the whole
+                // archive; temp+rename keeps the previous (still valid) copy.
+                crate::fsutil::write_atomic(dir, &entries_to_bytes(&self.entries))
             }
         }
     }
 
     fn move_entry_to_end(&mut self, idx: usize) -> io::Result<()> {
-        let (offset, size) = (self.entries[idx].offset_bytes(), self.entries[idx].size_bytes());
-        let mut f = OpenOptions::new().read(true).write(true).open(&self.img_file)?;
+        let (offset, size) = (
+            self.entries[idx].offset_bytes(),
+            self.entries[idx].size_bytes(),
+        );
+        let mut f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.img_file)?;
         let file_len = f.metadata()?.len();
         // Cap the read at the actual file length to prevent a malicious
         // directory entry (size_sectors up to u32::MAX → ~2^53 bytes) from
@@ -315,20 +369,17 @@ impl ImgArchive {
         let mut out = File::create(dest)?;
         // 1 MiB buffered copy: std::io::copy's internal 8 KiB buffer makes
         // multi-megabyte entries syscall-bound.
-        let mut reader =
-            io::BufReader::with_capacity(1024 * 1024, Read::by_ref(&mut src).take(entry.size_bytes()));
+        let mut reader = io::BufReader::with_capacity(
+            1024 * 1024,
+            Read::by_ref(&mut src).take(entry.size_bytes()),
+        );
         io::copy(&mut reader, &mut out)?;
         Ok(())
     }
 
     /// Copies up to `size` bytes src -> dst through a large scratch buffer
     /// (same EOF-tolerant semantics as `io::copy(take(size))`).
-    fn copy_up_to(
-        src: &mut File,
-        dst: &mut File,
-        mut size: u64,
-        buf: &mut [u8],
-    ) -> io::Result<()> {
+    fn copy_up_to(src: &mut File, dst: &mut File, mut size: u64, buf: &mut [u8]) -> io::Result<()> {
         while size > 0 {
             let want = (size as usize).min(buf.len());
             let n = src.read(&mut buf[..want])?;
@@ -368,11 +419,19 @@ impl ImgArchive {
     }
 
     pub fn add(&mut self, file_to_add: &Path, entry_name: Option<&str>) -> io::Result<()> {
-        let target = entry_name
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| file_to_add.file_name().unwrap_or_default().to_string_lossy().into_owned());
+        let target = entry_name.map(|s| s.to_string()).unwrap_or_else(|| {
+            file_to_add
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        });
         let clean = target.split('\0').next().unwrap_or("").to_string();
-        if self.entries.iter().any(|e| e.clean_name().eq_ignore_ascii_case(&clean)) {
+        if self
+            .entries
+            .iter()
+            .any(|e| e.clean_name().eq_ignore_ascii_case(&clean))
+        {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 format!("Entry already exists in archive: {clean}"),
@@ -387,7 +446,8 @@ impl ImgArchive {
             f.seek(SeekFrom::Start(append_sector as u64 * SECTOR_SIZE))?;
             Self::write_file_padded(&mut f, file_to_add, sectors)?;
         }
-        self.entries.push(ImgEntry::new(append_sector, sectors, &clean));
+        self.entries
+            .push(ImgEntry::new(append_sector, sectors, &clean));
         self.write_dir()
     }
 
@@ -431,7 +491,10 @@ impl ImgArchive {
     pub fn rebuild(&mut self) -> io::Result<()> {
         let tmp = self.img_file.with_file_name(format!(
             "{}_tmp",
-            self.img_file.file_name().unwrap_or_default().to_string_lossy()
+            self.img_file
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
         ));
         if tmp.exists() {
             std::fs::remove_file(&tmp)?;
@@ -441,10 +504,14 @@ impl ImgArchive {
         } else {
             0
         };
-        let mut current_sector = header_sectors as u32;
+        let mut current_sector = header_sectors;
         {
             let mut src = File::open(&self.img_file)?;
-            let mut dst = OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+            let mut dst = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&tmp)?;
             if self.version == ImgVersion::Ver2 {
                 dst.write_all(VER2_MAGIC)?;
                 let pad = header_sectors * SECTOR_SIZE - 4;
@@ -454,13 +521,33 @@ impl ImgArchive {
             for i in 0..self.entries.len() {
                 let (off, size) = (self.entries[i].offset_bytes(), self.entries[i].size_bytes());
                 src.seek(SeekFrom::Start(off))?;
-                dst.seek(SeekFrom::Start(current_sector as u64 * SECTOR_SIZE))?;
+                dst.seek(SeekFrom::Start(current_sector * SECTOR_SIZE))?;
                 Self::copy_up_to(&mut src, &mut dst, size, &mut copy_buf)?;
-                self.entries[i].offset_sectors = current_sector;
-                current_sector += self.entries[i].size_sectors;
+                // The offset of THIS entry is the pre-add cursor; it fits
+                // u32 because the check below caps the cursor at u32::MAX
+                // and header_sectors is bounded by MAX_VER2_ENTRIES.
+                self.entries[i].offset_sectors = current_sector as u32;
+                // Accumulate in u64 and refuse layouts beyond the u32 sector
+                // fields on disk: claimed spans from a malformed directory can
+                // otherwise wrap silently and produce a corrupt rebuilt
+                // archive (8 TiB of claimed sectors = 2³² × 2 KiB).
+                let next = current_sector.checked_add(self.entries[i].size_sectors as u64);
+                match next {
+                    Some(s) if s <= u32::MAX as u64 => current_sector = s,
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "archive layout exceeds u32 sector range",
+                        ));
+                    }
+                }
             }
+            dst.sync_all()?;
         }
-        std::fs::remove_file(&self.img_file)?;
+        // fs::rename atomically replaces the destination on Linux/Android.
+        // The previous remove_file() here opened a window in which the
+        // archive did not exist at all (kill/power loss between the two
+        // syscalls); rename alone is both atomic and sufficient.
         std::fs::rename(&tmp, &self.img_file)?;
         self.write_dir()
     }
@@ -496,10 +583,20 @@ pub fn verify_archive(img_file: &Path, dir_file: Option<&Path>) -> String {
     let mut spans: Vec<(u64, u64, &str)> = archive
         .entries
         .iter()
-        .map(|e| (e.offset_bytes(), e.offset_bytes() + e.size_bytes(), e.clean_name()))
+        .map(|e| {
+            (
+                e.offset_bytes(),
+                e.offset_bytes() + e.size_bytes(),
+                e.clean_name(),
+            )
+        })
         .collect();
     spans.sort();
-    let zero = archive.entries.iter().filter(|e| e.size_bytes() == 0).count();
+    let zero = archive
+        .entries
+        .iter()
+        .filter(|e| e.size_bytes() == 0)
+        .count();
     out.push_str(&format!("Entri ukuran nol: {zero}\n"));
     let past_eof = spans.iter().filter(|(_, end, _)| *end > file_len).count();
     out.push_str(&format!("Entri melewati akhir berkas: {past_eof}\n"));
@@ -530,11 +627,12 @@ pub fn verify_archive(img_file: &Path, dir_file: Option<&Path>) -> String {
     if dups.is_empty() && past_eof == 0 && overlaps == 0 {
         out.push_str("Hasil: SEHAT — tidak ada masalah struktural.\n");
     } else {
-        out.push_str("Hasil: ADA MASALAH — rebuild arsip biasanya memperbaiki tumpang tindih dan celah.\n");
+        out.push_str(
+            "Hasil: ADA MASALAH — rebuild arsip biasanya memperbaiki tumpang tindih dan celah.\n",
+        );
     }
     out
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -545,10 +643,8 @@ mod tests {
 
     fn test_dir(tag: &str) -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "imgtxd-img-test-{}-{n}-{tag}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("imgtxd-img-test-{}-{n}-{tag}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -557,6 +653,29 @@ mod tests {
         let p = dir.join(name);
         std::fs::write(&p, vec![fill; size]).unwrap();
         p
+    }
+
+    #[test]
+    fn encode_name_truncates_at_24_bytes_with_latin1_mapping() {
+        // 26 ASCII chars: truncated to exactly the first 24 bytes.
+        let mut out = [0u8; NAME_SIZE];
+        encode_name("abcdefghijklmnopqrstuvwxyz", &mut out);
+        assert_eq!(&out, b"abcdefghijklmnopqrstuvwx");
+
+        // One char → one byte: a 24-char name mixing in-field (é → 0xE9) and
+        // out-of-field (中 → '?') chars fills the field exactly, no overflow.
+        let mut out = [0u8; NAME_SIZE];
+        encode_name("ééé中中中ééé中中中ééé中中中ééé中中中", &mut out);
+        assert_eq!(out.len(), NAME_SIZE);
+        assert!(
+            out.iter().all(|&b| b == b'?' || b == 0xE9),
+            "unexpected bytes: {out:?}"
+        );
+
+        // 30 multibyte chars: truncated at the 24-byte field boundary.
+        let mut out = [0u8; NAME_SIZE];
+        encode_name(&"中".repeat(30), &mut out);
+        assert_eq!(out, [b'?'; NAME_SIZE]);
     }
 
     #[test]
@@ -697,5 +816,49 @@ mod tests {
         let e = ImgEntry::new(0, 1, "abc\0\0\0");
         assert_eq!(e.clean_name(), "abc");
     }
-}
 
+    #[test]
+    fn rebuild_rejects_u32_sector_overflow() {
+        // Review L3: claimed spans from a malformed directory must not wrap
+        // the u32 sector accumulator — rebuild fails cleanly instead of
+        // writing a corrupt archive layout (previously 2 entries claiming
+        // u32::MAX sectors wrapped back to small offsets on disk).
+        let dir = test_dir("overflow");
+        let img = dir.join("ovf.img");
+        let d = dir.join("ovf.dir");
+        std::fs::write(&img, vec![0u8; 4096]).unwrap();
+        std::fs::write(&d, []).unwrap();
+        let mut arc = ImgArchive::open(&img, Some(&d)).unwrap();
+        arc.entries.push(ImgEntry::new(0, u32::MAX, "a.dff"));
+        arc.entries.push(ImgEntry::new(0, 1, "b.dff"));
+        let res = arc.rebuild();
+        assert!(
+            res.is_err(),
+            "rebuild must refuse a layout beyond u32 sectors"
+        );
+        // The original archive on disk must be untouched (rename happens
+        // only after the whole layout is validated).
+        assert!(img.exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rebuild_swaps_archive_without_remove_window() {
+        // Review M4: rebuild must keep the archive present at all times —
+        // the swap is a single atomic rename, no remove_file before it.
+        let dir = test_dir("swap");
+        let img = dir.join("s.img");
+        let mut arc = ImgArchive::create_empty(&img, ImgVersion::Ver2, None).unwrap();
+        let a = write_src(&dir, "a.dff", 3000, 0xAA);
+        arc.add(&a, None).unwrap();
+        arc.rebuild().unwrap();
+        let reopened = ImgArchive::open(&img, None).unwrap();
+        assert_eq!(reopened.entries.len(), 1);
+        assert_eq!(reopened.entries[0].clean_name(), "a.dff");
+        assert!(
+            !dir.join("s_tmp").exists(),
+            "temp file must be gone after rename"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

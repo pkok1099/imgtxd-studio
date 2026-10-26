@@ -34,7 +34,21 @@ fn clamp255(v: i32) -> u32 {
     v.clamp(0, 255) as u32
 }
 
-fn decode_block(b: &[u8; 8], out: &mut [u32; 16]) {
+/// Unpacked per-block state shared by the scalar and SIMD pixel selection
+/// loops: the two 4-color subblock palettes, the 16-bit per-pixel modifier
+/// index bit planes (msb = high bit, lsb = low bit, pixel k = x*4 + y at bit
+/// 15-k) and the subblock split flag.
+struct BlockColors {
+    pal_a: [u32; 4],
+    pal_b: [u32; 4],
+    msb: u16,
+    lsb: u16,
+    flip: bool,
+}
+
+/// Color unpack half of `decode_block`, identical math to the previous
+/// monolithic implementation (diff/individual modes, packed palettes).
+fn block_colors(b: &[u8; 8]) -> BlockColors {
     let diff = (b[3] >> 1) & 1 == 1;
     let flip = b[3] & 1 == 1;
     let (c1, c2);
@@ -42,7 +56,11 @@ fn decode_block(b: &[u8; 8], out: &mut [u32; 16]) {
         let r = (b[0] >> 3) as i32;
         let g = (b[1] >> 3) as i32;
         let bl = (b[2] >> 3) as i32;
-        let (dr, dg, db) = (signed3(b[0] as u32), signed3(b[1] as u32), signed3(b[2] as u32));
+        let (dr, dg, db) = (
+            signed3(b[0] as u32),
+            signed3(b[1] as u32),
+            signed3(b[2] as u32),
+        );
         c1 = (expand5(r as u32), expand5(g as u32), expand5(bl as u32));
         c2 = (
             expand5((r + dr).clamp(0, 31) as u32),
@@ -63,22 +81,186 @@ fn decode_block(b: &[u8; 8], out: &mut [u32; 16]) {
     }
     let t1 = ((b[3] >> 5) & 7) as usize;
     let t2 = ((b[3] >> 2) & 7) as usize;
-    // Precompute the four packed output colors per subblock (same math as the
-    // per-pixel form: clamp255(base + modifier), same packing). Pixels then do
-    // one table lookup instead of 3 clamps + packing each.
-    let pal_a = packed_palette(c1, t1);
-    let pal_b = packed_palette(c2, t2);
-    let msb = ((b[4] as u16) << 8) | b[5] as u16;
-    let lsb = ((b[6] as u16) << 8) | b[7] as u16;
-    for x in 0..4 {
-        for y in 0..4 {
-            let k = x * 4 + y;
-            let idx = ((((msb >> (15 - k)) & 1) << 1) | ((lsb >> (15 - k)) & 1)) as usize;
-            let first = if flip { y < 2 } else { x < 2 };
-            let pal = if first { &pal_a } else { &pal_b };
-            out[y * 4 + x] = pal[idx];
+    BlockColors {
+        pal_a: packed_palette(c1, t1),
+        pal_b: packed_palette(c2, t2),
+        msb: ((b[4] as u16) << 8) | b[5] as u16,
+        lsb: ((b[6] as u16) << 8) | b[7] as u16,
+        flip,
+    }
+}
+
+/// Byte i of each entry is bit (7-i) of the byte, so the entries for a u16
+/// bit plane's high and low byte concatenated yield, at byte k, the plane's
+/// bit 15-k (k-order pixel index bit) as a 0/1 byte. Compile-time built.
+/// x86-only: the SSSE3 decode kernel is the only consumer (kept out of the
+/// aarch64 build so the table does not trip dead-code warnings there).
+#[cfg(target_arch = "x86_64")]
+const IDX01: [u64; 256] = {
+    let mut t = [0u64; 256];
+    let mut b = 0usize;
+    while b < 256 {
+        let mut v = 0u64;
+        let mut i = 0usize;
+        while i < 8 {
+            v |= (((b as u64) >> (7 - i)) & 1) << (8 * i);
+            i += 1;
+        }
+        t[b] = v;
+        b += 1;
+    }
+    t
+};
+
+/// pshufb selector mapping k-order index bytes (byte k = pixel x*4 + y) to
+/// row-major output order (byte p = pixel y*4 + x): byte p reads byte
+/// k(p) = (p % 4) * 4 + p / 4. x86-only (see `IDX01`).
+#[cfg(target_arch = "x86_64")]
+const PSHUF_K2P: [u8; 16] = [0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15];
+
+/// Subblock-palette offset per row-major output pixel p (0 = subblock A,
+/// 4 = B) for the scalar combined-palette lookup; flip=0 splits columns
+/// (first = x < 2), flip=1 splits rows (first = y < 2).
+const SEL_A_FLIP0: [u8; 16] = [0, 0, 4, 4, 0, 0, 4, 4, 0, 0, 4, 4, 0, 0, 4, 4];
+const SEL_A_FLIP1: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 4, 4];
+
+/// pshufb zero masks (high bit set) selecting which of the two subblock
+/// palettes contributes each pixel: subblock A's lookup uses ZERO_A_* (so
+/// B-only pixels read 0) and subblock B's uses ZERO_B_*; the OR of the two
+/// results is exactly the selected palette color. x86-only (see `IDX01`).
+#[cfg(target_arch = "x86_64")]
+const ZERO_A_FLIP0: [u8; 16] = [
+    0, 0, 0x80, 0x80, 0, 0, 0x80, 0x80, 0, 0, 0x80, 0x80, 0, 0, 0x80, 0x80,
+];
+#[cfg(target_arch = "x86_64")]
+const ZERO_B_FLIP0: [u8; 16] = [
+    0x80, 0x80, 0, 0, 0x80, 0x80, 0, 0, 0x80, 0x80, 0, 0, 0x80, 0x80, 0, 0,
+];
+#[cfg(target_arch = "x86_64")]
+const ZERO_A_FLIP1: [u8; 16] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+];
+#[cfg(target_arch = "x86_64")]
+const ZERO_B_FLIP1: [u8; 16] = [
+    0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+/// Decodes one block via the best available pixel-selection kernel.
+/// `simd` must equal `codec::simd::tier() >= 2` on x86_64 (callers hoist the
+/// feature check out of the block loops); it is ignored on other targets.
+#[inline]
+#[cfg_attr(not(target_arch = "x86_64"), allow(unused_variables))]
+fn decode_block_selected(simd: bool, b: &[u8; 8], out: &mut [u32; 16]) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if simd {
+            // SAFETY: SSSE3 runtime-detected (`tier() >= 2`); register-only
+            // kernel over the caller's 8-byte block, writing `out` in full.
+            unsafe { decode_block_ssse3(b, out) };
+            return;
         }
     }
+    decode_block_scalar(b, out)
+}
+
+fn decode_block(b: &[u8; 8], out: &mut [u32; 16]) {
+    #[cfg(target_arch = "x86_64")]
+    let simd = crate::codec::simd::tier() >= 2;
+    #[cfg(not(target_arch = "x86_64"))]
+    let simd = false;
+    decode_block_selected(simd, b, out)
+}
+
+/// Portable branchless pixel selection: one combined 8-entry palette plus a
+/// constant per-pixel subblock offset replaces the previous per-pixel branch
+/// and palette-pointer select. Bit-identical output by construction (same
+/// `block_colors` unpack, same index extraction, same palette math).
+fn decode_block_scalar(b: &[u8; 8], out: &mut [u32; 16]) {
+    let c = block_colors(b);
+    let mut pal8 = [0u32; 8];
+    pal8[..4].copy_from_slice(&c.pal_a);
+    pal8[4..].copy_from_slice(&c.pal_b);
+    let sel8: &[u8; 16] = if c.flip { &SEL_A_FLIP1 } else { &SEL_A_FLIP0 };
+    let (msb, lsb) = (c.msb, c.lsb);
+    for p in 0..16 {
+        let x = p & 3;
+        let y = p >> 2;
+        let bit = 15 - (x * 4 + y);
+        let idx = ((((msb >> bit) & 1) << 1) | ((lsb >> bit) & 1)) as usize;
+        out[p] = pal8[idx | sel8[p] as usize];
+    }
+}
+
+/// SSSE3 pixel-selection kernel for one ETC1 block, bit-identical to
+/// `decode_block_scalar`: the 16 per-pixel palette lookups become four
+/// `pshufb` lane selections against the two subblock palettes, with the
+/// index bit planes expanded via the compile-time `IDX01` table and
+/// transposed to output order by `PSHUF_K2P`. Differential-tested in
+/// `decode_block_simd_matches_scalar` over random and adversarial blocks.
+///
+/// # Safety
+/// SSSE3 must be runtime-detected (`tier() >= 2`) by the caller. All math is
+/// register-only; loads (`loadu`) touch only the caller's 8-byte block,
+/// read-only constant arrays and the 16-byte stack palettes; stores
+/// (`storeu`) write exactly the 64 bytes of `out: [u32; 16]`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn decode_block_ssse3(b: &[u8; 8], out: &mut [u32; 16]) {
+    use core::arch::x86_64::*;
+    let c = block_colors(b);
+    let msb = c.msb as u32;
+    let lsb = c.lsb as u32;
+    // Index bit planes as 0/1 bytes in k order (high byte entry feeds k=0..7).
+    let mv = _mm_set_epi64x(
+        IDX01[(msb & 0xFF) as usize] as i64,
+        IDX01[(msb >> 8) as usize] as i64,
+    );
+    let lv = _mm_set_epi64x(
+        IDX01[(lsb & 0xFF) as usize] as i64,
+        IDX01[(lsb >> 8) as usize] as i64,
+    );
+    // idx(k) = 2 * msb_bit + lsb_bit; bytes stay within 0..3 (no carry).
+    let idx_k = _mm_add_epi8(_mm_add_epi8(mv, mv), lv);
+    // Transpose to row-major p order, then scale to 4-byte palette offsets
+    // (idx <= 3, so the 16-bit left shift never spills across bytes).
+    let k2p = _mm_loadu_si128(PSHUF_K2P.as_ptr().cast());
+    let base = _mm_slli_epi16(_mm_shuffle_epi8(idx_k, k2p), 2);
+    let pa = _mm_loadu_si128(c.pal_a.as_ptr().cast());
+    let pb = _mm_loadu_si128(c.pal_b.as_ptr().cast());
+    let (zero_a, zero_b) = if c.flip {
+        (
+            _mm_loadu_si128(ZERO_A_FLIP1.as_ptr().cast()),
+            _mm_loadu_si128(ZERO_B_FLIP1.as_ptr().cast()),
+        )
+    } else {
+        (
+            _mm_loadu_si128(ZERO_A_FLIP0.as_ptr().cast()),
+            _mm_loadu_si128(ZERO_B_FLIP0.as_ptr().cast()),
+        )
+    };
+    // Byte j of every pixel = palette byte (idx*4 + j); exactly one of the
+    // two pshufb lookups survives each selector (the other is zeroed by the
+    // 0x80 mask), so the OR merges the selected subblock palette.
+    macro_rules! lane {
+        ($j:expr) => {{
+            let jb = _mm_set1_epi8($j);
+            let sa = _mm_or_si128(_mm_or_si128(base, jb), zero_a);
+            let sb = _mm_or_si128(_mm_or_si128(base, jb), zero_b);
+            _mm_or_si128(_mm_shuffle_epi8(pa, sa), _mm_shuffle_epi8(pb, sb))
+        }};
+    }
+    let (o0, o1, o2, o3) = (lane!(0), lane!(1), lane!(2), lane!(3));
+    // Interleave the four per-byte lanes into row-major u32 pixels:
+    // pixels 0..3 = output row 0, ..., pixels 12..15 = output row 3.
+    let ab_lo = _mm_unpacklo_epi8(o0, o1);
+    let ab_hi = _mm_unpackhi_epi8(o0, o1);
+    let cd_lo = _mm_unpacklo_epi8(o2, o3);
+    let cd_hi = _mm_unpackhi_epi8(o2, o3);
+    let ptr = out.as_mut_ptr().cast::<__m128i>();
+    _mm_storeu_si128(ptr, _mm_unpacklo_epi16(ab_lo, cd_lo));
+    _mm_storeu_si128(ptr.add(1), _mm_unpackhi_epi16(ab_lo, cd_lo));
+    _mm_storeu_si128(ptr.add(2), _mm_unpacklo_epi16(ab_hi, cd_hi));
+    _mm_storeu_si128(ptr.add(3), _mm_unpackhi_epi16(ab_hi, cd_hi));
 }
 
 /// The four packed ARGB outputs of one subblock: modifier table `t` applied to
@@ -109,10 +291,7 @@ pub fn decode_etc1(data: &[u8], width: usize, height: usize) -> Vec<u32> {
         decode_etc1_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
         return pixels;
     }
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let workers = crate::parallel::inner_workers(4);
     // At least 4 block-rows per band so per-thread work stays >> spawn cost.
     let rows_per_band = blocks_y.div_ceil(workers).max(4);
     std::thread::scope(|s| {
@@ -147,6 +326,58 @@ fn decode_etc1_band(
 ) {
     let y0 = (by_start * 4).min(height);
     let mut block = [0u32; 16];
+    // Whole-band vectorized path (pass-9): one SSSE3/NEON kernel decodes
+    // every block of the band directly to the band's pixel rows, skipping
+    // the per-block palette build entirely. Bit-identical to the per-block
+    // paths below (differential-tested over random blocks, dimensions,
+    // truncated streams, and exhaustive table pairs); falls through to the
+    // per-block fast path when no accelerated kernel exists on this platform.
+    if width.is_multiple_of(4)
+        && height.is_multiple_of(4)
+        && crate::codec::simd::etc1::etc1_band(
+            data,
+            width,
+            blocks_x,
+            by_start,
+            by_end,
+            pixels,
+            y0 * width,
+        )
+    {
+        return;
+    }
+    // Aligned fast path: every block covers a full 4x4 pixel group, block
+    // bytes are consumed in order without truncation, and each decoded block
+    // row is one contiguous 4-pixel store. Bit-identical to the general path
+    // below (same per-block decoder, same write positions) — only the
+    // per-pixel bounds checks and per-block byte copies disappear, which is
+    // where most of the decode wall-clock used to live.
+    if width.is_multiple_of(4)
+        && height.is_multiple_of(4)
+        && data.len() >= blocks_x * height.div_ceil(4) * 8
+    {
+        let blocks: &[[u8; 8]] = data.as_chunks::<8>().0;
+        #[cfg(target_arch = "x86_64")]
+        let use_simd = crate::codec::simd::tier() >= 2;
+        #[cfg(not(target_arch = "x86_64"))]
+        let use_simd = false;
+        for by in by_start..by_end {
+            let local_y = (by - by_start) * 4;
+            for bx in 0..blocks_x {
+                decode_block_selected(use_simd, &blocks[by * blocks_x + bx], &mut block);
+                let base = local_y * width + bx * 4;
+                let row = &mut pixels[base..base + 4];
+                row.copy_from_slice(&block[0..4]);
+                let row = &mut pixels[base + width..base + width + 4];
+                row.copy_from_slice(&block[4..8]);
+                let row = &mut pixels[base + 2 * width..base + 2 * width + 4];
+                row.copy_from_slice(&block[8..12]);
+                let row = &mut pixels[base + 3 * width..base + 3 * width + 4];
+                row.copy_from_slice(&block[12..16]);
+            }
+        }
+        return;
+    }
     for by in by_start..by_end {
         for bx in 0..blocks_x {
             let off = (by * blocks_x + bx) * 8;
@@ -199,17 +430,30 @@ struct Halves {
 
 /// Encodes one subblock (exactly 8 pixels): quantizes the mean color to 4
 /// bits per channel, then picks the modifier table minimizing squared error.
-///
-/// Per-pixel error math is i32 against pre-clamped level colors: for a fixed
-/// base color each level's `clamp(base + m)` is a constant, so the clamp is
-/// hoisted out of the pixel loop (12 clamps per table instead of 96). Values
-/// fit i32 (max per pixel 3*255^2 = 195075; sum over 8 pixels < 2^32). The
-/// pixel-outer / level-inner structure keeps all state in registers —
-/// measured faster than a level-outer "SIMD-friendly" layout on both x86_64
-/// and typical aarch64 pipelines. Selection order and tie-breaks (strict `<`,
-/// first level/table wins) match the original i64 version, so output is
-/// bit-identical.
+/// Dispatches to the NEON vectorized per-pixel distance search on aarch64
+/// (the 4 candidate levels ride in i32x4 lanes; the argmin over the extracted
+/// lane values replays the scalar loop's exact order and strict-< tie-break,
+/// so the chosen table and indices are bit-identical). x86_64 keeps the
+/// scalar form: on typical desktop Xeons `pmulld` is slower than the scalar
+/// `imul` chain LLVM already schedules well (measured, see bench).
 fn encode_subblock(px: &[(u32, u32, u32); 8]) -> SubblockEnc {
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON baseline; register-only math over the 8-pixel input.
+        unsafe {
+            return encode_subblock_neon(px);
+        }
+    }
+    // Not `any(test, ...)`: on aarch64 the NEON branch above diverges, so
+    // compiling this line in test builds too made it unreachable code (the
+    // only pre-existing aarch64-test warning). The scalar form stays
+    // available to tests on aarch64 via its own cfg below.
+    #[cfg(not(target_arch = "aarch64"))]
+    encode_subblock_scalar(px)
+}
+
+#[cfg(any(test, not(target_arch = "aarch64")))]
+fn encode_subblock_scalar(px: &[(u32, u32, u32); 8]) -> SubblockEnc {
     let mean = (
         px.iter().map(|p| p.0).sum::<u32>() >> 3,
         px.iter().map(|p| p.1).sum::<u32>() >> 3,
@@ -247,6 +491,84 @@ fn encode_subblock(px: &[(u32, u32, u32); 8]) -> SubblockEnc {
                 let e = dr * dr + dg * dg + db * db;
                 if e < best_e {
                     best_e = e;
+                    best_li = li;
+                }
+            }
+            indices[i] = best_li as u8;
+            err += best_e as u32;
+        }
+        if err < best_err {
+            best_err = err;
+            best_t = t as u32;
+            best_indices = indices;
+        }
+    }
+    SubblockEnc {
+        base4,
+        table: best_t,
+        indices: best_indices,
+    }
+}
+
+/// NEON variant of `encode_subblock_scalar` (i32x4 lanes, same ordering and
+/// tie-breaks as the scalar loop — see `encode_subblock_avx2`).
+///
+/// # Safety
+/// NEON is aarch64-baseline. Register-only math over the caller's slice.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn encode_subblock_neon(px: &[(u32, u32, u32); 8]) -> SubblockEnc {
+    use core::arch::aarch64::*;
+    let mean = (
+        px.iter().map(|p| p.0).sum::<u32>() >> 3,
+        px.iter().map(|p| p.1).sum::<u32>() >> 3,
+        px.iter().map(|p| p.2).sum::<u32>() >> 3,
+    );
+    let base4 = (mean.0 >> 4, mean.1 >> 4, mean.2 >> 4);
+    let base = (
+        expand4(base4.0) as i32,
+        expand4(base4.1) as i32,
+        expand4(base4.2) as i32,
+    );
+    let mut best_err = u32::MAX;
+    let mut best_t = 0u32;
+    let mut best_indices = [0u8; 8];
+    for (t, &(small, big)) in MODIFIERS.iter().enumerate() {
+        let levels = [-big, -small, small, big];
+        let mut lc = [(0i32, 0i32, 0i32); 4];
+        for (li, &m) in levels.iter().enumerate() {
+            lc[li] = (
+                (base.0 + m).clamp(0, 255),
+                (base.1 + m).clamp(0, 255),
+                (base.2 + m).clamp(0, 255),
+            );
+        }
+        let lc_r = [lc[0].0, lc[1].0, lc[2].0, lc[3].0];
+        let lc_g = [lc[0].1, lc[1].1, lc[2].1, lc[3].1];
+        let lc_b = [lc[0].2, lc[1].2, lc[2].2, lc[3].2];
+        let vr = vld1q_s32(lc_r.as_ptr());
+        let vg = vld1q_s32(lc_g.as_ptr());
+        let vb = vld1q_s32(lc_b.as_ptr());
+        let mut err = 0u32;
+        let mut indices = [0u8; 8];
+        for (i, &p) in px.iter().enumerate() {
+            let pr = vdupq_n_s32(p.0 as i32);
+            let pg = vdupq_n_s32(p.1 as i32);
+            let pb = vdupq_n_s32(p.2 as i32);
+            let dr = vsubq_s32(vr, pr);
+            let dg = vsubq_s32(vg, pg);
+            let db = vsubq_s32(vb, pb);
+            let e = vaddq_s32(
+                vaddq_s32(vmulq_s32(dr, dr), vmulq_s32(dg, dg)),
+                vmulq_s32(db, db),
+            );
+            let mut es = [0i32; 4];
+            vst1q_s32(es.as_mut_ptr(), e);
+            let mut best_e = i32::MAX;
+            let mut best_li = 0usize;
+            for (li, &ev) in es.iter().enumerate() {
+                if ev < best_e {
+                    best_e = ev;
                     best_li = li;
                 }
             }
@@ -329,25 +651,44 @@ fn encode_band(
                     })
                     .sum()
             };
-            let mut best: Option<FlipBest> = None;
-            for flip in [false, true] {
-                let h = halves(flip);
-                let ea = encode_subblock(&h.a);
-                let eb = encode_subblock(&h.b);
+            // Both orientations are always scored; the lower-variance one
+            // wins and ties keep the unflipped split (strict <, same as the
+            // original encoder). The losing orientation's subblock encodings
+            // are never used, so the flipped half is only encoded when its
+            // score actually wins — no Option/unwrap needed.
+            let mut best = {
+                let h = halves(false);
+                FlipBest {
+                    score: var(&h.a) + var(&h.b),
+                    flip: 0,
+                    ea: encode_subblock(&h.a),
+                    eb: encode_subblock(&h.b),
+                    pa: h.pa,
+                    pb: h.pb,
+                }
+            };
+            {
+                let h = halves(true);
                 let score = var(&h.a) + var(&h.b);
-                let better = best.as_ref().is_none_or(|b| score < b.score);
-                if better {
-                    best = Some(FlipBest {
+                if score < best.score {
+                    best = FlipBest {
                         score,
-                        flip: flip as u8,
-                        ea,
-                        eb,
+                        flip: 1,
+                        ea: encode_subblock(&h.a),
+                        eb: encode_subblock(&h.b),
                         pa: h.pa,
                         pb: h.pb,
-                    });
+                    };
                 }
             }
-            let FlipBest { flip, ea, eb, pa, pb, .. } = best.unwrap();
+            let FlipBest {
+                flip,
+                ea,
+                eb,
+                pa,
+                pb,
+                ..
+            } = best;
             out[o] = (((ea.base4.0 << 4) | eb.base4.0) & 0xFF) as u8;
             out[o + 1] = (((ea.base4.1 << 4) | eb.base4.1) & 0xFF) as u8;
             out[o + 2] = (((ea.base4.2 << 4) | eb.base4.2) & 0xFF) as u8;
@@ -402,10 +743,7 @@ pub fn encode_etc1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
         encode_band(pixels, width, height, blocks_x, 0, blocks_y, &mut out);
         return out;
     }
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let workers = crate::parallel::inner_workers(4);
     // At least 4 block-rows per band so per-thread work stays >> spawn cost.
     let rows_per_band = blocks_y.div_ceil(workers).max(4);
     let chunk = rows_per_band * blocks_x * 8;
@@ -451,7 +789,8 @@ mod tests {
         let mut total = 0u64;
         for (a, b) in px.iter().zip(dec.iter()) {
             for shift in [16, 8, 0] {
-                total += (((a >> shift) & 0xFF) as i64 - ((b >> shift) & 0xFF) as i64).unsigned_abs();
+                total +=
+                    (((a >> shift) & 0xFF) as i64 - ((b >> shift) & 0xFF) as i64).unsigned_abs();
             }
         }
         let mean = total as f64 / (px.len() * 3) as f64;
@@ -467,10 +806,123 @@ mod tests {
         b[1] = 0; // g=0, dg=0
         b[2] = 0; // b=0, db=0
         b[3] = 0b0000_0010; // t1=0,t2=0, diff=1, flip=0
-        // indices all '2' => msb bits all 1, lsb all 0
+                            // indices all '2' => msb bits all 1, lsb all 0
         b[4] = 0xFF;
         b[5] = 0xFF;
         let px = decode_etc1(&b, 4, 4);
         assert!(px.iter().all(|&p| p == 0xFFFF_0202), "got {:08x}", px[0]);
+    }
+
+    /// The vectorized encode path must pick the same table and indices as
+    /// the scalar reference for every random subblock (bit-identical bytes).
+    #[test]
+    fn encode_subblock_simd_matches_scalar() {
+        struct Rng(u64);
+        impl Rng {
+            fn next_u32(&mut self) -> u32 {
+                let mut x = self.0;
+                x ^= x >> 12;
+                x ^= x << 25;
+                x ^= x >> 27;
+                self.0 = x;
+                (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32) as u32
+            }
+        }
+        let mut rng = Rng(0xE71_C0DE_FEED_FACE);
+        for _ in 0..20_000 {
+            let px: [(u32, u32, u32); 8] = core::array::from_fn(|_| {
+                (
+                    rng.next_u32() & 0xFF,
+                    rng.next_u32() & 0xFF,
+                    rng.next_u32() & 0xFF,
+                )
+            });
+            let want = encode_subblock_scalar(&px);
+            let got = encode_subblock(&px);
+            assert_eq!(got.base4, want.base4);
+            assert_eq!(got.table, want.table, "table for {px:?}");
+            assert_eq!(got.indices, want.indices, "indices for {px:?}");
+        }
+    }
+
+    /// The SSSE3 decode path must be bit-identical to the scalar reference
+    /// for random blocks plus every diff/individual x flip x table-index
+    /// combination (the pixel-selection kernel replaces only the 16 lookups;
+    /// the shared `block_colors` unpack is exercised by both paths).
+    #[test]
+    fn decode_block_simd_matches_scalar() {
+        struct Rng(u64);
+        impl Rng {
+            fn next_u32(&mut self) -> u32 {
+                let mut x = self.0;
+                x ^= x >> 12;
+                x ^= x << 25;
+                x ^= x >> 27;
+                self.0 = x;
+                (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32) as u32
+            }
+        }
+        let mut rng = Rng(0xDE_C0_DE_5E_ED_F0_0D);
+        let mut cases: Vec<[u8; 8]> = Vec::new();
+        for diff in 0..2u8 {
+            for flip in 0..2u8 {
+                for t in 0..8u8 {
+                    let mut b = [0u8; 8];
+                    b[3] = (t << 5) | (t << 2) | (diff << 1) | flip;
+                    b[4] = 0xFF; // msb all ones
+                    b[6] = 0x55; // lsb alternating
+                    cases.push(b);
+                    let mut c = b;
+                    c[4] = 0x00; // msb all zeros
+                    c[6] = 0xAA;
+                    cases.push(c);
+                }
+            }
+        }
+        while cases.len() < 21_000 {
+            let mut b = [0u8; 8];
+            for slot in b.iter_mut() {
+                *slot = rng.next_u32() as u8;
+            }
+            cases.push(b);
+        }
+        for b in &cases {
+            let mut want = [0u32; 16];
+            decode_block_scalar(b, &mut want);
+            let mut got = [0u32; 16];
+            decode_block(b, &mut got);
+            assert_eq!(got, want, "decode mismatch for block {b:02x?}");
+        }
+    }
+
+    /// Pins the orientation selection of `encode_band`: the split with the
+    /// lower total variance wins, ties keep the unflipped encoding.
+    #[test]
+    fn flip_selection_prefers_lower_variance_orientation() {
+        // Left columns constant blue / right columns constant red-ish: the
+        // column split yields two zero-variance halves and must win (flip=0).
+        let mut px = Vec::new();
+        for _y in 0..4 {
+            for x in 0..4 {
+                px.push(if x < 2 { 0xFF0000FF } else { 0xFF000080 });
+            }
+        }
+        let enc = encode_etc1(&px, 4, 4);
+        assert_eq!(
+            enc[3] & 1,
+            0,
+            "column split must win, flip bit {:b}",
+            enc[3]
+        );
+
+        // Same colors stacked by rows: the row split wins, flip bit = 1.
+        let mut px = Vec::new();
+        for y in 0..4 {
+            for _x in 0..4 {
+                px.push(if y < 2 { 0xFF0000FF } else { 0xFF000080 });
+            }
+        }
+        let enc = encode_etc1(&px, 4, 4);
+        assert_eq!(enc[3] & 1, 1, "row split must win, flip bit {:b}", enc[3]);
     }
 }

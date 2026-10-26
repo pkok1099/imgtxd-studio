@@ -15,6 +15,14 @@
 //! - `.toc`: u32 .dat size, then one i32 offset per manifest entry
 //!   (-1 for affiliate entries, which carry no data).
 
+/// Upper bound for texture dimensions parsed from texdb listings and PNG
+/// imports. Real game caches are ≤ 2048 (mobile packs ≤ 4096); 8192 matches
+/// the cap in `txd::parse`. A faked listing header claiming e.g.
+/// 65535×32767 would inflate `expected_size()` and the RLE output cap into
+/// multi-GiB allocations → allocation failure aborts the whole process
+/// (panic=abort). Listings above the cap are treated as corrupt (no data).
+pub const MAX_TEXDB_DIM: usize = 8192;
+
 /// Name hash from the wiki algorithm; verified against real listings.
 pub fn hash_name(name: &str) -> u16 {
     let mut hash: u32 = 0;
@@ -26,12 +34,12 @@ pub fn hash_name(name: &str) -> u16 {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TexEncoding {
-    Dxt1,      // 0x83F0
-    Dxt5,      // 0x83F3
-    Etc1,      // 0x8D64 GL_ETC1_RGB8_OES
-    Rgb565,    // 0x8033 (render-verified) and 0x8363 (same family)
-    Rgba4444,  // 0x8034 (probable layout, same storage family)
-    Rgba32,    // 0x1401 GL_UNSIGNED_BYTE (RGBA bytes)
+    Dxt1,     // 0x83F0
+    Dxt5,     // 0x83F3
+    Etc1,     // 0x8D64 GL_ETC1_RGB8_OES
+    Rgb565,   // 0x8033 (render-verified) and 0x8363 (same family)
+    Rgba4444, // 0x8034 (probable layout, same storage family)
+    Rgba32,   // 0x1401 GL_UNSIGNED_BYTE (RGBA bytes)
     Unknown(u16),
 }
 
@@ -98,6 +106,9 @@ pub fn rle_decode(payload: &[u8], seg: usize, indicator: u8, max_out: usize) -> 
     if seg == 0 {
         return None;
     }
+    if seg == 8 {
+        return rle_decode_seg8(payload, indicator, max_out);
+    }
     let mut out = Vec::new();
     let mut i = 0usize;
     while i < payload.len() {
@@ -137,12 +148,105 @@ pub fn rle_decode(payload: &[u8], seg: usize, indicator: u8, max_out: usize) -> 
     Some(out)
 }
 
+/// Bit-identical `rle_decode` fast path for seg = 8 (the dominant on-disk
+/// segment size): literal spans — consecutive units whose first byte differs
+/// from the indicator — are located by checking one byte per unit start and
+/// copied as one bulk memcpy per span, replacing the per-unit bounds checks,
+/// byte `push` and 7-byte tail copies that dominated wall-clock on
+/// incompressible payloads. Group parsing, bomb guards (`max_out`) and every
+/// `None` condition match the generic decoder exactly; differential-tested
+/// in `rle_decode_seg8_matches_generic` (encoded roundtrips + random soup).
+fn rle_decode_seg8(payload: &[u8], indicator: u8, max_out: usize) -> Option<Vec<u8>> {
+    let len = payload.len();
+    let mut out = Vec::new();
+    let mut u = 0usize;
+    while u < len {
+        if payload[u] == indicator {
+            // Repeat group: indicator, count, one 8-byte unit.
+            if u + 2 + 8 > len {
+                return None;
+            }
+            let count = payload[u + 1] as usize;
+            let segment = &payload[u + 2..u + 2 + 8];
+            u += 2 + 8;
+            // Bomb guard: count × seg must fit in max_out; count <= 255 and
+            // seg = 8 cannot overflow.
+            let added = count * 8;
+            if out.len() + added > max_out {
+                return None;
+            }
+            for _ in 0..count {
+                out.extend_from_slice(segment);
+            }
+        } else {
+            // Literal span: full 8-byte units whose first byte is never the
+            // indicator decode to the very same payload bytes, so the whole
+            // span can be copied verbatim once the scan ends.
+            let start = u;
+            while u < len && payload[u] != indicator {
+                if u + 8 > len {
+                    return None;
+                }
+                u += 8;
+            }
+            let span = &payload[start..u];
+            if out.len() + span.len() > max_out {
+                return None;
+            }
+            out.extend_from_slice(span);
+        }
+    }
+    Some(out)
+}
+
 /// Encodes `data` as an RLE stream the game decoder accepts.
 /// Runs of identical `seg`-sized units become repeat groups; a literal unit
 /// that would start with the indicator byte is emitted as a count-1 repeat
 /// group so it can never be misread.
 pub fn rle_encode(data: &[u8], seg: usize, indicator: u8) -> Vec<u8> {
     assert!(seg > 0 && data.len().is_multiple_of(seg));
+    if seg == 8 {
+        rle_encode_seg8(data, indicator)
+    } else {
+        rle_encode_generic(data, seg, indicator)
+    }
+}
+
+/// Bit-identical `rle_encode` fast path for seg = 8 (the dominant on-disk
+/// segment size): run detection compares whole units as single `u64` loads
+/// (`u64::from_le_bytes` on a `[u8; 8]` compiles to one unaligned mov on
+/// x86_64/aarch64) instead of per-unit slice `memcmp` with bounds checks —
+/// the dominant cost on incompressible data. Emission order and bytes are
+/// unchanged (differential-tested in `rle_encode_seg8_matches_generic`).
+fn rle_encode_seg8(data: &[u8], indicator: u8) -> Vec<u8> {
+    let (chunks, _) = data.as_chunks::<8>();
+    let units = chunks.len();
+    let mut out = Vec::new();
+    let mut u = 0usize;
+    while u < units {
+        let unit: &[u8; 8] = &chunks[u];
+        let unit_word = u64::from_le_bytes(*unit);
+        // Count the run of identical units (cap 255 per group).
+        let mut run = 1usize;
+        while u + run < units && run < 255 && u64::from_le_bytes(chunks[u + run]) == unit_word {
+            run += 1;
+        }
+        if run >= 2 || unit[0] == indicator {
+            out.push(indicator);
+            out.push(run as u8);
+            out.extend_from_slice(unit);
+            u += run;
+        } else {
+            out.extend_from_slice(unit);
+            u += 1;
+        }
+    }
+    out
+}
+
+/// Reference `rle_encode` for seg != 8, unchanged from the original
+/// implementation; also the differential-test oracle for the seg-8 fast path.
+fn rle_encode_generic(data: &[u8], seg: usize, indicator: u8) -> Vec<u8> {
     let units = data.len() / seg;
     let mut out = Vec::new();
     let mut u = 0usize;
@@ -168,15 +272,27 @@ pub fn rle_encode(data: &[u8], seg: usize, indicator: u8) -> Vec<u8> {
 
 /// IEEE CRC32 (used for the manifest's informational png=/img= fields,
 /// which the game itself never reads).
+///
+/// Slicing-by-8: the classic T0 table processes one byte per step, while the
+/// additional T1..T7 tables fold 8 bytes per iteration with the same
+/// polynomial — the result is identical to the byte-at-a-time version by
+/// construction (each Tn[i] is the byte algorithm applied to i followed by n
+/// zero bytes). A byte-at-a-time tail handles the last `len % 8` bytes.
 pub fn crc32_ieee(data: &[u8]) -> u32 {
+    const fn next(c: u32) -> u32 {
+        if c & 1 != 0 {
+            0xEDB8_8320 ^ (c >> 1)
+        } else {
+            c >> 1
+        }
+    }
     const TABLE: [u32; 256] = {
         let mut table = [0u32; 256];
         let mut i = 0;
         while i < 256 {
-            let mut c = i as u32;
-            let mut k = 0;
+            let (mut c, mut k) = (i as u32, 0);
             while k < 8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = next(c);
                 k += 1;
             }
             table[i] = c;
@@ -184,9 +300,40 @@ pub fn crc32_ieee(data: &[u8]) -> u32 {
         }
         table
     };
+    const T: [[u32; 256]; 8] = {
+        let mut tables = [[0u32; 256]; 8];
+        tables[0] = TABLE;
+        let mut n = 1;
+        while n < 8 {
+            let mut i = 0;
+            while i < 256 {
+                let prev = tables[n - 1][i];
+                tables[n][i] = (prev >> 8) ^ TABLE[(prev & 0xFF) as usize];
+                i += 1;
+            }
+            n += 1;
+        }
+        tables
+    };
     let mut crc = 0xFFFF_FFFFu32;
-    for &b in data {
-        crc = TABLE[((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
+    let (chunks, tail) = data.as_chunks::<8>();
+    for c in chunks {
+        let lo = crc
+            ^ ((c[0] as u32)
+                | ((c[1] as u32) << 8)
+                | ((c[2] as u32) << 16)
+                | ((c[3] as u32) << 24));
+        crc = T[7][(lo & 0xFF) as usize]
+            ^ T[6][((lo >> 8) & 0xFF) as usize]
+            ^ T[5][((lo >> 16) & 0xFF) as usize]
+            ^ T[4][(lo >> 24) as usize]
+            ^ T[3][c[4] as usize]
+            ^ T[2][c[5] as usize]
+            ^ T[1][c[6] as usize]
+            ^ T[0][c[7] as usize];
+    }
+    for &b in tail {
+        crc = T[0][((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
     }
     crc ^ 0xFFFF_FFFF
 }
@@ -213,7 +360,9 @@ pub fn build_listing(
         TexEncoding::Unknown(_) => return None,
     };
     let full_chain = levels.len() > 1;
-    if encoding.raw_size(width, height, full_chain)? != levels.iter().map(|l| l.len()).sum::<usize>() {
+    if encoding.raw_size(width, height, full_chain)?
+        != levels.iter().map(|l| l.len()).sum::<usize>()
+    {
         return None;
     }
     let raw: Vec<u8> = levels.iter().flat_map(|l| l.iter().copied()).collect();
@@ -304,7 +453,8 @@ impl Listing {
     }
 
     pub fn expected_size(&self) -> Option<usize> {
-        self.encoding.raw_size(self.width, self.height, self.full_chain)
+        self.encoding
+            .raw_size(self.width, self.height, self.full_chain)
     }
 }
 
@@ -352,7 +502,9 @@ fn parse_manifest(text: &str) -> Vec<ManifestEntry> {
         if !line.starts_with('"') {
             continue;
         }
-        let Some(end) = line[1..].find('"') else { continue };
+        let Some(end) = line[1..].find('"') else {
+            continue;
+        };
         let name = line[1..1 + end].to_string();
         let rest = &line[1 + end + 1..];
         let mut props = Vec::new();
@@ -429,7 +581,11 @@ impl TexdbCache {
         let mut variants: Vec<String> = Vec::new();
         for entry in std::fs::read_dir(dir)? {
             let path = entry?.path();
-            let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let fname = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             if let Some(rest) = fname.strip_prefix(&format!("{cache_name}.")) {
                 if let Some(v) = rest.strip_suffix(".toc") {
                     variants.push(v.to_string());
@@ -459,16 +615,20 @@ impl TexdbCache {
         let dat = std::fs::read(dir.join(format!("{cache_name}.{variant}.dat")))?;
         let toc_bytes = std::fs::read(dir.join(format!("{cache_name}.{variant}.toc")))?;
         if toc_bytes.len() < 4 || (toc_bytes.len() - 4) / 4 < manifest.len() {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "toc too short"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "toc too short",
+            ));
         }
         let stated = u32::from_le_bytes(toc_bytes[0..4].try_into().unwrap()) as usize;
         if stated != dat.len() {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "toc/dat size mismatch"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "toc/dat size mismatch",
+            ));
         }
         let offsets: Vec<i64> = (0..manifest.len())
-            .map(|i| {
-                i32::from_le_bytes(toc_bytes[4 + i * 4..8 + i * 4].try_into().unwrap()) as i64
-            })
+            .map(|i| i32::from_le_bytes(toc_bytes[4 + i * 4..8 + i * 4].try_into().unwrap()) as i64)
             .collect();
         let mut listings: Vec<Option<Listing>> = Vec::with_capacity(manifest.len());
         for (i, entry) in manifest.iter().enumerate() {
@@ -479,7 +639,10 @@ impl TexdbCache {
             }
             let start = off as usize;
             if start + 16 > dat.len() {
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "listing out of range"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "listing out of range",
+                ));
             }
             let h = &dat[start..start + 16];
             let hash = u16::from_le_bytes(h[0..2].try_into().unwrap());
@@ -496,13 +659,24 @@ impl TexdbCache {
             // sequential fallback walks exactly this csize chain.
             let end = start + compressed_size as usize + 12;
             if end > dat.len() || end < start + 16 {
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "listing out of range"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "listing out of range",
+                ));
             }
             if hash != hash_name(&entry.name) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("listing hash mismatch for {}", entry.name),
                 ));
+            }
+            // Dimension cap (see MAX_TEXDB_DIM): an inflated header would
+            // push huge "expected" sizes and RLE caps into every consumer
+            // of this listing. Degrade to "no data" for this one texture
+            // instead of failing the whole cache or aborting later.
+            if width > MAX_TEXDB_DIM || (hm & 0x7FFF) as usize > MAX_TEXDB_DIM {
+                listings.push(None);
+                continue;
             }
             listings.push(Some(Listing {
                 hash,
@@ -598,67 +772,37 @@ impl TexdbCache {
 /// Decodes PNG bytes to ARGB pixels (the `png` crate, EXPAND transform).
 pub fn decode_png_argb(bytes: &[u8]) -> Option<(Vec<u32>, usize, usize)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    // Cap the decoder's own allocations (row buffers etc.). The png 0.17
+    // `Limits` struct has only `bytes` — it can NOT bound the output buffer,
+    // which WE allocate below from the attacker-chosen header.
+    decoder.set_limits(png::Limits { bytes: 64 << 20 });
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().ok()?;
+    // Gate the header dimensions BEFORE `output_buffer_size()`: a faked
+    // 100000×100000 RGBA header would otherwise request a ~40 GB output
+    // allocation and abort the process (panic=abort). Oversized images fail
+    // here and the import wizard counts them as skipped.
+    {
+        let info = reader.info();
+        if info.width as usize > MAX_TEXDB_DIM || info.height as usize > MAX_TEXDB_DIM {
+            return None;
+        }
+    }
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
     let (w, h) = (info.width as usize, info.height as usize);
     let data = &buf[..info.buffer_size()];
     let px: Vec<u32> = match info.color_type {
-        png::ColorType::Rgba => data
-            .chunks_exact(4)
-            .map(|c| ((c[3] as u32) << 24) | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32)
-            .collect(),
-        png::ColorType::Rgb => data
-            .chunks_exact(3)
-            .map(|c| 0xFF00_0000 | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32)
-            .collect(),
-        png::ColorType::Grayscale => data
-            .iter()
-            .map(|&v| 0xFF00_0000 | ((v as u32) << 16) | ((v as u32) << 8) | v as u32)
-            .collect(),
-        png::ColorType::GrayscaleAlpha => data
-            .chunks_exact(2)
-            .map(|c| ((c[1] as u32) << 24) | ((c[0] as u32) << 16) | ((c[0] as u32) << 8) | c[0] as u32)
-            .collect(),
+        png::ColorType::Rgba => crate::codec::raw::rgba32_to_argb(data),
+        png::ColorType::Rgb => crate::codec::raw::rgb24_to_argb(data),
+        png::ColorType::Grayscale => crate::codec::raw::gray8_to_argb(data),
+        png::ColorType::GrayscaleAlpha => crate::codec::raw::gray_alpha8_to_argb(data),
         _ => return None,
     };
     if px.len() != w * h {
         return None;
     }
     Some((px, w, h))
-}
-
-fn rgb565_bytes(pixels: &[u32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pixels.len() * 2);
-    for &p in pixels {
-        let v = ((((p >> 16) & 0xFF) >> 3) << 11) | ((((p >> 8) & 0xFF) >> 2) << 5) | ((p & 0xFF) >> 3);
-        out.extend_from_slice(&(v as u16).to_le_bytes());
-    }
-    out
-}
-
-fn rgba4444_bytes(pixels: &[u32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pixels.len() * 2);
-    for &p in pixels {
-        let v = ((((p >> 16) & 0xFF) >> 4) << 12)
-            | ((((p >> 8) & 0xFF) >> 4) << 8)
-            | (((p & 0xFF) >> 4) << 4)
-            | ((p >> 24) & 0xFF) >> 4;
-        out.extend_from_slice(&(v as u16).to_le_bytes());
-    }
-    out
-}
-
-fn rgba32_bytes(pixels: &[u32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pixels.len() * 4);
-    for &p in pixels {
-        out.push(((p >> 16) & 0xFF) as u8);
-        out.push(((p >> 8) & 0xFF) as u8);
-        out.push((p & 0xFF) as u8);
-        out.push((p >> 24) as u8);
-    }
-    out
 }
 
 /// Import format choices, mirroring TXD Tool's image-import dialog.
@@ -763,7 +907,11 @@ fn import_manifest_line(t: &ManifestTex<'_>) -> String {
         t.height,
         t.png_crc,
         t.img_crc,
-        if matches!(t.encoding, TexEncoding::Dxt1 | TexEncoding::Dxt5) { " format=7" } else { "" },
+        if matches!(t.encoding, TexEncoding::Dxt1 | TexEncoding::Dxt5) {
+            " format=7"
+        } else {
+            ""
+        },
         if t.has_alpha { " alphamode=2" } else { "" },
         if t.camnorm { " camnorm=1" } else { "" },
         if t.sibling { " hassibling=1" } else { "" },
@@ -842,8 +990,8 @@ fn apply_write(
             _ => 0,
         })
         .sum();
-    let rebuild = mode == WriteMode::ForceRebuild
-        || (old_dat_len > 0 && appended_len * 2 > old_dat_len);
+    let rebuild =
+        mode == WriteMode::ForceRebuild || (old_dat_len > 0 && appended_len * 2 > old_dat_len);
 
     let (new_dat, new_listings): (Vec<u8>, Vec<Option<Listing>>) = if rebuild {
         let refs: Vec<Option<&[u8]>> = slots
@@ -992,12 +1140,19 @@ fn load_variant_meta(
         if span_end > dat_len || span_end < start + 16 {
             return None;
         }
+        let width = u16::from_le_bytes(h[4..6].try_into().ok()?) as usize;
+        let height = (hm & 0x7FFF) as usize;
+        // Dimension cap (see MAX_TEXDB_DIM) — same rationale as load_variant.
+        if width > MAX_TEXDB_DIM || height > MAX_TEXDB_DIM {
+            listings.push(None);
+            continue;
+        }
         listings.push(Some(Listing {
             hash,
             encoding: TexEncoding::from_u16(encoding_raw),
             encoding_raw,
-            width: u16::from_le_bytes(h[4..6].try_into().ok()?) as usize,
-            height: (hm & 0x7FFF) as usize,
+            width,
+            height,
             full_chain: hm & 0x8000 != 0,
             compressed_size,
             rle_indicator: u32::from_le_bytes(h[12..16].try_into().ok()?),
@@ -1006,6 +1161,133 @@ fn load_variant_meta(
         }));
     }
     Some(VariantMeta { listings, dat_len })
+}
+
+/// Per-image import work product: everything computed before the conflict
+/// policy mutates cache state. `hash_ok` folds the overwrite hash-check
+/// (`true` when no check applies) so the apply step never touches pixel data
+/// or the borrowed cache.
+struct PreparedImport {
+    twin: Option<usize>,
+    name: String,
+    line: String,
+    listing: Vec<u8>,
+    hash_ok: bool,
+}
+
+/// Pure per-image pipeline: PNG decode → mip chain → per-level encode →
+/// listing build. Reads only immutable cache state (manifest + listings),
+/// writes nothing, so any number of these can run concurrently. Results are
+/// applied to the cache strictly in input order by `import_textures`, which
+/// keeps every manifest line, listing byte and report counter identical to
+/// the previous serial implementation (duplicate names: last write wins,
+/// exactly as before).
+fn prepare_import(
+    raw_name: &str,
+    png_bytes: &[u8],
+    manifest: &[ManifestEntry],
+    listings: &[Option<Listing>],
+    opts: &ImportOptions,
+) -> Option<PreparedImport> {
+    let (pixels, w, h) = decode_png_argb(png_bytes)?;
+    let twin = manifest
+        .iter()
+        .position(|e| e.affiliate.is_none() && e.name.eq_ignore_ascii_case(raw_name));
+    let name = if opts.correct_caps {
+        twin.map(|i| manifest[i].name.clone())
+            .unwrap_or_else(|| raw_name.to_string())
+    } else {
+        raw_name.to_string()
+    };
+    let src = crate::mipmap::PixelImage::new(pixels, w, h);
+    let rest =
+        crate::mipmap::generate_chain(&src, crate::mipmap::MipFilter::from_i32(opts.mip_filter));
+    // Level 0 is moved (not cloned) in front of the generated chain: the
+    // old `vec![src.clone()]` duplicated the full-resolution image (3 MB
+    // at 1024x768) once per imported image — and once per concurrent
+    // worker — while a move is free. Chain content and every downstream
+    // byte are unchanged (levels[0] is the same pixels either way).
+    let mut chain = Vec::with_capacity(rest.len() + 1);
+    chain.push(src);
+    chain.extend(rest);
+    let base = if opts.reduce_to > 0 {
+        chain
+            .iter()
+            .position(|l| l.width.max(l.height) <= opts.reduce_to)
+            .unwrap_or(chain.len() - 1)
+    } else {
+        0
+    };
+    let levels = if opts.generate_mipmaps {
+        &chain[base..]
+    } else {
+        &chain[base..base + 1]
+    };
+    let has_alpha = levels[0].pixels.iter().any(|p| (p >> 24) & 0xFF < 255);
+    let encoding = match opts.format {
+        ImportFormat::CompressedAlpha => {
+            if has_alpha {
+                TexEncoding::Dxt5
+            } else {
+                TexEncoding::Dxt1
+            }
+        }
+        ImportFormat::CompressedNoAlpha => TexEncoding::Dxt1,
+        ImportFormat::UncompressedAlpha | ImportFormat::UncompressedLowMemory => {
+            TexEncoding::Rgba4444
+        }
+        ImportFormat::UncompressedNoAlpha => TexEncoding::Rgb565,
+        ImportFormat::Uncompressed32 => TexEncoding::Rgba32,
+    };
+    let encoded: Vec<Vec<u8>> = levels
+        .iter()
+        .map(|l| match encoding {
+            TexEncoding::Dxt5 => crate::codec::dxt::encode_dxt5(&l.pixels, l.width, l.height),
+            TexEncoding::Dxt1 => crate::codec::dxt::encode_dxt1(&l.pixels, l.width, l.height),
+            TexEncoding::Rgb565 => crate::codec::raw::argb_to_rgb565_bytes(&l.pixels),
+            TexEncoding::Rgba4444 => crate::codec::raw::argb_to_rgba4444_bytes(&l.pixels),
+            TexEncoding::Rgba32 => crate::codec::raw::argb_to_rgba32_bytes(&l.pixels),
+            _ => Vec::new(),
+        })
+        .collect();
+    let refs: Vec<&[u8]> = encoded.iter().map(|v| &v[..]).collect();
+    let listing = build_listing(
+        &name,
+        encoding,
+        levels[0].width,
+        levels[0].height,
+        &refs,
+        opts.use_rle,
+    )?;
+    let is_sibling = opts.conflict == ConflictPolicy::CreateSibling;
+    let line = import_manifest_line(&ManifestTex {
+        name: &name,
+        width: levels[0].width,
+        height: levels[0].height,
+        png_crc: crc32_ieee(png_bytes),
+        img_crc: crc32_ieee(&encoded[0]),
+        encoding,
+        has_alpha,
+        camnorm: opts.camnorm,
+        sibling: is_sibling,
+    });
+    // Overwrite hash-check folded here: `cache.listings` is immutable during
+    // the whole import, so reading it in the worker is race-free, and the
+    // apply step reduces to pure state mutation on already-computed data.
+    let hash_ok = match twin {
+        Some(i) if opts.hash_check => !listings
+            .get(i)
+            .and_then(|l| l.as_ref())
+            .is_some_and(|existing| existing.hash != hash_name(&manifest[i].name)),
+        _ => true,
+    };
+    Some(PreparedImport {
+        twin,
+        name,
+        line,
+        listing,
+        hash_ok,
+    })
 }
 
 /// Imports images (name, PNG bytes) into the cache in `dir`, TXD Tool style:
@@ -1018,7 +1300,12 @@ pub fn import_textures(
     opts: &ImportOptions,
 ) -> Result<String, String> {
     let cache = TexdbCache::load(dir, cache_name).map_err(|e| e.to_string())?;
-    let mut lines: Vec<String> = cache.manifest.iter().map(|e| e.line.clone()).collect();
+    // Clone-on-replace: only slots an image actually replaces carry an
+    // owned line; untouched entries are borrowed from the cache at write
+    // time. The old code cloned every manifest line upfront and cloned it
+    // a second time during the rebuild — 2N String allocations per import
+    // call for N entries (~12k on the gta3 cache).
+    let mut changed_lines: Vec<Option<String>> = vec![None; cache.manifest.len()];
     // Only slots an image actually replaces carry owned bytes — untouched
     // entries are never copied (the old code cloned every listing in the
     // cache, ~185 MB of copies on the gta3 cache, before writing anything).
@@ -1027,127 +1314,121 @@ pub fn import_textures(
     let mut appended_listings: Vec<Option<Vec<u8>>> = Vec::new();
     let mut report = ImportReport::default();
 
-    let find_entry = |name: &str, lines_len: usize, manifest: &[ManifestEntry]| -> Option<usize> {
-        let _ = lines_len;
-        manifest
-            .iter()
-            .position(|e| e.affiliate.is_none() && e.name.eq_ignore_ascii_case(name))
-    };
-
-    for (raw_name, png_bytes) in images {
-        let Some((pixels, w, h)) = decode_png_argb(png_bytes) else {
-            report.skipped += 1;
-            continue;
-        };
-        let twin = find_entry(raw_name, lines.len(), &cache.manifest);
-        let name = if opts.correct_caps {
-            twin.map(|i| cache.manifest[i].name.clone()).unwrap_or_else(|| raw_name.clone())
-        } else {
-            raw_name.clone()
-        };
-        let src = crate::mipmap::PixelImage::new(pixels, w, h);
-        let mut chain = vec![src.clone()];
-        chain.extend(crate::mipmap::generate_chain(&src, crate::mipmap::MipFilter::from_i32(opts.mip_filter)));
-        let base = if opts.reduce_to > 0 {
-            chain
-                .iter()
-                .position(|l| l.width.max(l.height) <= opts.reduce_to)
-                .unwrap_or(chain.len() - 1)
-        } else {
-            0
-        };
-        let levels = if opts.generate_mipmaps { &chain[base..] } else { &chain[base..base + 1] };
-        let has_alpha = levels[0].pixels.iter().any(|p| (p >> 24) & 0xFF < 255);
-        let encoding = match opts.format {
-            ImportFormat::CompressedAlpha => {
-                if has_alpha { TexEncoding::Dxt5 } else { TexEncoding::Dxt1 }
-            }
-            ImportFormat::CompressedNoAlpha => TexEncoding::Dxt1,
-            ImportFormat::UncompressedAlpha | ImportFormat::UncompressedLowMemory => {
-                TexEncoding::Rgba4444
-            }
-            ImportFormat::UncompressedNoAlpha => TexEncoding::Rgb565,
-            ImportFormat::Uncompressed32 => TexEncoding::Rgba32,
-        };
-        let encoded: Vec<Vec<u8>> = levels
-            .iter()
-            .map(|l| match encoding {
-                TexEncoding::Dxt5 => crate::codec::dxt::encode_dxt5(&l.pixels, l.width, l.height),
-                TexEncoding::Dxt1 => crate::codec::dxt::encode_dxt1(&l.pixels, l.width, l.height),
-                TexEncoding::Rgb565 => rgb565_bytes(&l.pixels),
-                TexEncoding::Rgba4444 => rgba4444_bytes(&l.pixels),
-                TexEncoding::Rgba32 => rgba32_bytes(&l.pixels),
-                _ => Vec::new(),
+    // Per-image work (PNG decode → mip chain → encode → listing) is pure with
+    // respect to cache state, so it runs concurrently across the batch; the
+    // results are then applied to the cache strictly in input order, which
+    // keeps every manifest line, listing byte and report counter identical to
+    // the serial implementation (duplicate names: last write wins, as before).
+    // Batches are sized to the worker count so peak memory stays proportional
+    // to CPU count rather than batch size, and the codecs' internal band
+    // splitters are oversubscribed by at most a small constant factor.
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2)
+        .clamp(1, 16);
+    let mut prepared: Vec<Option<PreparedImport>> = Vec::with_capacity(images.len());
+    for batch in images.chunks(workers) {
+        // The outer spawn only pays off when at least two images overlap;
+        // a single-image batch runs the identical pipeline inline on the
+        // calling thread WITHOUT the outer guard, so the per-image kernels
+        // keep their internal band parallelism (a lone 1024x1024 import
+        // measures ~2x effective cores from banding alone).
+        let computed: Vec<Option<PreparedImport>> = if workers >= 3 && batch.len() > 1 {
+            std::thread::scope(|s| {
+                let handles: Vec<_> = batch
+                    .iter()
+                    .map(|(raw_name, png_bytes)| {
+                        s.spawn(|| {
+                            // Outer concurrent worker: hold the guard so the
+                            // per-image kernels (chain generation, codec
+                            // banding) run inline instead of multiplying
+                            // threads past the core count.
+                            let _outer = crate::parallel::OuterGuard::acquire();
+                            prepare_import(
+                                raw_name,
+                                png_bytes,
+                                &cache.manifest,
+                                &cache.listings,
+                                opts,
+                            )
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| match h.join() {
+                        Ok(p) => p,
+                        // Propagate worker panics exactly like the serial
+                        // loop did (release builds abort before this runs).
+                        Err(e) => std::panic::resume_unwind(e),
+                    })
+                    .collect()
             })
-            .collect();
-        let refs: Vec<&[u8]> = encoded.iter().map(|v| &v[..]).collect();
-        let Some(listing) = build_listing(
-            &name,
-            encoding,
-            levels[0].width,
-            levels[0].height,
-            &refs,
-            opts.use_rle,
-        ) else {
+        } else {
+            // One or two cores, or a single-image batch: thread spawn/scope
+            // overhead cancels the compute win (measured), so run the
+            // identical pipeline inline.
+            batch
+                .iter()
+                .map(|(raw_name, png_bytes)| {
+                    prepare_import(raw_name, png_bytes, &cache.manifest, &cache.listings, opts)
+                })
+                .collect()
+        };
+        prepared.extend(computed);
+    }
+
+    // CreateSibling needs a quoted-name needle per applied image; opts is
+    // constant for the whole call, so build it once instead of once per
+    // image (a format! allocation inside the apply loop).
+    let sibling_ctx: Option<(&str, String)> = opts
+        .sibling_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(|m| (m, format!("\"{m}\"")));
+
+    for prepared in prepared {
+        let Some(p) = prepared else {
             report.skipped += 1;
             continue;
         };
-        let is_sibling = opts.conflict == ConflictPolicy::CreateSibling;
-        let line = import_manifest_line(&ManifestTex {
-            name: &name,
-            width: levels[0].width,
-            height: levels[0].height,
-            png_crc: crc32_ieee(png_bytes),
-            img_crc: crc32_ieee(&encoded[0]),
-            encoding,
-            has_alpha,
-            camnorm: opts.camnorm,
-            sibling: is_sibling,
-        });
         match opts.conflict {
             ConflictPolicy::Overwrite => {
-                if let Some(i) = twin {
+                if let Some(i) = p.twin {
                     // Raster-hash check: never overwrite an entry whose stored
                     // hash does not match its manifest name.
-                    if opts.hash_check {
-                        if let Some(existing) =
-                            cache.listings.get(i).and_then(|l| l.as_ref())
-                        {
-                            if existing.hash != hash_name(&cache.manifest[i].name) {
-                                report.skipped += 1;
-                                continue;
-                            }
-                        }
+                    if !p.hash_ok {
+                        report.skipped += 1;
+                        continue;
                     }
-                    changed[i] = Some(listing);
-                    lines[i] = line;
+                    changed[i] = Some(p.listing);
+                    changed_lines[i] = Some(p.line);
                     report.replaced += 1;
                 } else {
-                    appended_listings.push(Some(listing));
-                    appended_lines.push(line);
+                    appended_listings.push(Some(p.listing));
+                    appended_lines.push(p.line);
                     report.added += 1;
                 }
             }
             ConflictPolicy::JustAdd => {
-                appended_listings.push(Some(listing));
-                appended_lines.push(line);
+                appended_listings.push(Some(p.listing));
+                appended_lines.push(p.line);
                 report.added += 1;
             }
             ConflictPolicy::CreateSibling => {
-                appended_listings.push(Some(listing));
-                appended_lines.push(line);
+                appended_listings.push(Some(p.listing));
+                appended_lines.push(p.line);
                 report.siblings += 1;
-                if let Some(model) = &opts.sibling_model {
-                    let model = model.trim();
-                    if !model.is_empty()
-                        && !cache.manifest.iter().any(|e| e.name.eq_ignore_ascii_case(model))
-                        && !appended_lines.iter().any(|l| l.contains(&format!("\"{model}\"")))
+                if let Some((model, needle)) = &sibling_ctx {
+                    if !cache
+                        .manifest
+                        .iter()
+                        .any(|e| e.name.eq_ignore_ascii_case(model))
+                        && !appended_lines.iter().any(|l| l.contains(needle.as_str()))
                     {
                         appended_listings.push(None);
-                        appended_lines.push(format!(
-                            "\"{}\" \"affiliate={}\"",
-                            model, name
-                        ));
+                        appended_lines.push(format!("\"{}\" \"affiliate={}\"", model, p.name));
                     }
                 }
             }
@@ -1156,7 +1437,8 @@ pub fn import_textures(
 
     // Final slots in manifest order: replaced entries carry their new
     // bytes; everything else stays byte-identical at its existing offset.
-    let mut slots: Vec<FinalSlot> = Vec::with_capacity(cache.manifest.len() + appended_listings.len());
+    let mut slots: Vec<FinalSlot> =
+        Vec::with_capacity(cache.manifest.len() + appended_listings.len());
     for (i, slot) in changed.into_iter().enumerate() {
         slots.push(match slot {
             Some(bytes) => FinalSlot::New(bytes),
@@ -1177,21 +1459,26 @@ pub fn import_textures(
     }
 
     // Rewrite the manifest preserving its original structure: texture lines
-    // are substituted by ordinal, additions go last.
-    let mut out_lines: Vec<String> = Vec::new();
+    // are substituted by ordinal, additions go last. Unchanged entries and
+    // raw non-texture lines are borrowed (Cow) — zero per-line allocation;
+    // replaced entries move the prepared line; appends move theirs.
+    let mut out_lines: Vec<std::borrow::Cow<'_, str>> = Vec::new();
     let mut ordinal = 0usize;
     for raw_line in cache.raw_txt.lines() {
         let line = raw_line.trim_end();
         if line.trim_start().starts_with('"') {
-            if ordinal < lines.len() {
-                out_lines.push(lines[ordinal].clone());
+            if ordinal < cache.manifest.len() {
+                out_lines.push(match changed_lines[ordinal].take() {
+                    Some(new) => std::borrow::Cow::Owned(new),
+                    None => std::borrow::Cow::Borrowed(cache.manifest[ordinal].line.as_str()),
+                });
             }
             ordinal += 1;
         } else {
-            out_lines.push(line.to_string());
+            out_lines.push(std::borrow::Cow::Borrowed(line));
         }
     }
-    out_lines.extend(appended_lines);
+    out_lines.extend(appended_lines.into_iter().map(std::borrow::Cow::Owned));
     let mut txt = out_lines.join("\n");
     txt.push('\n');
 
@@ -1222,11 +1509,20 @@ pub fn rebuild_cache(dir: &std::path::Path, cache_name: &str) -> Result<String, 
             }
         })
         .collect();
-    let (old_cache, new_cache) =
-        apply_write(dir, cache_name, cache, &slots, &raw_txt, WriteMode::ForceRebuild)?;
+    let (old_cache, new_cache) = apply_write(
+        dir,
+        cache_name,
+        cache,
+        &slots,
+        &raw_txt,
+        WriteMode::ForceRebuild,
+    )?;
     let bytes = new_cache.dat.len();
     let notes = sync_after_write(dir, cache_name, &old_cache, &new_cache);
-    Ok(with_notes(format!("entries={entries};bytes={bytes}"), notes))
+    Ok(with_notes(
+        format!("entries={entries};bytes={bytes}"),
+        notes,
+    ))
 }
 
 /// Decodes one texture's level-0 pixels without loading the whole .dat:
@@ -1253,7 +1549,9 @@ pub fn decode_pixels_at(
         if !line.starts_with('"') {
             continue;
         }
-        let Some(end) = line[1..].find('"') else { continue };
+        let Some(end) = line[1..].find('"') else {
+            continue;
+        };
         if count == index {
             affiliate = quote_tokens(&line[1 + end + 1..])
                 .iter()
@@ -1320,6 +1618,11 @@ pub fn decode_pixels_at(
             span_start: 0,
             span_end: span.len(),
         };
+        // Dimension cap (see MAX_TEXDB_DIM) — a faked header here would
+        // inflate `expected_size()` and the RLE output cap below.
+        if listing.width > MAX_TEXDB_DIM || listing.height > MAX_TEXDB_DIM {
+            return None;
+        }
         let expected = listing.expected_size()?;
         let payload = &span[16..];
         let decoded_storage;
@@ -1414,7 +1717,8 @@ pub fn write_cache_edit(
             Some(b) => FinalSlot::New(b),
         });
     }
-    let (old_cache, new_cache) = apply_write(dir, cache_name, cache, &slots, &txt, WriteMode::Auto)?;
+    let (old_cache, new_cache) =
+        apply_write(dir, cache_name, cache, &slots, &txt, WriteMode::Auto)?;
     Ok(sync_after_write(dir, cache_name, &old_cache, &new_cache))
 }
 
@@ -1438,6 +1742,13 @@ fn encode_listing_from_pixels(
     full_chain: bool,
     use_rle: bool,
 ) -> Option<Vec<u8>> {
+    // Defensive: PixelImage::new (mip chain) and the encoders index
+    // `pixels[y * width + x]` and assert on inconsistent input — under
+    // panic=abort that aborts the whole app. Any caller passing mismatched
+    // dimensions must get None (the slot is skipped), never a panic.
+    if width == 0 || height == 0 || pixels.len() != width.checked_mul(height)? {
+        return None;
+    }
     let mut levels: Vec<(Vec<u32>, usize, usize)> = vec![(pixels.to_vec(), width, height)];
     if full_chain {
         let src = crate::mipmap::PixelImage::new(pixels.to_vec(), width, height);
@@ -1451,9 +1762,9 @@ fn encode_listing_from_pixels(
             TexEncoding::Dxt5 => crate::codec::dxt::encode_dxt5(px, *w, *h),
             TexEncoding::Dxt1 => crate::codec::dxt::encode_dxt1(px, *w, *h),
             TexEncoding::Etc1 => crate::codec::etc1::encode_etc1(px, *w, *h),
-            TexEncoding::Rgb565 => rgb565_bytes(px),
-            TexEncoding::Rgba4444 => rgba4444_bytes(px),
-            TexEncoding::Rgba32 => rgba32_bytes(px),
+            TexEncoding::Rgb565 => crate::codec::raw::argb_to_rgb565_bytes(px),
+            TexEncoding::Rgba4444 => crate::codec::raw::argb_to_rgba4444_bytes(px),
+            TexEncoding::Rgba32 => crate::codec::raw::argb_to_rgba32_bytes(px),
             TexEncoding::Unknown(_) => Vec::new(),
         })
         .collect();
@@ -1487,7 +1798,12 @@ fn scale_box(px: &[u32], w: usize, h: usize, tw: usize, th: usize) -> Vec<u32> {
                     n += 1;
                 }
             }
-            out.push((((a / n) as u32) << 24) | (((r / n) as u32) << 16) | (((g / n) as u32) << 8) | ((b / n) as u32));
+            out.push(
+                (((a / n) as u32) << 24)
+                    | (((r / n) as u32) << 16)
+                    | (((g / n) as u32) << 8)
+                    | ((b / n) as u32),
+            );
         }
     }
     out
@@ -1504,20 +1820,30 @@ fn thumb_record(
     variant: &str,
 ) -> Vec<u8> {
     let (tw, th, enc_raw, payload): (usize, usize, u16, Vec<u8>) = match pixels {
-        None => (1, 1, 0x1401, rgba32_bytes(&[0xFF00_0000])),
+        None => (
+            1,
+            1,
+            0x1401,
+            crate::codec::raw::argb_to_rgba32_bytes(&[0xFF00_0000]),
+        ),
         Some((px, w, h)) => match encoding {
-            TexEncoding::Rgba32 => (1, 1, 0x1401, rgba32_bytes(&scale_box(px, w, h, 1, 1))),
+            TexEncoding::Rgba32 => (
+                1,
+                1,
+                0x1401,
+                crate::codec::raw::argb_to_rgba32_bytes(&scale_box(px, w, h, 1, 1)),
+            ),
             TexEncoding::Etc1 if variant == "etc" => {
                 let s = scale_box(px, w, h, 8, 8);
                 (8, 8, 0x8D64, crate::codec::etc1::encode_etc1(&s, 8, 8))
             }
             TexEncoding::Rgba4444 => {
                 let s = scale_box(px, w, h, 8, 8);
-                (8, 8, 0x8034, rgba4444_bytes(&s))
+                (8, 8, 0x8034, crate::codec::raw::argb_to_rgba4444_bytes(&s))
             }
             _ => {
                 let s = scale_box(px, w, h, 8, 8);
-                (8, 8, 0x8033, rgb565_bytes(&s))
+                (8, 8, 0x8033, crate::codec::raw::argb_to_rgb565_bytes(&s))
             }
         },
     };
@@ -1574,7 +1900,24 @@ fn sync_after_write(
     new: &TexdbCache,
 ) -> String {
     use std::collections::{BTreeSet, HashMap};
+    // One variant re-encode job: everything needed to rebuild a changed
+    // entry's listing in another variant family, as a pure function of the
+    // post-write cache. `ni` indexes `new`; the rest mirror the listing
+    // header that the decoded pixels come from.
+    struct VariantJob {
+        ni: usize,
+        name: String,
+        enc: TexEncoding,
+        lw: usize,
+        lh: usize,
+        full_chain: bool,
+        use_rle: bool,
+    }
     let mut notes: Vec<String> = Vec::new();
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2)
+        .clamp(1, 16);
     let old_index: HashMap<String, usize> = old
         .manifest
         .iter()
@@ -1618,26 +1961,30 @@ fn sync_after_write(
             .collect();
         // Plan first (all-or-nothing per variant, like the old full
         // rewrite): unchanged entries keep their offsets; changed/new
-        // entries are encoded and appended at the variant's .dat end.
-        let mut offsets: Vec<i64> = Vec::with_capacity(new.manifest.len());
-        let mut appends: Vec<u8> = Vec::new();
-        let mut cursor = meta.dat_len;
-        let mut enc_map: HashMap<String, TexEncoding> = HashMap::new();
+        // entries are re-encoded from the new listing's pixels. The
+        // re-encode jobs are pure functions of (new, meta) — they run
+        // concurrently in worker-sized windows, while the append
+        // bookkeeping (offsets/cursor/enc_map) stays serial in manifest
+        // order, so the on-disk result is byte-identical to the serial
+        // loop this replaces.
+        enum VariantSlot {
+            NoData,
+            Keep(i64, TexEncoding),
+            Encode(VariantJob),
+        }
+        let mut plan: Vec<VariantSlot> = Vec::with_capacity(new.manifest.len());
         let mut failed = false;
         for (ni, entry) in new.manifest.iter().enumerate() {
             if entry.affiliate.is_some() {
-                offsets.push(-1);
+                plan.push(VariantSlot::NoData);
                 continue;
             }
             let lname = entry.name.clone();
             if unchanged(ni, &entry.name) {
                 if let Some(&voi) = vold_index.get(&lname) {
                     match &meta.listings[voi] {
-                        Some(l) => {
-                            offsets.push(l.span_start as i64);
-                            enc_map.insert(lname.clone(), l.encoding);
-                        }
-                        None => offsets.push(-1),
+                        Some(l) => plan.push(VariantSlot::Keep(l.span_start as i64, l.encoding)),
+                        None => plan.push(VariantSlot::NoData),
                     }
                     continue;
                 }
@@ -1651,30 +1998,128 @@ fn sync_after_write(
                 failed = true;
                 break;
             }
-            let Some(px) = new.decode_pixels(ni) else {
-                failed = true;
-                break;
-            };
+            // Dimensions must come from the SAME source as the decoded
+            // pixels (the listing header). Mixing in the manifest's
+            // width/height invites a PixelImage::new assert (panic=abort)
+            // on a hand-edited or corrupted manifest, mid-way through a
+            // cache write.
+            let (lw, lh) = new.listings[ni]
+                .as_ref()
+                .map(|l| (l.width, l.height))
+                .unwrap_or((entry.width, entry.height));
             let full_chain = new.listings[ni].as_ref().is_some_and(|l| l.full_chain);
-            let use_rle = new.listings[ni].as_ref().is_none_or(|l| l.rle_indicator != 0);
-            match encode_listing_from_pixels(
-                &entry.name,
-                &px,
-                entry.width,
-                entry.height,
+            let use_rle = new.listings[ni]
+                .as_ref()
+                .is_none_or(|l| l.rle_indicator != 0);
+            plan.push(VariantSlot::Encode(VariantJob {
+                ni,
+                name: lname,
                 enc,
+                lw,
+                lh,
                 full_chain,
                 use_rle,
-            ) {
-                Some(listing) => {
-                    offsets.push(cursor as i64);
-                    cursor += listing.len();
-                    appends.extend_from_slice(&listing);
-                    enc_map.insert(lname, enc);
-                }
-                None => {
-                    failed = true;
-                    break;
+            }));
+        }
+
+        let mut offsets: Vec<i64> = Vec::with_capacity(new.manifest.len());
+        let mut appends: Vec<u8> = Vec::new();
+        let mut cursor = meta.dat_len;
+        let mut enc_map: HashMap<String, TexEncoding> = HashMap::new();
+        'windows: for (widx, window) in plan.chunks_mut(workers).enumerate() {
+            // Spawn only when at least two encode jobs overlap; a lone job
+            // runs inline WITHOUT the outer guard so the decode/encode
+            // kernels keep their internal band parallelism.
+            let encode_jobs = window
+                .iter()
+                .filter(|slot| matches!(slot, VariantSlot::Encode(_)))
+                .count();
+            let results: Vec<Option<Vec<u8>>> = if workers >= 3 && encode_jobs > 1 {
+                std::thread::scope(|s| {
+                    let handles: Vec<_> = window
+                        .iter_mut()
+                        .filter_map(|slot| match slot {
+                            VariantSlot::Encode(job) => Some(job),
+                            _ => None,
+                        })
+                        .map(|job| {
+                            s.spawn(move || {
+                                let _outer = crate::parallel::OuterGuard::acquire();
+                                new.decode_pixels(job.ni).and_then(|px| {
+                                    encode_listing_from_pixels(
+                                        &job.name,
+                                        &px,
+                                        job.lw,
+                                        job.lh,
+                                        job.enc,
+                                        job.full_chain,
+                                        job.use_rle,
+                                    )
+                                })
+                            })
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|h| match h.join() {
+                            Ok(r) => r,
+                            // Propagate worker panics exactly like the serial
+                            // loop did (release builds abort before this runs).
+                            Err(e) => std::panic::resume_unwind(e),
+                        })
+                        .collect()
+                })
+            } else {
+                // One or two cores, or a single-job window: identical work
+                // inline, no spawn overhead, inner banding left active.
+                window
+                    .iter_mut()
+                    .filter_map(|slot| match slot {
+                        VariantSlot::Encode(job) => Some(job),
+                        _ => None,
+                    })
+                    .map(|job| {
+                        new.decode_pixels(job.ni).and_then(|px| {
+                            encode_listing_from_pixels(
+                                &job.name,
+                                &px,
+                                job.lw,
+                                job.lh,
+                                job.enc,
+                                job.full_chain,
+                                job.use_rle,
+                            )
+                        })
+                    })
+                    .collect()
+            };
+            let mut results = results.into_iter();
+            for (wi, slot) in window.iter().enumerate() {
+                let ni = widx * workers + wi;
+                match slot {
+                    VariantSlot::NoData => offsets.push(-1),
+                    VariantSlot::Keep(off, enc) => {
+                        offsets.push(*off);
+                        enc_map.insert(new.manifest[ni].name.clone(), *enc);
+                    }
+                    VariantSlot::Encode(job) => {
+                        // `Some(None)` = encode failed (same as the serial
+                        // loop's None branch); `None` here would mean result
+                        // misalignment, which cannot happen structurally —
+                        // both map to a full variant skip, never a bad write.
+                        match results.next() {
+                            Some(Some(listing)) => {
+                                offsets.push(cursor as i64);
+                                cursor += listing.len();
+                                appends.extend_from_slice(&listing);
+                                enc_map.insert(new.manifest[ni].name.clone(), job.enc);
+                            }
+                            _ => {
+                                failed = true;
+                                break 'windows;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1686,7 +2131,9 @@ fn sync_after_write(
         let already_synced = appends.is_empty()
             && offsets.len() == meta.listings.len()
             && offsets.iter().enumerate().all(|(i, &o)| {
-                o == meta.listings[i].as_ref().map_or(-1, |l| l.span_start as i64)
+                o == meta.listings[i]
+                    .as_ref()
+                    .map_or(-1, |l| l.span_start as i64)
             });
         let wrote = if already_synced {
             true
@@ -1720,22 +2167,28 @@ fn sync_after_write(
     for v in variant_enc.keys() {
         tmb_variants.insert(v.clone());
     }
-    let old_real: Vec<&ManifestEntry> =
-        old.manifest.iter().filter(|e| e.affiliate.is_none()).collect();
+    let old_real: Vec<&ManifestEntry> = old
+        .manifest
+        .iter()
+        .filter(|e| e.affiliate.is_none())
+        .collect();
     for t in &tmb_variants {
         let path = dir.join(format!("{cache_name}.{t}.tmb"));
         let mut old_records: HashMap<String, Vec<u8>> = HashMap::new();
         if path.exists() {
-            let Ok(bytes) = std::fs::read(&path) else { continue };
-            let Some(recs) = parse_tmb_records(&bytes) else { continue };
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let Some(recs) = parse_tmb_records(&bytes) else {
+                continue;
+            };
             // Positional pairing first (records sit in manifest order);
             // fall back to hash matching when counts desynced (a deleted
             // texture shifts positions). Hash collisions (e.g. cd11c and
             // goldrim share 0xE023 in the shipped cache) make the pure
             // hash map hand a texture its namesake's thumbnail.
             let paired = recs.len().min(old_real.len());
-            let positional_ok = (0..paired)
-                .all(|i| recs[i].0 == hash_name(&old_real[i].name));
+            let positional_ok = (0..paired).all(|i| recs[i].0 == hash_name(&old_real[i].name));
             if positional_ok {
                 for (i, (_, rec)) in recs.into_iter().enumerate() {
                     if i < old_real.len() {
@@ -1755,37 +2208,98 @@ fn sync_after_write(
             }
         }
         let mut out: Vec<u8> = Vec::new();
-        for (ni, entry) in new.manifest.iter().enumerate() {
-            if entry.affiliate.is_some() {
-                continue;
-            }
-            let lname = entry.name.clone();
-            if unchanged(ni, &entry.name) {
-                if let Some(rec) = old_records.get(&lname) {
-                    out.extend_from_slice(rec);
-                    continue;
+        // Changed entries need their pixels decoded for a fresh thumbnail;
+        // unchanged ones reuse the stored record byte-for-byte. Decodes are
+        // pure reads of `new`, so they run concurrently in worker-sized
+        // windows; the record assembly stays serial so the .tmb content is
+        // byte-identical to the serial loop this replaces.
+        enum ThumbSlot<'a> {
+            Reuse(&'a [u8]),
+            Need { ni: usize, enc: TexEncoding },
+        }
+        let mut plan: Vec<ThumbSlot<'_>> = new
+            .manifest
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.affiliate.is_none())
+            .map(|(ni, entry)| {
+                let lname = &entry.name;
+                if unchanged(ni, lname) {
+                    if let Some(rec) = old_records.get(lname) {
+                        return ThumbSlot::Reuse(rec.as_slice());
+                    }
+                }
+                let enc = variant_enc
+                    .get(t)
+                    .and_then(|m| m.get(lname).copied())
+                    .or_else(|| {
+                        if *t == new.variant {
+                            new.listings[ni].as_ref().map(|l| l.encoding)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| new.listings[ni].as_ref().map(|l| l.encoding))
+                    .unwrap_or(TexEncoding::Rgb565);
+                ThumbSlot::Need { ni, enc }
+            })
+            .collect();
+        for window in plan.chunks_mut(workers) {
+            let need_nis: Vec<usize> = window
+                .iter()
+                .filter_map(|slot| match slot {
+                    ThumbSlot::Need { ni, .. } => Some(*ni),
+                    _ => None,
+                })
+                .collect();
+            let decoded: Vec<Option<Vec<u32>>> = if need_nis.is_empty() {
+                Vec::new()
+            } else if workers >= 3 && need_nis.len() > 1 {
+                // >= 2 decodes overlap: spawn guarded workers (inner kernels
+                // run inline; a lone decode stays inline-with-banding below).
+                std::thread::scope(|s| {
+                    let handles: Vec<_> = need_nis
+                        .iter()
+                        .map(|&ni| {
+                            s.spawn(move || {
+                                let _outer = crate::parallel::OuterGuard::acquire();
+                                new.decode_pixels(ni)
+                            })
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|h| match h.join() {
+                            Ok(r) => r,
+                            Err(e) => std::panic::resume_unwind(e),
+                        })
+                        .collect()
+                })
+            } else {
+                need_nis.iter().map(|&ni| new.decode_pixels(ni)).collect()
+            };
+            let mut decoded = decoded.into_iter();
+            for slot in window.iter() {
+                match slot {
+                    ThumbSlot::Reuse(rec) => out.extend_from_slice(rec),
+                    ThumbSlot::Need { ni, enc } => {
+                        // Misalignment (None) cannot happen structurally;
+                        // both it and a failed decode fall back to the
+                        // placeholder record, exactly like the serial loop
+                        // passing `None` pixels to thumb_record.
+                        let px = decoded.next().unwrap_or(None);
+                        let entry = &new.manifest[*ni];
+                        let rec = thumb_record(
+                            &entry.name,
+                            px.as_ref()
+                                .map(|v| (v.as_slice(), entry.width, entry.height)),
+                            *enc,
+                            t,
+                        );
+                        out.extend_from_slice(&rec);
+                    }
                 }
             }
-            let enc = variant_enc
-                .get(t)
-                .and_then(|m| m.get(&lname).copied())
-                .or_else(|| {
-                    if *t == new.variant {
-                        new.listings[ni].as_ref().map(|l| l.encoding)
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| new.listings[ni].as_ref().map(|l| l.encoding))
-                .unwrap_or(TexEncoding::Rgb565);
-            let px = new.decode_pixels(ni);
-            let rec = thumb_record(
-                &entry.name,
-                px.as_ref().map(|v| (v.as_slice(), entry.width, entry.height)),
-                enc,
-                t,
-            );
-            out.extend_from_slice(&rec);
         }
         // The .tmb is small and most records are reused byte-for-byte, so
         // after a no-op or single-texture edit the regenerated content is
@@ -1921,7 +2435,11 @@ pub fn add_alias(
     if target_index >= cache.manifest.len() || cache.manifest[target_index].affiliate.is_some() {
         return Err("target bukan tekstur asli".to_string());
     }
-    if cache.manifest.iter().any(|e| e.name.eq_ignore_ascii_case(alias_name)) {
+    if cache
+        .manifest
+        .iter()
+        .any(|e| e.name.eq_ignore_ascii_case(alias_name))
+    {
         return Err(format!("nama '{alias_name}' sudah dipakai"));
     }
     let target_name = cache.manifest[target_index].name.clone();
@@ -1967,31 +2485,9 @@ fn pixels_for_encoding(encoding: TexEncoding, data: &[u8], w: usize, h: usize) -
         TexEncoding::Dxt1 => crate::codec::dxt::decode_dxt1(data, w, h),
         TexEncoding::Dxt5 => crate::codec::dxt::decode_dxt5(data, w, h),
         TexEncoding::Etc1 => crate::codec::etc1::decode_etc1(data, w, h),
-        TexEncoding::Rgb565 => data
-            .chunks_exact(2)
-            .map(|c| {
-                let v = u16::from_le_bytes([c[0], c[1]]) as u32;
-                let r = (((v >> 11) & 0x1F) * 255 + 15) / 31;
-                let g = (((v >> 5) & 0x3F) * 255 + 31) / 63;
-                let b = ((v & 0x1F) * 255 + 15) / 31;
-                0xFF00_0000 | (r << 16) | (g << 8) | b
-            })
-            .collect(),
-        TexEncoding::Rgba4444 => data
-            .chunks_exact(2)
-            .map(|c| {
-                let v = u16::from_le_bytes([c[0], c[1]]) as u32;
-                let r = ((v >> 12) & 0xF) * 17;
-                let g = ((v >> 8) & 0xF) * 17;
-                let b = ((v >> 4) & 0xF) * 17;
-                let a = (v & 0xF) * 17;
-                (a << 24) | (r << 16) | (g << 8) | b
-            })
-            .collect(),
-        TexEncoding::Rgba32 => data
-            .chunks_exact(4)
-            .map(|c| ((c[3] as u32) << 24) | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32)
-            .collect(),
+        TexEncoding::Rgb565 => crate::codec::raw::rgb565_to_argb(data),
+        TexEncoding::Rgba4444 => crate::codec::raw::rgba4444_to_argb(data),
+        TexEncoding::Rgba32 => crate::codec::raw::rgba32_to_argb(data),
         TexEncoding::Unknown(_) => return None,
     };
     Some(px)
@@ -2044,14 +2540,15 @@ pub fn repack_cache(
                 TexEncoding::Dxt5 => crate::codec::dxt::encode_dxt5(px, *w, *h),
                 TexEncoding::Dxt1 => crate::codec::dxt::encode_dxt1(px, *w, *h),
                 TexEncoding::Etc1 => crate::codec::etc1::encode_etc1(px, *w, *h),
-                TexEncoding::Rgb565 => rgb565_bytes(px),
-                TexEncoding::Rgba4444 => rgba4444_bytes(px),
+                TexEncoding::Rgb565 => crate::codec::raw::argb_to_rgb565_bytes(px),
+                TexEncoding::Rgba4444 => crate::codec::raw::argb_to_rgba4444_bytes(px),
                 _ => Vec::new(),
             })
             .collect();
         let refs: Vec<&[u8]> = encoded.iter().map(|v| &v[..]).collect();
         let entry = &cache.manifest[i];
-        let Some(listing) = build_listing(&entry.name, encoding, levels[0].0, levels[0].1, &refs, true)
+        let Some(listing) =
+            build_listing(&entry.name, encoding, levels[0].0, levels[0].1, &refs, true)
         else {
             kept += 1;
             continue;
@@ -2210,6 +2707,105 @@ mod tests {
         assert_eq!(out, b"ABCDWXYZWXYZWXYZ".to_vec());
     }
 
+    /// The seg-8 fast path must be byte-identical to the generic reference
+    /// across noise (no runs), run-heavy data (runs crossing the 255 cap),
+    /// all-same, empty, single-unit, and indicator-collision inputs.
+    #[test]
+    fn rle_encode_seg8_matches_generic() {
+        struct Rng(u32);
+        impl Rng {
+            fn next(&mut self) -> u32 {
+                let mut x = self.0;
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                self.0 = x;
+                x
+            }
+        }
+        let mut rng = Rng(0x9E37_79B9);
+        let mut cases: Vec<Vec<u8>> = vec![
+            Vec::new(),
+            vec![0x11; 8],
+            vec![0x09; 8 * 3],   // short run, indicator 0x09 first byte
+            vec![0xFF; 8 * 300], // run crossing the 255 cap
+            (0u8..8).collect(),  // single unit
+        ];
+        // Incompressible noise.
+        let noise: Vec<u8> = (0..64 * 1024).map(|_| rng.next() as u8).collect();
+        cases.push(noise);
+        // Run-heavy: each unit repeats 4..16 times.
+        let mut run_heavy = Vec::new();
+        while run_heavy.len() < 64 * 1024 {
+            let unit: Vec<u8> = (0..8).map(|_| rng.next() as u8).collect();
+            for _ in 0..(4 + (rng.next() % 12) as usize) {
+                run_heavy.extend_from_slice(&unit);
+            }
+        }
+        cases.push(run_heavy);
+        for data in &cases {
+            let fast = rle_encode_seg8(data, 0x09);
+            let want = rle_encode_generic(data, 8, 0x09);
+            assert_eq!(fast, want, "seg8 fast path diverged (len {})", data.len());
+            // Roundtrip through the real dispatcher + decoder.
+            let enc = rle_encode(data, 8, 0x09);
+            let dec = rle_decode(&enc, 8, 0x09, usize::MAX).expect("decode");
+            assert_eq!(dec, *data);
+        }
+    }
+
+    /// The seg-8 decode fast path must agree with the generic decoder on
+    /// every Some/None outcome and output byte: valid encoded roundtrips
+    /// (noise, run-heavy, runs crossing the 255 cap, indicator collisions),
+    /// truncated payloads, bomb-guard rejections (small max_out), and raw
+    /// random byte soup that may parse to anything as long as both agree.
+    #[test]
+    fn rle_decode_seg8_matches_generic() {
+        struct Rng(u32);
+        impl Rng {
+            fn next(&mut self) -> u32 {
+                let mut x = self.0;
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                self.0 = x;
+                x
+            }
+        }
+        let mut rng = Rng(0x1234_ABCD);
+        let mut payloads: Vec<Vec<u8>> = Vec::new();
+        for len in [32 * 1024usize, 8, 0] {
+            let noise: Vec<u8> = (0..len).map(|_| rng.next() as u8).collect();
+            payloads.push(rle_encode_generic(&noise, 8, 0x09));
+            let mut run_heavy = Vec::new();
+            while run_heavy.len() < len {
+                let unit: Vec<u8> = (0..8).map(|_| rng.next() as u8).collect();
+                for _ in 0..(1 + (rng.next() % 300) as usize) {
+                    run_heavy.extend_from_slice(&unit);
+                }
+            }
+            payloads.push(rle_encode_generic(&run_heavy, 8, 0x09));
+        }
+        // Corruptions: truncated headers/units, and raw random soup.
+        let valid = payloads[0].clone();
+        for cut in [0usize, 1, 2, 5, 9, 10, 11, 17] {
+            if cut <= valid.len() {
+                payloads.push(valid[..valid.len() - cut].to_vec());
+            }
+        }
+        for _ in 0..64 {
+            let soup_len = 1 + (rng.next() % 512) as usize;
+            payloads.push((0..soup_len).map(|_| rng.next() as u8).collect());
+        }
+        for payload in &payloads {
+            for max_out in [usize::MAX, 4096, 64] {
+                let fast = rle_decode_seg8(payload, 0x09, max_out);
+                let want = rle_decode(payload, 8, 0x09, max_out);
+                assert_eq!(fast, want, "decode divergence len {}", payload.len());
+            }
+        }
+    }
+
     fn tiny_png() -> Vec<u8> {
         let mut out = Vec::new();
         {
@@ -2217,7 +2813,9 @@ mod tests {
             enc.set_color(png::ColorType::Rgba);
             enc.set_depth(png::BitDepth::Eight);
             let mut writer = enc.write_header().unwrap();
-            writer.write_image_data(&[255, 0, 0, 255].repeat(16)).unwrap();
+            writer
+                .write_image_data(&[255, 0, 0, 255].repeat(16))
+                .unwrap();
         }
         out
     }
@@ -2249,15 +2847,182 @@ mod tests {
             mip_filter: 1,
             defragment: false,
         };
-        let report = import_textures(&dir, "beta", &[("beta".to_string(), tiny_png())], &opts).unwrap();
+        let report =
+            import_textures(&dir, "beta", &[("beta".to_string(), tiny_png())], &opts).unwrap();
         assert!(report.contains("replaced=1"), "report: {report}");
         let cache = TexdbCache::load(&dir, "beta").unwrap();
         let (w, h, _enc, px) = decode_pixels_at(&dir, "beta", 0).unwrap();
         assert_eq!((w, h), (4, 4));
-        assert!(px.iter().all(|&p| p == 0xFFFF_0000), "imported texture must decode red");
+        assert!(
+            px.iter().all(|&p| p == 0xFFFF_0000),
+            "imported texture must decode red"
+        );
         assert!(cache.manifest[0].line.contains("camnorm=1"));
         let rebuilt = rebuild_cache(&dir, "beta").unwrap();
         assert!(rebuilt.contains("entries=2"), "rebuild: {rebuilt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn tiny_png_color(r: u8, g: u8, b: u8) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut out, 4, 4);
+            enc.set_color(png::ColorType::Rgb);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut writer = enc.write_header().unwrap();
+            let px = [r, g, b];
+            let mut data = Vec::with_capacity(16 * 3);
+            for _ in 0..16 {
+                data.extend_from_slice(&px);
+            }
+            writer.write_image_data(&data).unwrap();
+        }
+        out
+    }
+
+    #[test]
+    fn import_parallel_preserves_input_order_semantics() {
+        // The parallel prepare / serial apply refactor must keep the serial
+        // semantics: corrupt PNGs are skipped, duplicate NEW names append one
+        // entry each in input order, and every result is applied in the order
+        // the images were given (batching over workers must not reorder).
+        let dir = std::env::temp_dir().join(format!("parallel-order-{}", std::process::id()));
+        make_synthetic_cache(&dir);
+        let opts = ImportOptions {
+            format: ImportFormat::CompressedNoAlpha,
+            conflict: ConflictPolicy::Overwrite,
+            sibling_model: None,
+            reduce_to: 0,
+            camnorm: false,
+            hash_check: true,
+            correct_caps: false,
+            use_rle: true,
+            generate_mipmaps: true,
+            mip_filter: 1,
+            defragment: false,
+        };
+        // With workers=2 (CI hosts) this splits as [beta,dup1] [corrupt,dup2]
+        // [new1] — the duplicate "dup" images land in different batches, so a
+        // result-order bug (instead of input-order apply) would flip them.
+        let images: Vec<(String, Vec<u8>)> = vec![
+            ("beta".to_string(), tiny_png_color(255, 0, 0)),
+            ("dup".to_string(), tiny_png_color(0, 255, 0)),
+            ("corrupt".to_string(), b"definitely not a png".to_vec()),
+            ("dup".to_string(), tiny_png_color(0, 0, 255)),
+            ("new1".to_string(), tiny_png_color(255, 255, 0)),
+        ];
+        let report = import_textures(&dir, "beta", &images, &opts).unwrap();
+        assert!(
+            report.contains("replaced=1")
+                && report.contains("added=3")
+                && report.contains("skipped=1"),
+            "report: {report}"
+        );
+        // Slot 0 = "beta" replaced with red; slot 1 = untouched affiliate.
+        let cache = TexdbCache::load(&dir, "beta").unwrap();
+        assert_eq!(cache.manifest.len(), 5, "2 beta + alpha + dup x2 + new1");
+        let (_, _, _, px) = decode_pixels_at(&dir, "beta", 0).unwrap();
+        assert!(px.iter().all(|&p| p == 0xFFFF_0000), "beta must be red");
+        // Appended order preserved: dup(green), dup(blue), new1(yellow).
+        let (_, _, _, d1) = decode_pixels_at(&dir, "beta", 2).unwrap();
+        assert!(d1.iter().all(|&p| p == 0xFF00_FF00), "first dup green");
+        let (_, _, _, d2) = decode_pixels_at(&dir, "beta", 3).unwrap();
+        assert!(d2.iter().all(|&p| p == 0xFF00_00FF), "second dup blue");
+        let (_, _, _, n1) = decode_pixels_at(&dir, "beta", 4).unwrap();
+        assert!(n1.iter().all(|&p| p == 0xFFFF_FF00), "new1 yellow");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn prepare_import_is_deterministic() {
+        // Concurrency contract: the same (input, cache-state) pair always
+        // yields the same work product, regardless of which worker runs it.
+        let manifest = parse_manifest(
+            "\"beta\" width=4 height=4\n\"alpha\" width=4 height=4 affiliate=\"beta\"\n",
+        );
+        let listings: Vec<Option<Listing>> = vec![None, None];
+        let opts = ImportOptions {
+            format: ImportFormat::CompressedNoAlpha,
+            conflict: ConflictPolicy::Overwrite,
+            sibling_model: None,
+            reduce_to: 0,
+            camnorm: true,
+            hash_check: true,
+            correct_caps: false,
+            use_rle: true,
+            generate_mipmaps: true,
+            mip_filter: 1,
+            defragment: false,
+        };
+        let png = tiny_png_color(255, 0, 0);
+        let a = prepare_import("beta", &png, &manifest, &listings, &opts).unwrap();
+        let b = prepare_import("beta", &png, &manifest, &listings, &opts).unwrap();
+        assert_eq!(a.twin, b.twin);
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.line, b.line);
+        assert_eq!(a.listing, b.listing);
+        assert_eq!(a.hash_ok, b.hash_ok);
+        assert_eq!(
+            a.twin,
+            Some(0),
+            "twin resolved against the original manifest"
+        );
+        assert!(a.hash_ok, "no stored listing -> no hash rejection");
+        assert!(prepare_import("x", b"not a png", &manifest, &listings, &opts).is_none());
+    }
+
+    #[test]
+    fn import_create_sibling_with_model_appends_affiliate() {
+        // Locks the CreateSibling apply arm including the hoisted quoted-name
+        // needle (pass-12): the trimmed sibling model must be appended as an
+        // affiliate-less manifest line referencing the imported texture name,
+        // and a model already present in the manifest (case-insensitive) must
+        // not be duplicated.
+        let dir = std::env::temp_dir().join(format!("sibling-model-{}", std::process::id()));
+        make_synthetic_cache(&dir);
+        let opts = ImportOptions {
+            format: ImportFormat::CompressedNoAlpha,
+            conflict: ConflictPolicy::CreateSibling,
+            // Whitespace around the model must be trimmed once (hoisted).
+            sibling_model: Some("  wheel  ".to_string()),
+            reduce_to: 0,
+            camnorm: false,
+            hash_check: true,
+            correct_caps: false,
+            use_rle: true,
+            generate_mipmaps: true,
+            mip_filter: 1,
+            defragment: false,
+        };
+        let report =
+            import_textures(&dir, "beta", &[("newtex".to_string(), tiny_png())], &opts).unwrap();
+        assert!(report.contains("siblings=1"), "report: {report}");
+        // CreateSibling counts the image under `siblings` only (added=0) —
+        // established report semantics, unchanged by pass-12.
+        assert!(report.contains("added=0"), "report: {report}");
+        let cache = TexdbCache::load(&dir, "beta").unwrap();
+        assert!(
+            cache
+                .manifest
+                .iter()
+                .any(|e| e.name == "wheel" && e.affiliate.as_deref() == Some("newtex")),
+            "model sibling missing: {:?}",
+            cache
+                .manifest
+                .iter()
+                .map(|e| e.line.clone())
+                .collect::<Vec<_>>()
+        );
+        // Re-importing the same texture must not append a second "wheel".
+        let report2 =
+            import_textures(&dir, "beta", &[("newtex2".to_string(), tiny_png())], &opts).unwrap();
+        assert!(report2.contains("siblings=1"), "report2: {report2}");
+        let cache2 = TexdbCache::load(&dir, "beta").unwrap();
+        assert_eq!(
+            cache2.manifest.iter().filter(|e| e.name == "wheel").count(),
+            1,
+            "duplicate wheel sibling appended"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -2321,15 +3086,23 @@ mod tests {
             mip_filter: 1,
             defragment: false,
         };
-        let report = import_textures(&dir, "beta", &[("t2".to_string(), tiny_png())], &opts).unwrap();
+        let report =
+            import_textures(&dir, "beta", &[("t2".to_string(), tiny_png())], &opts).unwrap();
         assert!(report.contains("replaced=1"), "report: {report}");
         let after = toc_offsets(&dir, "beta.etc.toc");
         assert_eq!(after.len(), 3, "one toc offset per manifest entry");
         assert_eq!(after[0], before[0], "t1 must keep its offset");
         assert_eq!(after[2], before[2], "t3 must keep its offset");
-        assert_eq!(after[1] as usize, old_dat_len, "t2's new listing is appended at the old EOF");
+        assert_eq!(
+            after[1] as usize, old_dat_len,
+            "t2's new listing is appended at the old EOF"
+        );
         let new_len = std::fs::metadata(dir.join("beta.etc.dat")).unwrap().len() as usize;
-        assert_eq!(toc_stated_len(&dir, "beta.etc.toc"), new_len, "toc[0] == .dat length");
+        assert_eq!(
+            toc_stated_len(&dir, "beta.etc.toc"),
+            new_len,
+            "toc[0] == .dat length"
+        );
         assert!(new_len > old_dat_len, "dat grew by append only");
         let cache = TexdbCache::load(&dir, "beta").unwrap();
         assert_eq!(cache.raw_listing(0).unwrap(), &l1[..], "t1 bytes untouched");
@@ -2390,9 +3163,19 @@ mod tests {
                 (la.len() + lb.len()) as i32,
                 "{v}: cc kept its original offset"
             );
-            assert_eq!(offs[0] as usize, dat.len(), "{v}: aa appended at the old EOF");
-            let dat_len = std::fs::metadata(dir.join(format!("multi.{v}.dat"))).unwrap().len() as usize;
-            assert_eq!(toc_stated_len(&dir, &format!("multi.{v}.toc")), dat_len, "{v}: toc[0] == .dat len");
+            assert_eq!(
+                offs[0] as usize,
+                dat.len(),
+                "{v}: aa appended at the old EOF"
+            );
+            let dat_len = std::fs::metadata(dir.join(format!("multi.{v}.dat")))
+                .unwrap()
+                .len() as usize;
+            assert_eq!(
+                toc_stated_len(&dir, &format!("multi.{v}.toc")),
+                dat_len,
+                "{v}: toc[0] == .dat len"
+            );
             let tmb = std::fs::read(dir.join(format!("multi.{v}.tmb"))).unwrap();
             assert_eq!(
                 parse_tmb_records(&tmb).map(|r| r.len()),
@@ -2531,13 +3314,19 @@ mod tests {
         std::fs::write(dir.join("beta.etc.toc"), &toc).unwrap();
 
         let cache = TexdbCache::load(&dir, "beta").unwrap();
-        assert_eq!(cache.manifest.len(), 3, "manifest entries: beta, beta_lod, gamma");
+        assert_eq!(
+            cache.manifest.len(),
+            3,
+            "manifest entries: beta, beta_lod, gamma"
+        );
         let enc0 = cache.listings[0].as_ref().unwrap().encoding_raw;
         let enc2 = cache.listings[2].as_ref().unwrap().encoding_raw;
 
         for i in 0..6usize {
             let via_at = decode_pixels_at(&dir, "beta", i);
-            let via_cache = cache.decode_pixels(i).map(|px| (cache.manifest[i].width, cache.manifest[i].height, px));
+            let via_cache = cache
+                .decode_pixels(i)
+                .map(|px| (cache.manifest[i].width, cache.manifest[i].height, px));
             match (via_at, via_cache) {
                 (None, None) => {}
                 (Some((w, h, enc, px)), Some((cw, ch, cpx))) => {
@@ -2552,8 +3341,98 @@ mod tests {
         assert!(decode_pixels_at(&dir, "beta", 3).is_none(), "out of bounds");
         let (w, h, _, px) = decode_pixels_at(&dir, "beta", 2).unwrap();
         assert_eq!((w, h), (4, 4));
-        assert_ne!(px, cache.decode_pixels(0).unwrap(), "gamma decodes its own pixels");
+        assert_ne!(
+            px,
+            cache.decode_pixels(0).unwrap(),
+            "gamma decodes its own pixels"
+        );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn oversized_listing_is_treated_as_missing() {
+        // A faked listing header (65535×32767) would inflate expected_size()
+        // and the RLE output cap into multi-GiB allocations (review H1). It
+        // must surface as "no data", never as a decode attempt. The header
+        // is hand-rolled (an attacker does not use build_listing either).
+        let mut listing = Vec::new();
+        listing.extend_from_slice(&hash_name("huge").to_le_bytes());
+        listing.extend_from_slice(&0x83F0u16.to_le_bytes()); // DXT1
+        listing.extend_from_slice(&65535u16.to_le_bytes()); // width
+        listing.extend_from_slice(&32767u16.to_le_bytes()); // height, level 0 only
+        listing.extend_from_slice(&12u32.to_le_bytes()); // csize = payload(8) + 4
+        listing.extend_from_slice(&0u32.to_le_bytes()); // stored raw
+        listing.extend_from_slice(&[0u8; 8]);
+        let (dat, toc) = rebuild_dat_toc(&[Some(&listing)]);
+        let dir = std::env::temp_dir().join(format!("texdb-huge-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("huge.txt"), "\"huge\" width=65535 height=32767\n").unwrap();
+        std::fs::write(dir.join("huge.etc.dat"), &dat).unwrap();
+        std::fs::write(dir.join("huge.etc.toc"), &toc).unwrap();
+        let cache = TexdbCache::load(&dir, "huge").unwrap();
+        assert!(
+            cache.listings[0].is_none(),
+            "oversized listing must be dropped at load"
+        );
+        assert!(cache.decode_pixels(0).is_none());
+        assert!(decode_pixels_at(&dir, "huge", 0).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn png_decode_rejects_oversized_header_and_accepts_small() {
+        // IHDR claiming 65535×65535 RGBA (~17 GiB output buffer) must be
+        // rejected by the dimension gate BEFORE the output allocation
+        // (review M1). The trailing IDAT makes read_info succeed, so a
+        // regression that checks too late OOMs instead of asserting.
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&65535u32.to_be_bytes());
+        ihdr.extend_from_slice(&65535u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]); // depth 8, RGBA, deflate/adaptive/none
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&ihdr);
+        png.extend_from_slice(&crc32_ieee(&[b"IHDR".as_slice(), &ihdr].concat()).to_be_bytes());
+        png.extend_from_slice(&0u32.to_be_bytes()); // empty IDAT
+        png.extend_from_slice(b"IDAT");
+        png.extend_from_slice(&crc32_ieee(b"IDAT").to_be_bytes());
+        assert!(
+            decode_png_argb(&png).is_none(),
+            "oversized PNG header must be rejected"
+        );
+
+        // Sanity: a small valid PNG still decodes (and stays red).
+        let (px, w, h) = decode_png_argb(&tiny_png()).unwrap();
+        assert_eq!((w, h), (4, 4));
+        assert_eq!(px.len(), 16);
+        assert!(px.iter().all(|&p| p == 0xFFFF_0000));
+    }
+
+    #[test]
+    fn encode_listing_rejects_inconsistent_dims() {
+        // Review M3 backstop: a (pixels, w, h) mismatch must return None
+        // instead of reaching PixelImage::new's assert (panic=abort).
+        let px4 = vec![0xFF00_0000u32; 4];
+        assert!(
+            encode_listing_from_pixels("x", &px4, 0, 4, TexEncoding::Rgb565, false, true).is_none()
+        );
+        assert!(
+            encode_listing_from_pixels("x", &px4, 4, 0, TexEncoding::Rgb565, false, true).is_none()
+        );
+        assert!(
+            encode_listing_from_pixels("x", &px4, 2, 2, TexEncoding::Rgb565, false, true).is_some()
+        );
+        assert!(
+            encode_listing_from_pixels("x", &px4, 4, 4, TexEncoding::Rgb565, false, true).is_none()
+        );
+        assert!(
+            encode_listing_from_pixels("x", &px4, 4, 4, TexEncoding::Rgb565, true, true).is_none()
+        );
+        // 2×2 with the full mip chain (down to 1×1) still encodes.
+        assert!(
+            encode_listing_from_pixels("x", &px4, 2, 2, TexEncoding::Rgb565, true, true).is_some()
+        );
     }
 }
 
@@ -2689,8 +3568,8 @@ impl TexdbCache {
 /// via seeks — the (potentially hundreds of MB) .dat payload is never loaded.
 pub fn describe_cache(dir: &std::path::Path) -> Result<CacheDescription, String> {
     let name = resolve_cache_name(dir)?;
-    let text = std::fs::read_to_string(dir.join(format!("{name}.txt")))
-        .map_err(|e| e.to_string())?;
+    let text =
+        std::fs::read_to_string(dir.join(format!("{name}.txt"))).map_err(|e| e.to_string())?;
     let (categories, defaults) = manifest_categories(&text);
 
     let mut toc_variants: Vec<String> = Vec::new();
@@ -2728,7 +3607,8 @@ pub fn describe_cache(dir: &std::path::Path) -> Result<CacheDescription, String>
 
     // Listing lookup for an index, with affiliate resolution to its target's
     // listing (same semantics as the previous full-load implementation).
-    let listing_at = |j: usize| -> Option<&Listing> { meta.listings.get(j).and_then(|x| x.as_ref()) };
+    let listing_at =
+        |j: usize| -> Option<&Listing> { meta.listings.get(j).and_then(|x| x.as_ref()) };
     let mut textures = Vec::with_capacity(manifest.len());
     for (i, entry) in manifest.iter().enumerate() {
         let direct = listing_at(i);
@@ -2743,7 +3623,12 @@ pub fn describe_cache(dir: &std::path::Path) -> Result<CacheDescription, String>
         let (offset, size, hash, mips) = match (direct, resolved) {
             (Some(l), _) | (None, Some(l)) => {
                 let (start, end) = (l.span_start, l.span_end);
-                (start, end - start, (l.hash as u32) | ((l.encoding_raw as u32) << 16), l.full_chain)
+                (
+                    start,
+                    end - start,
+                    (l.hash as u32) | ((l.encoding_raw as u32) << 16),
+                    l.full_chain,
+                )
             }
             (None, None) => (0, 0, 0, false),
         };
@@ -2792,8 +3677,8 @@ pub fn extract_raw_span(
 ) -> Result<String, String> {
     use std::io::{Read, Seek, SeekFrom};
     let name = resolve_cache_name(dir)?;
-    let text = std::fs::read_to_string(dir.join(format!("{name}.txt")))
-        .map_err(|e| e.to_string())?;
+    let text =
+        std::fs::read_to_string(dir.join(format!("{name}.txt"))).map_err(|e| e.to_string())?;
     let mut manifest = parse_manifest(&text);
     inherit_affiliate_dims(&mut manifest);
     if index >= manifest.len() {
@@ -2814,16 +3699,22 @@ pub fn extract_raw_span(
     variants.sort();
     let mut found: Option<(String, usize, usize)> = None;
     for v in &variants {
-        let Some(meta) = load_variant_meta(dir, &name, v, &manifest) else { continue };
+        let Some(meta) = load_variant_meta(dir, &name, v, &manifest) else {
+            continue;
+        };
         // Resolve the span (affiliate-aware, same as span_for).
-        let resolved = meta.listings.get(index).and_then(|x| x.as_ref()).or_else(|| {
-            manifest[index].affiliate.as_ref().and_then(|t| {
-                manifest
-                    .iter()
-                    .position(|e| e.affiliate.is_none() && e.name.eq_ignore_ascii_case(t))
-                    .and_then(|j| meta.listings.get(j).and_then(|x| x.as_ref()))
-            })
-        });
+        let resolved = meta
+            .listings
+            .get(index)
+            .and_then(|x| x.as_ref())
+            .or_else(|| {
+                manifest[index].affiliate.as_ref().and_then(|t| {
+                    manifest
+                        .iter()
+                        .position(|e| e.affiliate.is_none() && e.name.eq_ignore_ascii_case(t))
+                        .and_then(|j| meta.listings.get(j).and_then(|x| x.as_ref()))
+                })
+            });
         if let Some(l) = resolved {
             found = Some((v.clone(), l.span_start, l.span_end));
             break;
@@ -2837,7 +3728,8 @@ pub fn extract_raw_span(
     };
     let dat_path = dir.join(format!("{name}.{variant}.dat"));
     let mut f = std::fs::File::open(&dat_path).map_err(|e| e.to_string())?;
-    f.seek(SeekFrom::Start(start as u64)).map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(start as u64))
+        .map_err(|e| e.to_string())?;
     let mut bytes = vec![0u8; end - start];
     f.read_exact(&mut bytes).map_err(|e| e.to_string())?;
     if let Some(parent) = dest.parent() {

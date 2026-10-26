@@ -12,7 +12,11 @@ fn crc32(data: &[u8], mut crc: u32) -> u32 {
     for &b in data {
         crc ^= b as u32;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB88320 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB88320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc
@@ -54,11 +58,17 @@ fn main() {
                     ));
                 }
                 let dir_crc = crc32(dir_desc.as_bytes(), 0);
-                let largest = arc.entries.iter().reduce(|a, b| if b.size_sectors > a.size_sectors { b } else { a });
+                let largest = arc.entries.iter().reduce(|a, b| {
+                    if b.size_sectors > a.size_sectors {
+                        b
+                    } else {
+                        a
+                    }
+                });
                 let (largest_desc, largest_crc) = match largest {
                     Some(e) => {
-                        let crc = data_crc(path, e.offset_bytes(), e.size_bytes())
-                            .unwrap_or(0xDEAD_BEEF);
+                        let crc =
+                            data_crc(path, e.offset_bytes(), e.size_bytes()).unwrap_or(0xDEAD_BEEF);
                         (format!("{}:{}", e.clean_name(), e.size_sectors), crc)
                     }
                     None => ("-".to_string(), 0),

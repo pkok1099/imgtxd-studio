@@ -31,7 +31,12 @@ fn main() {
     let mut arc = ImgArchive::open(&img_path, None).expect("open");
     let n0 = arc.entries.len();
     let before = crcs(&arc);
-    println!("OPEN {:?} entries={} total={}", arc.version, n0, arc.total_data_size());
+    println!(
+        "OPEN {:?} entries={} total={}",
+        arc.version,
+        n0,
+        arc.total_data_size()
+    );
 
     // ADD
     let new_file = work.join("probe_new.dff");
@@ -40,11 +45,15 @@ fn main() {
     assert_eq!(arc.entries.len(), n0 + 1);
     let idx_new = arc.entries.len() - 1;
     let out = work.join("out_new.bin");
-    arc.extract(&arc.entries[idx_new].clone(), &out).expect("extract new");
+    arc.extract(&arc.entries[idx_new].clone(), &out)
+        .expect("extract new");
     let data = std::fs::read(&out).unwrap();
     assert_eq!(data.len(), 6144);
     assert!(data[..5000].iter().all(|&b| b == 0x5A));
-    println!("ADD+EXTRACT ok (crc untouched stable: {})", crcs(&arc)[..n0] == before[..]);
+    println!(
+        "ADD+EXTRACT ok (crc untouched stable: {})",
+        crcs(&arc)[..n0] == before[..]
+    );
 
     // REPLACE (grow entry 0)
     let repl = work.join("repl.bin");
@@ -52,7 +61,8 @@ fn main() {
     let victim_name = arc.entries[0].clean_name().to_string();
     arc.replace(0, &repl).expect("replace");
     let out0 = work.join("out0.bin");
-    arc.extract(&arc.entries[0].clone(), &out0).expect("extract replaced");
+    arc.extract(&arc.entries[0].clone(), &out0)
+        .expect("extract replaced");
     let d0 = std::fs::read(&out0).unwrap();
     assert!(d0[..9000].iter().all(|&b| b == 0x77));
     println!("REPLACE ok ({victim_name})");

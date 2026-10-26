@@ -7,12 +7,13 @@
 
 pub mod audio;
 pub mod audit;
+pub mod codec;
 pub mod datalines;
 pub mod dff;
-pub mod codec;
 pub mod ide;
 pub mod img;
 pub mod mipmap;
+pub(crate) mod parallel;
 pub mod texdb;
 pub mod txd;
 
@@ -25,6 +26,47 @@ use jni::JNIEnv;
 /// texture (≤ 4096 × 4096) while still preventing 2³¹ × 2³¹ allocation-DoS
 /// panics from a malicious Kotlin caller passing `Int.MAX_VALUE`.
 const MAX_TEXTURE_DIM: jint = 16_384;
+
+/// Crash-safe file replacement shared by the txd/dff/img writers: write to a
+/// temp sibling, fsync, then `fs::rename` over the target. `rename` is atomic
+/// on Linux/Android (ext4), so a kill/power-loss/disk-full mid-write can no
+/// longer leave the user's TXD/DFF/`.dir` truncated — at worst the stale
+/// original or a leftover `.tmp` survives.
+pub(crate) mod fsutil {
+    use std::io::Write as _;
+
+    pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+        let tmp = path.with_file_name(format!(
+            "{}.tmp",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&tmp)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, path)
+    }
+}
+
+/// Shared validation for one (pixels, width, height) triple arriving over
+/// JNI: rejects zero / oversized dimensions and pixel-count mismatches
+/// BEFORE they reach encoders that index `pixels[y * width + x]` (OOB index
+/// → panic → abort under panic=abort). Values are the u32s produced by
+/// `int_array_to_vec` (a negative jint wraps to a huge u32, which this
+/// rejects via the MAX_TEXTURE_DIM bound). Same contract as
+/// nativeMipmapHalf / nativeDecodeDxt1.
+fn image_dims_ok(px_len: usize, width: u32, height: u32) -> bool {
+    width > 0
+        && height > 0
+        && width <= MAX_TEXTURE_DIM as u32
+        && height <= MAX_TEXTURE_DIM as u32
+        && px_len == (width as usize).checked_mul(height as usize).unwrap_or(0)
+}
 
 fn jstring_to_string(env: &mut JNIEnv, s: &JString) -> String {
     env.get_string(s)
@@ -174,11 +216,15 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbImpor
         // returns a new local ref each call; we wrap it in an owned JString /
         // JByteArray, use it, then move it into delete_local_ref which deletes
         // the underlying local ref.
-        let Ok(name_obj) = env.get_object_array_element(&names, i) else { continue };
+        let Ok(name_obj) = env.get_object_array_element(&names, i) else {
+            continue;
+        };
         let js = JString::from(name_obj);
         let name = jstring_to_string(&mut env, &js);
         let _ = env.delete_local_ref(js);
-        let Ok(png_obj) = env.get_object_array_element(&pngs, i) else { continue };
+        let Ok(png_obj) = env.get_object_array_element(&pngs, i) else {
+            continue;
+        };
         let jba = JByteArray::from(png_obj);
         let bytes = env.convert_byte_array(&jba).unwrap_or_default();
         let _ = env.delete_local_ref(jba);
@@ -190,7 +236,11 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbImpor
     let opts = texdb::ImportOptions {
         format: texdb::ImportFormat::from_i32(format),
         conflict: texdb::ConflictPolicy::from_i32(conflict),
-        sibling_model: if model.trim().is_empty() { None } else { Some(model) },
+        sibling_model: if model.trim().is_empty() {
+            None
+        } else {
+            Some(model)
+        },
         reduce_to: reduce_to.max(0) as usize,
         camnorm: camnorm != 0,
         hash_check: hash_check != 0,
@@ -200,7 +250,8 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbImpor
         mip_filter,
         defragment: defrag != 0,
     };
-    let result = texdb::import_textures(std::path::Path::new(&dir_path), &cache_name, &images, &opts);
+    let result =
+        texdb::import_textures(std::path::Path::new(&dir_path), &cache_name, &images, &opts);
     report_string(&mut env, result)
 }
 
@@ -423,7 +474,11 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeImgVerify(
     let path_str = jstring_to_string(&mut env, &path);
     let p = std::path::Path::new(&path_str);
     let dir_path = p.with_extension("dir");
-    let dir_ref = if dir_path.exists() { Some(dir_path.as_path()) } else { None };
+    let dir_ref = if dir_path.exists() {
+        Some(dir_path.as_path())
+    } else {
+        None
+    };
     let report = img::verify_archive(p, dir_ref);
     env.new_string(format!("OK\n{report}"))
         .map(|s| s.into_raw())
@@ -461,10 +516,7 @@ fn opt_jstring_to_string(env: &mut JNIEnv, s: &JString) -> Option<String> {
         .map(|js| js.to_string_lossy().into_owned())
 }
 
-fn img_open_archive(
-    path: &str,
-    dir: &Option<String>,
-) -> Result<img::ImgArchive, String> {
+fn img_open_archive(path: &str, dir: &Option<String>) -> Result<img::ImgArchive, String> {
     img::ImgArchive::open(
         std::path::Path::new(path),
         dir.as_deref().map(std::path::Path::new),
@@ -481,10 +533,7 @@ fn img_op(
     f(&mut archive).map_err(|e| e.to_string())
 }
 
-fn img_entry_at(
-    archive: &img::ImgArchive,
-    index: jint,
-) -> Result<&img::ImgEntry, String> {
+fn img_entry_at(archive: &img::ImgArchive, index: jint) -> Result<&img::ImgEntry, String> {
     if index < 0 {
         return Err("Indeks entri negatif".to_string());
     }
@@ -625,7 +674,10 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeImgAdd(
     let name_opt = opt_jstring_to_string(&mut env, &entry_name);
     let result = img_op(&path_str, &dir_opt, |archive| {
         archive.add(std::path::Path::new(&file_str), name_opt.as_deref())?;
-        Ok(format!("ditambahkan; total {} entri", archive.entries.len()))
+        Ok(format!(
+            "ditambahkan; total {} entri",
+            archive.entries.len()
+        ))
     });
     report_string(&mut env, result)
 }
@@ -768,20 +820,40 @@ fn int_arrays_to_images(
     for i in 0..count {
         // Free the per-iteration local ref so large batch imports don't
         // overflow the JVM local-ref table.
-        let Ok(obj) = env.get_object_array_element(pixels_list, i) else { continue };
+        let Ok(obj) = env.get_object_array_element(pixels_list, i) else {
+            // Fail the whole batch: silently dropping one image would
+            // misalign this list against the caller's indices/names.
+            return None;
+        };
         let jia = JIntArray::from(obj);
-        let px = int_array_to_vec(env, &jia)?;
+        let px = int_array_to_vec(env, &jia);
         let _ = env.delete_local_ref(jia);
-        images.push((px, w[i as usize] as usize, h[i as usize] as usize));
+        let px = px?;
+        let (iw, ih) = (w[i as usize], h[i as usize]);
+        // Validate every triple BEFORE it reaches the encoders (see
+        // image_dims_ok): a bad (w, h, len) combination must surface as a
+        // clean ERROR string, not an OOB abort inside encode_dxt1.
+        if !image_dims_ok(px.len(), iw, ih) {
+            return None;
+        }
+        images.push((px, iw as usize, ih as usize));
     }
     Some(images)
 }
 
-fn txd_import_options(gen_mips: jboolean, mip_filter: jint, max_dimension: jint) -> txd::ImportOptions {
+fn txd_import_options(
+    gen_mips: jboolean,
+    mip_filter: jint,
+    max_dimension: jint,
+) -> txd::ImportOptions {
     txd::ImportOptions {
         generate_mipmaps: gen_mips != 0,
         mip_filter: txd::MipFilter::from_ordinal(mip_filter),
-        max_dimension: if max_dimension > 0 { Some(max_dimension as usize) } else { None },
+        max_dimension: if max_dimension > 0 {
+            Some(max_dimension as usize)
+        } else {
+            None
+        },
     }
 }
 
@@ -794,7 +866,9 @@ fn txd_as_dxt1(mode: jint) -> Option<bool> {
 }
 
 /// Lists a TXD's textures: header "OK\t<rwVersion>\t<count>", then per
-/// texture the wire line from `txd::list_lines`.
+/// texture the wire line from `txd::list_lines`. Uses the lenient parse:
+/// a single malformed texture entry is skipped instead of blanking the
+/// whole listing (the file header itself must still be valid).
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdList(
     mut env: JNIEnv,
@@ -802,7 +876,7 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdList(
     path: JString,
 ) -> jobjectArray {
     let path_str = jstring_to_string(&mut env, &path);
-    let items = match txd::parse_file(std::path::Path::new(&path_str)) {
+    let items = match txd::parse_file_lenient(std::path::Path::new(&path_str)) {
         Ok(txd_file) => txd::list_lines(&txd_file),
         Err(e) => vec![format!("ERROR\t{e}")],
     };
@@ -810,8 +884,9 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdList(
 }
 
 /// Decoded level-0 ARGB pixels of one TXD texture. Uses the targeted
-/// single-texture scan (chunk headers + only the requested entry's payload)
-/// and falls back to the full parse for anything it cannot handle.
+/// single-texture scan (chunk headers + only the requested entry's payload);
+/// the fallback is the lenient full parse, whose index space matches the
+/// listing shown by `nativeTxdList`.
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdTexturePixels(
     mut env: JNIEnv,
@@ -828,7 +903,7 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdTexture
         if let Some(px) = txd::decode_entry_pixels_at(path, index as usize) {
             return Some(px);
         }
-        let txd_file = txd::parse_file(path).ok()?;
+        let txd_file = txd::parse_file_lenient(path).ok()?;
         let entry = txd_file.textures.get(index as usize)?;
         txd::decode_pixels(entry)
     })();
@@ -927,7 +1002,9 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdAddText
         let total = txd::parse_file(std::path::Path::new(&path_str))
             .map(|t| t.textures.len())
             .unwrap_or(0);
-        Ok(format!("added={added} overwritten={overwritten} total={total}"))
+        Ok(format!(
+            "added={added} overwritten={overwritten} total={total}"
+        ))
     })();
     report_string(&mut env, result)
 }
@@ -1069,7 +1146,10 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeAudioCompu
         Ok(entries) => {
             let mut v = vec![format!("OK\t{}", entries.len())];
             for e in entries {
-                v.push(format!("{}\t{}\t{}", e.name, e.data_offset, e.compressed_size));
+                v.push(format!(
+                    "{}\t{}\t{}",
+                    e.name, e.data_offset, e.compressed_size
+                ));
             }
             v
         }
@@ -1141,3 +1221,23 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeDataLinesP
         .unwrap_or(std::ptr::null_mut())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::image_dims_ok;
+
+    #[test]
+    fn image_dims_ok_rejects_bad_triples() {
+        assert!(image_dims_ok(4, 2, 2));
+        assert!(image_dims_ok(16_384usize * 16_384, 16_384, 16_384));
+        // Zero / oversized dimensions (a negative jint wraps to a huge u32
+        // inside int_array_to_vec, so u32::MAX stands in for -1 here).
+        assert!(!image_dims_ok(4, 0, 2));
+        assert!(!image_dims_ok(4, 2, 0));
+        assert!(!image_dims_ok(4, u32::MAX, 2));
+        assert!(!image_dims_ok(4, 2, u32::MAX));
+        assert!(!image_dims_ok(4, 16_385, 1));
+        // Pixel-count mismatch must never reach the encoders.
+        assert!(!image_dims_ok(3, 2, 2));
+        assert!(!image_dims_ok(5, 2, 2));
+    }
+}

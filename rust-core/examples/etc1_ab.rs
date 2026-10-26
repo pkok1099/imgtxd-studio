@@ -8,11 +8,17 @@ fn lcg_image(w: usize, h: usize, seed: u64, mode: u32) -> Vec<u32> {
     let mut s = seed;
     let mut px = Vec::with_capacity(w * h);
     for _ in 0..w * h {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let r = (s >> 33) as u32 & 0xFF;
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let g = (s >> 33) as u32 & 0xFF;
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let b = (s >> 33) as u32 & 0xFF;
         let p = match mode {
             0 => 0xFF00_0000 | (r << 16) | (g << 8) | b, // full noise

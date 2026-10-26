@@ -45,7 +45,10 @@ fn main() {
     defs.sort();
     println!(
         "GOLDEN|texdb_defaults|{}",
-        defs.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(";")
+        defs.iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(";")
     );
     for t in &desc.textures {
         let mut flags = t.flags.clone();
@@ -62,7 +65,11 @@ fn main() {
             t.png_crc.as_deref().unwrap_or("-"),
             t.img_crc.as_deref().unwrap_or("-"),
             t.category,
-            flags.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(";")
+            flags
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join(";")
         );
     }
 }

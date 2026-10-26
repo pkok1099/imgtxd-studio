@@ -20,7 +20,11 @@ fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) {
     for _ in 0..iters {
         f();
     }
-    println!("{name:<38} {:>9.2} ms/iter ({} it)", ms(t) / iters as f64, iters);
+    println!(
+        "{name:<38} {:>9.2} ms/iter ({} it)",
+        ms(t) / iters as f64,
+        iters
+    );
 }
 
 fn gradient(w: usize, h: usize) -> Vec<u32> {
@@ -57,7 +61,11 @@ fn synthetic_cache(dir: &Path, n: usize) -> PathBuf {
     }
     let refs: Vec<&[u8]> = listings.iter().map(|l| &l[..]).collect();
     let (dat, toc) = rebuild_dat_toc(&refs.iter().map(|r| Some(*r)).collect::<Vec<_>>());
-    std::fs::write(dir.join("bench.txt"), format!("cat=0 name=Default\n{}\n", lines.join("\n"))).unwrap();
+    std::fs::write(
+        dir.join("bench.txt"),
+        format!("cat=0 name=Default\n{}\n", lines.join("\n")),
+    )
+    .unwrap();
     std::fs::write(dir.join("bench.etc.dat"), &dat).unwrap();
     std::fs::write(dir.join("bench.etc.toc"), &toc).unwrap();
     dir.to_path_buf()
@@ -104,25 +112,49 @@ fn main() {
     println!("=== resample (1024x1024 -> 512x512) ===");
     let px = gradient(1024, 1024);
     let src = PixelImage::new(px.clone(), 1024, 1024);
-    bench("nearest", 10, || { let _ = resample(&src, 512, 512, MipFilter::Nearest); });
-    bench("box", 10, || { let _ = resample(&src, 512, 512, MipFilter::Box); });
-    bench("bilinear", 10, || { let _ = resample(&src, 512, 512, MipFilter::Bilinear); });
-    bench("cubic", 5, || { let _ = resample(&src, 512, 512, MipFilter::Cubic); });
-    bench("gaussian", 5, || { let _ = resample(&src, 512, 512, MipFilter::Gaussian); });
-    bench("lanczos4", 5, || { let _ = resample(&src, 512, 512, MipFilter::Lanczos4); });
+    bench("nearest", 10, || {
+        let _ = resample(&src, 512, 512, MipFilter::Nearest);
+    });
+    bench("box", 10, || {
+        let _ = resample(&src, 512, 512, MipFilter::Box);
+    });
+    bench("bilinear", 10, || {
+        let _ = resample(&src, 512, 512, MipFilter::Bilinear);
+    });
+    bench("cubic", 5, || {
+        let _ = resample(&src, 512, 512, MipFilter::Cubic);
+    });
+    bench("gaussian", 5, || {
+        let _ = resample(&src, 512, 512, MipFilter::Gaussian);
+    });
+    bench("lanczos4", 5, || {
+        let _ = resample(&src, 512, 512, MipFilter::Lanczos4);
+    });
 
     println!("=== dxt (1024x1024 decode / 512x512 decode) ===");
     let d1 = dxt1_1024();
-    bench("decode_dxt1 1024", 10, || { let _ = decode_dxt1(&d1, 1024, 1024); });
+    bench("decode_dxt1 1024", 10, || {
+        let _ = decode_dxt1(&d1, 1024, 1024);
+    });
     let px1024 = gradient(1024, 1024);
-    bench("encode_dxt1 1024", 5, || { let _ = encode_dxt1(&px1024, 1024, 1024); });
+    bench("encode_dxt1 1024", 5, || {
+        let _ = encode_dxt1(&px1024, 1024, 1024);
+    });
     let d5 = dxt5_512();
-    bench("decode_dxt5 512", 10, || { let _ = decode_dxt5(&d5, 512, 512); });
+    bench("decode_dxt5 512", 10, || {
+        let _ = decode_dxt5(&d5, 512, 512);
+    });
     let px512 = gradient(512, 512);
-    bench("encode_dxt5 512", 5, || { let _ = encode_dxt5(&px512, 512, 512); });
+    bench("encode_dxt5 512", 5, || {
+        let _ = encode_dxt5(&px512, 512, 512);
+    });
     let e1 = encode_etc1(&px512, 512, 512);
-    bench("decode_etc1 512", 10, || { let _ = decode_etc1(&e1, 512, 512); });
-    bench("encode_etc1 512", 3, || { let _ = encode_etc1(&px512, 512, 512); });
+    bench("decode_etc1 512", 10, || {
+        let _ = decode_etc1(&e1, 512, 512);
+    });
+    bench("encode_etc1 512", 3, || {
+        let _ = encode_etc1(&px512, 512, 512);
+    });
 
     println!("=== texdb ===");
     let cdir = synthetic_cache(&tmp.join("cache"), 300);

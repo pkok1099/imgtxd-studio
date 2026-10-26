@@ -7,7 +7,9 @@ use std::path::Path;
 use imgtxd_core::texdb::{TexEncoding, TexdbCache};
 
 fn main() {
-    let root_arg = std::env::args().nth(1).expect("usage: validate_texdb <root>");
+    let root_arg = std::env::args()
+        .nth(1)
+        .expect("usage: validate_texdb <root>");
     let root = Path::new(&root_arg);
     let mut caches: Vec<String> = Vec::new();
     for e in std::fs::read_dir(root).unwrap() {

@@ -42,10 +42,7 @@ impl IndexBuilder {
             return;
         }
         let mut fields = line.split(',');
-        let Some(id) = fields
-            .next()
-            .and_then(|f| f.trim().parse::<u32>().ok())
-        else {
+        let Some(id) = fields.next().and_then(|f| f.trim().parse::<u32>().ok()) else {
             // Section headers (objs/cars/peds/end/...), txdp rows and any
             // other non-definition line have no numeric first field.
             return;
@@ -255,10 +252,7 @@ some garbage line without commas
 
     #[test]
     fn scan_dir_walks_recursively_and_sorts() {
-        let base = std::env::temp_dir().join(format!(
-            "ide_scan_test_{}",
-            std::process::id()
-        ));
+        let base = std::env::temp_dir().join(format!("ide_scan_test_{}", std::process::id()));
         let nested = base.join("maps").join("LA");
         std::fs::create_dir_all(&nested).expect("mkdir");
         std::fs::write(base.join("vehicles.ide"), VEHICLES_SNIPPET).expect("write");

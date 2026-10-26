@@ -206,7 +206,10 @@ mod tests {
         assert_eq!(line_key(",starts-with-comma"), None);
         assert_eq!(line_key("ABC, def ghi"), Some("ABC".to_string()));
         assert_eq!(line_key("  ABC   def"), Some("ABC".to_string()));
-        assert_eq!(line_key("1100, landstal, landstal"), Some("1100".to_string()));
+        assert_eq!(
+            line_key("1100, landstal, landstal"),
+            Some("1100".to_string())
+        );
     }
 
     #[test]
@@ -220,12 +223,16 @@ mod tests {
 
     // --- plan fixtures (the Kotlin goldens, byte-for-byte) ---
 
-    const HANDLING: &str = "; handling comment\nLANDSTALKER 1700.0 2.0 5.0\nBANSHEE 1400.0 1.5 4.0\n";
+    const HANDLING: &str =
+        "; handling comment\nLANDSTALKER 1700.0 2.0 5.0\nBANSHEE 1400.0 1.5 4.0\n";
 
     #[test]
     fn replace_identical_and_case_insensitive() {
         let p = plan(HANDLING, "BANSHEE 1400.0 1.5 4.0\nbanshee 1500.0 9.9");
-        assert_eq!(p.notes, "GANTI BANSHEE\nGANTI banshee\nTotal perubahan: 2\n");
+        assert_eq!(
+            p.notes,
+            "GANTI BANSHEE\nGANTI banshee\nTotal perubahan: 2\n"
+        );
         assert_eq!(p.changed, 2);
         assert_eq!(
             p.merged_text,
@@ -278,21 +285,30 @@ mod tests {
     #[test]
     fn comma_first_line_has_no_key() {
         let p = plan(HANDLING, ",weird line");
-        assert_eq!(p.notes, "Lewati (komentar/kosong): ,weird line\nTotal perubahan: 0\n");
+        assert_eq!(
+            p.notes,
+            "Lewati (komentar/kosong): ,weird line\nTotal perubahan: 0\n"
+        );
         assert_eq!(p.changed, 0);
     }
 
     #[test]
     fn sectioned_file_is_replace_only() {
         let ide = "objs\n1100, landstal, landstal, CHER, 1, 0\nend\n";
-        let p = plan(ide, "1100, newtex, newtex, CHER, 1, 0\n2200, foo, foo, CHER, 1, 0");
+        let p = plan(
+            ide,
+            "1100, newtex, newtex, CHER, 1, 0\n2200, foo, foo, CHER, 1, 0",
+        );
         assert_eq!(
             p.notes,
             "GANTI 1100\nLEWATI 2200 — berkas berseksi (mode ganti-saja); id baru tidak ditambahkan\nTotal perubahan: 1\n"
         );
         assert_eq!(p.changed, 1);
         assert!(p.sectioned);
-        assert_eq!(p.merged_text, "objs\n1100, newtex, newtex, CHER, 1, 0\nend\n");
+        assert_eq!(
+            p.merged_text,
+            "objs\n1100, newtex, newtex, CHER, 1, 0\nend\n"
+        );
     }
 
     #[test]
@@ -313,7 +329,10 @@ mod tests {
     #[test]
     fn pasted_lines_are_trim_end_but_not_trim_start() {
         let p = plan(HANDLING, "BANSHEE 1.0 2.0 3.0   \n  LANDSTALKER 9 9 9");
-        assert_eq!(p.notes, "GANTI BANSHEE\nGANTI LANDSTALKER\nTotal perubahan: 2\n");
+        assert_eq!(
+            p.notes,
+            "GANTI BANSHEE\nGANTI LANDSTALKER\nTotal perubahan: 2\n"
+        );
         assert_eq!(
             p.merged_text,
             "; handling comment\n  LANDSTALKER 9 9 9\nBANSHEE 1.0 2.0 3.0\n"
@@ -342,6 +361,9 @@ mod tests {
     #[test]
     fn wire_block_layout() {
         let w = plan_wire("A 1\nB 2\n", "C 3");
-        assert_eq!(w, "OK\t1\t2\t0\t2\nTAMBAH C\nTotal perubahan: 1\nA 1\nB 2\nC 3\n");
+        assert_eq!(
+            w,
+            "OK\t1\t2\t0\t2\nTAMBAH C\nTotal perubahan: 1\nA 1\nB 2\nC 3\n"
+        );
     }
 }

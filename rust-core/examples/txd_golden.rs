@@ -18,7 +18,8 @@ const K: [u32; 64] = [
 
 fn sha256(data: &[u8]) -> String {
     let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     let bit_len = (data.len() as u64) * 8;
     let mut msg = data.to_vec();
@@ -27,7 +28,7 @@ fn sha256(data: &[u8]) -> String {
         msg.push(0);
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
-    for chunk in msg.chunks_exact(64) {
+    for chunk in msg.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
         for i in 0..16 {
             w[i] = u32::from_be_bytes(chunk[i * 4..i * 4 + 4].try_into().unwrap());
@@ -93,22 +94,33 @@ fn pattern(w: usize, h: usize, alpha_mode: u8) -> Vec<u32> {
                 0 => 255,
                 1 => (x * 255) / (w - 1).max(1),
                 _ => {
-                    if (x + y) % 3 == 0 { 0 } else { 255 }
+                    if (x + y) % 3 == 0 {
+                        0
+                    } else {
+                        255
+                    }
                 }
             };
-            px[y * w + x] =
-                ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | b as u32;
+            px[y * w + x] = ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | b as u32;
         }
     }
     px
 }
 
 fn crafted(size: usize, seed: usize) -> Vec<u8> {
-    (0..size).map(|i| ((i * 7 + seed * 31 + 3) % 251) as u8).collect()
+    (0..size)
+        .map(|i| ((i * 7 + seed * 31 + 3) % 251) as u8)
+        .collect()
 }
 
 fn manual(
-    name: &str, w: usize, h: usize, depth: u32, raster: u32, d3d: u32, raw: Vec<u8>,
+    name: &str,
+    w: usize,
+    h: usize,
+    depth: u32,
+    raster: u32,
+    d3d: u32,
+    raw: Vec<u8>,
 ) -> TxdTexture {
     TxdTexture {
         name: name.to_string(),
@@ -130,7 +142,11 @@ fn main() {
         16,
         16,
         None,
-        &ImportOptions { generate_mipmaps: true, mip_filter: MipFilter::Box, max_dimension: None },
+        &ImportOptions {
+            generate_mipmaps: true,
+            mip_filter: MipFilter::Box,
+            max_dimension: None,
+        },
     )];
     entries.push(create_entry(
         "smooth_alpha",
@@ -156,8 +172,24 @@ fn main() {
             max_dimension: Some(16),
         },
     ));
-    entries.push(manual("manual_dxt5", 8, 8, 16, FORMAT_565, FOURCC_DXT5, crafted(64, 5)));
-    entries.push(manual("manual_dxt3", 8, 8, 16, FORMAT_565, FOURCC_DXT3, crafted(64, 9)));
+    entries.push(manual(
+        "manual_dxt5",
+        8,
+        8,
+        16,
+        FORMAT_565,
+        FOURCC_DXT5,
+        crafted(64, 5),
+    ));
+    entries.push(manual(
+        "manual_dxt3",
+        8,
+        8,
+        16,
+        FORMAT_565,
+        FOURCC_DXT3,
+        crafted(64, 9),
+    ));
     let mut dxt1a = vec![0u8; 8];
     dxt1a[2] = 0xFF;
     dxt1a[3] = 0xFF;
@@ -165,16 +197,80 @@ fn main() {
     dxt1a[5] = 0xE4;
     dxt1a[6] = 0xE4;
     dxt1a[7] = 0xE4;
-    entries.push(manual("manual_dxt1a", 4, 4, 16, FORMAT_565, FOURCC_DXT1, dxt1a));
-    let mut pal = manual("manual_pal8", 4, 4, 8, FORMAT_PAL8, 0, (0..16).map(|i| i as u8).collect());
+    entries.push(manual(
+        "manual_dxt1a",
+        4,
+        4,
+        16,
+        FORMAT_565,
+        FOURCC_DXT1,
+        dxt1a,
+    ));
+    let mut pal = manual(
+        "manual_pal8",
+        4,
+        4,
+        8,
+        FORMAT_PAL8,
+        0,
+        (0..16).map(|i| i as u8).collect(),
+    );
     pal.palette = Some(crafted(1024, 2));
     entries.push(pal);
-    entries.push(manual("manual_565", 4, 2, 16, FORMAT_565, 0, crafted(16, 3)));
-    entries.push(manual("manual_1555", 4, 2, 16, FORMAT_1555, 0, crafted(16, 4)));
-    entries.push(manual("manual_4444", 4, 2, 16, FORMAT_4444, 0, crafted(16, 6)));
-    entries.push(manual("manual_888", 4, 2, 24, FORMAT_888, 0, crafted(24, 7)));
-    entries.push(manual("manual_8888", 4, 2, 32, FORMAT_8888, 0, crafted(32, 8)));
-    entries.push(manual("manual_etc1", 8, 8, 16, FORMAT_565, FOURCC_ETC1, crafted(32, 11)));
+    entries.push(manual(
+        "manual_565",
+        4,
+        2,
+        16,
+        FORMAT_565,
+        0,
+        crafted(16, 3),
+    ));
+    entries.push(manual(
+        "manual_1555",
+        4,
+        2,
+        16,
+        FORMAT_1555,
+        0,
+        crafted(16, 4),
+    ));
+    entries.push(manual(
+        "manual_4444",
+        4,
+        2,
+        16,
+        FORMAT_4444,
+        0,
+        crafted(16, 6),
+    ));
+    entries.push(manual(
+        "manual_888",
+        4,
+        2,
+        24,
+        FORMAT_888,
+        0,
+        crafted(24, 7),
+    ));
+    entries.push(manual(
+        "manual_8888",
+        4,
+        2,
+        32,
+        FORMAT_8888,
+        0,
+        crafted(32, 8),
+    ));
+    entries.push(manual(
+        "manual_etc1",
+        8,
+        8,
+        16,
+        FORMAT_565,
+        FOURCC_ETC1,
+        crafted(32, 11),
+    ));
     let mut mips = manual("manual_mips", 8, 8, 32, FORMAT_8888, 0, crafted(256, 12));
     mips.mask_name = "maskx".to_string();
     mips.filter_flags = 0x2222;
@@ -208,7 +304,10 @@ fn main() {
             e.mip_levels.len(),
             sha256(&e.raw_pixels),
             sha256(&mips_joined),
-            e.palette.as_ref().map(|p| sha256(p)).unwrap_or_else(|| "-".to_string())
+            e.palette
+                .as_ref()
+                .map(|p| sha256(p))
+                .unwrap_or_else(|| "-".to_string())
         );
     }
 
@@ -231,7 +330,10 @@ fn main() {
     );
 
     let mut textures = parsed.textures.clone();
-    let target = textures.iter_mut().find(|e| e.name == "manual_565").unwrap();
+    let target = textures
+        .iter_mut()
+        .find(|e| e.name == "manual_565")
+        .unwrap();
     replace_texture(
         target,
         &pattern(8, 8, 1),

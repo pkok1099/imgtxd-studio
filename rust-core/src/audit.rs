@@ -32,7 +32,11 @@ pub fn audit_game_folder(files_dir: &Path) -> Result<String, String> {
             if !path.is_dir() {
                 continue;
             }
-            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             if !path.join(format!("{name}.txt")).exists() {
                 continue;
             }
@@ -65,7 +69,9 @@ pub fn audit_game_folder(files_dir: &Path) -> Result<String, String> {
         if depth > 4 {
             return;
         }
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in rd.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -84,7 +90,11 @@ pub fn audit_game_folder(files_dir: &Path) -> Result<String, String> {
         let path = path.as_path();
         // VER1 needs its .dir next to the .img.
         let dir_path = path.with_extension("dir");
-        let dir_ref = if dir_path.exists() { Some(dir_path.as_path()) } else { None };
+        let dir_ref = if dir_path.exists() {
+            Some(dir_path.as_path())
+        } else {
+            None
+        };
         let archive = match ImgArchive::open(path, dir_ref) {
             Ok(a) => a,
             Err(_) => continue,
@@ -140,10 +150,7 @@ pub fn audit_game_folder(files_dir: &Path) -> Result<String, String> {
         real_textures.len(),
         affiliate_targets.len()
     ));
-    out.push_str(&format!(
-        "Tekstur dirujuk DFF: {}\n\n",
-        referenced.len()
-    ));
+    out.push_str(&format!("Tekstur dirujuk DFF: {}\n\n", referenced.len()));
     out.push_str(&format!(
         "TEKSTUR HILANG ({}): dirujuk model tapi tidak ada di cache mana pun — penyebab klasik model putih/tak terlihat.\n",
         missing.len()

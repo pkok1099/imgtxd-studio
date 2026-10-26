@@ -50,10 +50,7 @@ pub fn decode_dxt1(data: &[u8], width: usize, height: usize) -> Vec<u32> {
         decode_dxt1_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
         return pixels;
     }
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let workers = crate::parallel::inner_workers(4);
     let rows_per_band = blocks_y.div_ceil(workers).max(4);
     std::thread::scope(|s| {
         let mut rest: &mut [u32] = &mut pixels;
@@ -88,6 +85,15 @@ fn decode_dxt1_band(
     let mut offset = by_start * blocks_x * 8;
     let mut palette = [0u32; 4];
     let aligned = width.is_multiple_of(4) && height.is_multiple_of(4);
+    // Aligned bands take the vectorized whole-band path (bit-identical to
+    // the scalar expansion below — differential-tested per random blocks).
+    if aligned
+        && crate::codec::simd::dxt::dxt1_band(
+            data, width, blocks_x, by_start, by_end, pixels, band_y,
+        )
+    {
+        return;
+    }
 
     for by in by_start..by_end {
         for bx in 0..blocks_x {
@@ -150,10 +156,7 @@ pub fn decode_dxt5(data: &[u8], width: usize, height: usize) -> Vec<u32> {
         decode_dxt5_band(data, width, height, blocks_x, 0, blocks_y, &mut pixels);
         return pixels;
     }
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let workers = crate::parallel::inner_workers(4);
     let rows_per_band = blocks_y.div_ceil(workers).max(4);
     std::thread::scope(|s| {
         let mut rest: &mut [u32] = &mut pixels;
@@ -189,6 +192,14 @@ fn decode_dxt5_band(
     let mut alpha_palette = [0u32; 8];
     let mut color_palette = [0u32; 4];
     let aligned = width.is_multiple_of(4) && height.is_multiple_of(4);
+    // Aligned bands take the vectorized whole-band path (see decode_dxt1_band).
+    if aligned
+        && crate::codec::simd::dxt::dxt5_band(
+            data, width, blocks_x, by_start, by_end, pixels, band_y,
+        )
+    {
+        return;
+    }
 
     for by in by_start..by_end {
         for bx in 0..blocks_x {
@@ -300,10 +311,7 @@ pub fn encode_dxt1(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
         encode_dxt1_band(pixels, width, height, blocks_x, 0, blocks_y, &mut out);
         return out;
     }
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let workers = crate::parallel::inner_workers(4);
     // At least 4 block-rows per band so per-thread work stays >> spawn cost.
     let rows_per_band = blocks_y.div_ceil(workers).max(4);
     let chunk = rows_per_band * blocks_x * 8;
@@ -456,10 +464,7 @@ pub fn encode_dxt5(pixels: &[u32], width: usize, height: usize) -> Vec<u8> {
         encode_dxt5_band(pixels, width, height, blocks_x, 0, blocks_y, &mut out);
         return out;
     }
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(16);
+    let workers = crate::parallel::inner_workers(4);
     let rows_per_band = blocks_y.div_ceil(workers).max(4);
     let chunk = rows_per_band * blocks_x * 16;
     std::thread::scope(|s| {
@@ -608,5 +613,46 @@ mod tests {
         let dec = decode_dxt1(&enc, 8, 8);
         assert_eq!(dec.len(), 64);
         assert!(dec.iter().all(|&p| (p >> 24) == 0xFF));
+    }
+
+    #[test]
+    fn encode_dxt5_banded_and_guard_inline_identical() {
+        // 256x256 = 4096 blocks (>= 1024 encode threshold): the encoder
+        // bands across worker threads without a guard and runs inline while
+        // an OuterGuard is held. Band and inline execution must stay
+        // byte-identical — the pass-13 nested-parallelism switch rides on it.
+        let mut rng = 0x1234_5678u32;
+        let px: Vec<u32> = (0..256 * 256)
+            .map(|_| {
+                rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                0xFF00_0000 | (rng & 0x00FF_FFFF)
+            })
+            .collect();
+        let banded = encode_dxt5(&px, 256, 256);
+        let inline = {
+            let _outer = crate::parallel::OuterGuard::acquire();
+            encode_dxt5(&px, 256, 256)
+        };
+        assert_eq!(banded, inline, "guard must not change encode bytes");
+    }
+
+    #[test]
+    fn decode_dxt5_banded_and_guard_inline_identical() {
+        // 512x512 = 16384 blocks (== decode threshold): banded path either
+        // way; the guard only switches it to inline execution.
+        let mut rng = 0x0BAD_F00Du32;
+        let px: Vec<u32> = (0..512 * 512)
+            .map(|_| {
+                rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                0xFF00_0000 | (rng & 0x00FF_FFFF)
+            })
+            .collect();
+        let enc = encode_dxt5(&px, 512, 512);
+        let banded = decode_dxt5(&enc, 512, 512);
+        let inline = {
+            let _outer = crate::parallel::OuterGuard::acquire();
+            decode_dxt5(&enc, 512, 512)
+        };
+        assert_eq!(banded, inline, "guard must not change decode bytes");
     }
 }

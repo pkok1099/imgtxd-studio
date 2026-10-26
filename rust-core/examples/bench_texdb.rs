@@ -75,9 +75,17 @@ fn image_cpu(png_bytes: &[u8], name: &str, opts: &ImportOptions) -> usize {
     let src = PixelImage::new(pixels, w, h);
     let mut chain = vec![src.clone()];
     chain.extend(generate_chain(&src, MipFilter::from_i32(opts.mip_filter)));
-    let levels = if opts.generate_mipmaps { &chain[..] } else { &chain[..1] };
+    let levels = if opts.generate_mipmaps {
+        &chain[..]
+    } else {
+        &chain[..1]
+    };
     let has_alpha = levels[0].pixels.iter().any(|p| (p >> 24) & 0xFF < 255);
-    let enc = if has_alpha { TexEncoding::Dxt5 } else { TexEncoding::Dxt1 };
+    let enc = if has_alpha {
+        TexEncoding::Dxt5
+    } else {
+        TexEncoding::Dxt1
+    };
     let encoded: Vec<Vec<u8>> = levels
         .iter()
         .map(|l| match enc {
@@ -101,19 +109,20 @@ fn main() {
             let t = Instant::now();
             let cache = TexdbCache::load(&dir, &cache_name).unwrap();
             let load_ms = ms(t);
-            let dat_len = std::fs::metadata(dir.join(format!(
-                "{cache_name}.{}.dat",
-                cache.variant
-            )))
-            .unwrap()
-            .len();
+            let dat_len =
+                std::fs::metadata(dir.join(format!("{cache_name}.{}.dat", cache.variant)))
+                    .unwrap()
+                    .len();
             // Step 2 of import_textures: copy every raw listing into owned Vecs.
             let t = Instant::now();
             let mut listings: Vec<Option<Vec<u8>>> = (0..cache.manifest.len())
                 .map(|i| cache.raw_listing(i).map(|b| b.to_vec()))
                 .collect();
             let copy_ms = ms(t);
-            let copied: usize = listings.iter().map(|l| l.as_ref().map_or(0, |v| v.len())).sum();
+            let copied: usize = listings
+                .iter()
+                .map(|l| l.as_ref().map_or(0, |v| v.len()))
+                .sum();
             // Per-image CPU.
             let pngs = make_pngs(&cache, n);
             let png_bytes: usize = pngs.iter().map(|(_, b)| b.len()).sum();

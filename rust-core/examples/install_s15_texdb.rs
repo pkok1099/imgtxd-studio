@@ -19,11 +19,17 @@ fn decode_png(bytes: &[u8]) -> (Vec<u32>, usize, usize) {
     let (w, h) = (info.width as usize, info.height as usize);
     let px: Vec<u32> = match info.color_type {
         png::ColorType::Rgba => buf[..info.buffer_size()]
-            .chunks_exact(4)
-            .map(|c| ((c[3] as u32) << 24) | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| {
+                ((c[3] as u32) << 24) | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32
+            })
             .collect(),
         png::ColorType::Rgb => buf[..info.buffer_size()]
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| 0xFF00_0000 | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32)
             .collect(),
         png::ColorType::Grayscale => buf[..info.buffer_size()]
@@ -31,8 +37,12 @@ fn decode_png(bytes: &[u8]) -> (Vec<u32>, usize, usize) {
             .map(|&v| 0xFF00_0000 | ((v as u32) << 16) | ((v as u32) << 8) | v as u32)
             .collect(),
         png::ColorType::GrayscaleAlpha => buf[..info.buffer_size()]
-            .chunks_exact(2)
-            .map(|c| ((c[1] as u32) << 24) | ((c[0] as u32) << 16) | ((c[0] as u32) << 8) | c[0] as u32)
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| {
+                ((c[1] as u32) << 24) | ((c[0] as u32) << 16) | ((c[0] as u32) << 8) | c[0] as u32
+            })
             .collect(),
         other => panic!("unsupported png color type {other:?}"),
     };
@@ -98,7 +108,11 @@ fn main() {
             .unwrap_or(chain.len() - 1);
         let levels = &chain[base..];
         let has_alpha = levels[0].pixels.iter().any(|p| (p >> 24) & 0xFF < 255);
-        let encoding = if has_alpha { TexEncoding::Dxt5 } else { TexEncoding::Dxt1 };
+        let encoding = if has_alpha {
+            TexEncoding::Dxt5
+        } else {
+            TexEncoding::Dxt1
+        };
         let encoded: Vec<Vec<u8>> = levels
             .iter()
             .map(|l| match encoding {
@@ -107,8 +121,15 @@ fn main() {
             })
             .collect();
         let refs: Vec<&[u8]> = encoded.iter().map(|v| &v[..]).collect();
-        let listing = build_listing(name, encoding, levels[0].width, levels[0].height, &refs, true)
-            .expect("build listing");
+        let listing = build_listing(
+            name,
+            encoding,
+            levels[0].width,
+            levels[0].height,
+            &refs,
+            true,
+        )
+        .expect("build listing");
         let line = format!(
             "\"{}\" width={} height={} png={:08x} img={:08x} format=7 {}streammode=1",
             name,
@@ -123,12 +144,18 @@ fn main() {
                 new_listings.insert(i, listing);
                 new_lines.insert(i, line);
                 replaced += 1;
-                println!("  overwrite {name} ({}x{} {:?})", levels[0].width, levels[0].height, encoding);
+                println!(
+                    "  overwrite {name} ({}x{} {:?})",
+                    levels[0].width, levels[0].height, encoding
+                );
             }
             None => {
                 appended.push((listing, line));
                 added += 1;
-                println!("  add {name} ({}x{} {:?})", levels[0].width, levels[0].height, encoding);
+                println!(
+                    "  add {name} ({}x{} {:?})",
+                    levels[0].width, levels[0].height, encoding
+                );
             }
         }
     }
@@ -174,7 +201,18 @@ fn main() {
     txt.push('\n');
 
     std::fs::write(out_dir.join(format!("{cache_name}.txt")), txt).unwrap();
-    std::fs::write(out_dir.join(format!("{cache_name}.{}.dat", cache.variant)), &dat).unwrap();
-    std::fs::write(out_dir.join(format!("{cache_name}.{}.toc", cache.variant)), &toc).unwrap();
-    println!("done: replaced={replaced} added={added} dat={} bytes", dat.len());
+    std::fs::write(
+        out_dir.join(format!("{cache_name}.{}.dat", cache.variant)),
+        &dat,
+    )
+    .unwrap();
+    std::fs::write(
+        out_dir.join(format!("{cache_name}.{}.toc", cache.variant)),
+        &toc,
+    )
+    .unwrap();
+    println!(
+        "done: replaced={replaced} added={added} dat={} bytes",
+        dat.len()
+    );
 }

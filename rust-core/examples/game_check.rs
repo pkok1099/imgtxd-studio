@@ -59,7 +59,11 @@ impl Findings {
         self.add(Level::Fail, msg);
     }
     fn verdict(&self) -> Level {
-        self.list.iter().map(|(l, _)| *l).max().unwrap_or(Level::Pass)
+        self.list
+            .iter()
+            .map(|(l, _)| *l)
+            .max()
+            .unwrap_or(Level::Pass)
     }
     /// Gabung temuan satu keluarga varian. Untuk keluarga yang bukan format
     /// aktif game, FAIL diturunkan menjadi WARN (game tidak pernah membuka
@@ -169,7 +173,10 @@ fn check_native(data: &[u8], pos: usize, len: u32) -> Result<String, String> {
     }
     let p = &data[pstart..pend];
     if p.len() < 88 {
-        return Err(format!("payload Struct native {} byte < 88 byte wajib", p.len()));
+        return Err(format!(
+            "payload Struct native {} byte < 88 byte wajib",
+            p.len()
+        ));
     }
     let name = {
         let raw = &p[8..40];
@@ -209,7 +216,9 @@ fn check_native(data: &[u8], pos: usize, len: u32) -> Result<String, String> {
         }
         cur += 4 + sz as usize;
         if cur > p.len() {
-            return Err(format!("level mip {level} ({sz} byte) melewati akhir Struct"));
+            return Err(format!(
+                "level mip {level} ({sz} byte) melewati akhir Struct"
+            ));
         }
     }
     // Ekor setelah Struct = chunk ekstensi; harus berupa chunk utuh.
@@ -394,7 +403,9 @@ fn parse_manifest(text: &str) -> Vec<MEntry> {
         if !line.starts_with('"') {
             continue;
         }
-        let Some(end) = line[1..].find('"') else { continue };
+        let Some(end) = line[1..].find('"') else {
+            continue;
+        };
         let name = line[1..1 + end].to_string();
         let rest = &line[1 + end + 1..];
         let mut affiliate = None;
@@ -688,7 +699,9 @@ fn check_cache(dir: &Path) -> Findings {
     let text = match std::fs::read_to_string(dir.join(format!("{name}.txt"))) {
         Ok(t) => t,
         Err(e) => {
-            f.fail(format!("B4: {name}.txt tidak bisa dibuka game (LoadEntries gagal): {e}"));
+            f.fail(format!(
+                "B4: {name}.txt tidak bisa dibuka game (LoadEntries gagal): {e}"
+            ));
             return f;
         }
     };
@@ -771,9 +784,7 @@ fn check_cache(dir: &Path) -> Findings {
     let preference = ["etc", "dxt", "pvr", "360", "ps3", "unc"];
     let active = preference
         .iter()
-        .find(|v| {
-            families.iter().any(|x| x == *v) && dir.join(format!("{name}.{v}.dat")).exists()
-        })
+        .find(|v| families.iter().any(|x| x == *v) && dir.join(format!("{name}.{v}.dat")).exists())
         .map(|v| v.to_string())
         .or_else(|| {
             families
