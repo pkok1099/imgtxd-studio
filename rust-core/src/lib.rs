@@ -478,7 +478,8 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeDffExtract
                 Ok(a) => a,
                 Err(_) => return std::ptr::null_mut(),
             };
-            let as_i8: Vec<jni::sys::jbyte> = serialized.iter().map(|&b| b as jni::sys::jbyte).collect();
+            let as_i8: Vec<jni::sys::jbyte> =
+                serialized.iter().map(|&b| b as jni::sys::jbyte).collect();
             if env.set_byte_array_region(&out, 0, &as_i8).is_err() {
                 return std::ptr::null_mut();
             }
@@ -1059,11 +1060,8 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdCreate(
     rw_version: jint,
 ) -> jstring {
     let path_str = jstring_to_string(&mut env, &path);
-    let result = txd::create_empty_file(
-        std::path::Path::new(&path_str),
-        rw_version as u32,
-    )
-    .map(|_| "created".to_string());
+    let result = txd::create_empty_file(std::path::Path::new(&path_str), rw_version as u32)
+        .map(|_| "created".to_string());
     report_string(&mut env, result)
 }
 

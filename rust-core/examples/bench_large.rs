@@ -15,7 +15,11 @@ fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) {
     for _ in 0..iters {
         f();
     }
-    println!("{name:<42} {:>9.2} ms/iter ({} it)", ms(t) / iters as f64, iters);
+    println!(
+        "{name:<42} {:>9.2} ms/iter ({} it)",
+        ms(t) / iters as f64,
+        iters
+    );
 }
 
 fn make_synthetic_pixels(w: usize, h: usize) -> Vec<u32> {
@@ -85,10 +89,14 @@ fn main() {
 
         // 4. Mipmap chain (Box filter down to 1x1)
         let img = PixelImage::new(pixels, size, size);
-        bench(&format!("mip chain Box {size}x{size} -> 1x1"), iters, || {
-            let chain = generate_chain(&img, MipFilter::Box);
-            std::hint::black_box(chain);
-        });
+        bench(
+            &format!("mip chain Box {size}x{size} -> 1x1"),
+            iters,
+            || {
+                let chain = generate_chain(&img, MipFilter::Box);
+                std::hint::black_box(chain);
+            },
+        );
     }
     println!("\nLarge texture benchmark finished!");
 }

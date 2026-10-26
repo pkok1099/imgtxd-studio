@@ -54,9 +54,9 @@ impl PixelImage {
         if width == 0 || height == 0 {
             return Err(format!("invalid dimensions {width}x{height}"));
         }
-        let total = width.checked_mul(height).ok_or_else(|| {
-            format!("dimensions overflow: {width}x{height}")
-        })?;
+        let total = width
+            .checked_mul(height)
+            .ok_or_else(|| format!("dimensions overflow: {width}x{height}"))?;
         let mut pixels = Vec::new();
         pixels.try_reserve_exact(total).map_err(|e| {
             format!("out of native memory allocating {total} pixels ({width}x{height}): {e}")

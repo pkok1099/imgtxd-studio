@@ -384,24 +384,51 @@ impl RwMatrix {
     fn multiply(&self, parent: &RwMatrix) -> RwMatrix {
         RwMatrix {
             right: [
-                self.right[0] * parent.right[0] + self.right[1] * parent.up[0] + self.right[2] * parent.at[0],
-                self.right[0] * parent.right[1] + self.right[1] * parent.up[1] + self.right[2] * parent.at[1],
-                self.right[0] * parent.right[2] + self.right[1] * parent.up[2] + self.right[2] * parent.at[2],
+                self.right[0] * parent.right[0]
+                    + self.right[1] * parent.up[0]
+                    + self.right[2] * parent.at[0],
+                self.right[0] * parent.right[1]
+                    + self.right[1] * parent.up[1]
+                    + self.right[2] * parent.at[1],
+                self.right[0] * parent.right[2]
+                    + self.right[1] * parent.up[2]
+                    + self.right[2] * parent.at[2],
             ],
             up: [
-                self.up[0] * parent.right[0] + self.up[1] * parent.up[0] + self.up[2] * parent.at[0],
-                self.up[0] * parent.right[1] + self.up[1] * parent.up[1] + self.up[2] * parent.at[1],
-                self.up[0] * parent.right[2] + self.up[1] * parent.up[2] + self.up[2] * parent.at[2],
+                self.up[0] * parent.right[0]
+                    + self.up[1] * parent.up[0]
+                    + self.up[2] * parent.at[0],
+                self.up[0] * parent.right[1]
+                    + self.up[1] * parent.up[1]
+                    + self.up[2] * parent.at[1],
+                self.up[0] * parent.right[2]
+                    + self.up[1] * parent.up[2]
+                    + self.up[2] * parent.at[2],
             ],
             at: [
-                self.at[0] * parent.right[0] + self.at[1] * parent.up[0] + self.at[2] * parent.at[0],
-                self.at[0] * parent.right[1] + self.at[1] * parent.up[1] + self.at[2] * parent.at[1],
-                self.at[0] * parent.right[2] + self.at[1] * parent.up[2] + self.at[2] * parent.at[2],
+                self.at[0] * parent.right[0]
+                    + self.at[1] * parent.up[0]
+                    + self.at[2] * parent.at[0],
+                self.at[0] * parent.right[1]
+                    + self.at[1] * parent.up[1]
+                    + self.at[2] * parent.at[1],
+                self.at[0] * parent.right[2]
+                    + self.at[1] * parent.up[2]
+                    + self.at[2] * parent.at[2],
             ],
             pos: [
-                self.pos[0] * parent.right[0] + self.pos[1] * parent.up[0] + self.pos[2] * parent.at[0] + parent.pos[0],
-                self.pos[0] * parent.right[1] + self.pos[1] * parent.up[1] + self.pos[2] * parent.at[1] + parent.pos[1],
-                self.pos[0] * parent.right[2] + self.pos[1] * parent.up[2] + self.pos[2] * parent.at[2] + parent.pos[2],
+                self.pos[0] * parent.right[0]
+                    + self.pos[1] * parent.up[0]
+                    + self.pos[2] * parent.at[0]
+                    + parent.pos[0],
+                self.pos[0] * parent.right[1]
+                    + self.pos[1] * parent.up[1]
+                    + self.pos[2] * parent.at[1]
+                    + parent.pos[1],
+                self.pos[0] * parent.right[2]
+                    + self.pos[1] * parent.up[2]
+                    + self.pos[2] * parent.at[2]
+                    + parent.pos[2],
             ],
         }
     }
@@ -704,11 +731,17 @@ pub fn parse_dff_mesh(data: &[u8]) -> Option<DffMesh> {
                                 f32::from_le_bytes(p[off + 40..off + 44].try_into().unwrap()),
                                 f32::from_le_bytes(p[off + 44..off + 48].try_into().unwrap()),
                             ];
-                            let parent = i32::from_le_bytes(p[off + 48..off + 52].try_into().unwrap());
+                            let parent =
+                                i32::from_le_bytes(p[off + 48..off + 52].try_into().unwrap());
                             // p[off + 52..off + 56] is flags
                             off += 56;
 
-                            frames_matrices.push(RwMatrix { right: r, up: u, at: a, pos });
+                            frames_matrices.push(RwMatrix {
+                                right: r,
+                                up: u,
+                                at: a,
+                                pos,
+                            });
                             frames_parent.push(parent);
                         }
                     }
@@ -812,11 +845,8 @@ pub fn parse_dff_mesh(data: &[u8]) -> Option<DffMesh> {
             max_y = max_y.max(wp[1]);
             max_z = max_z.max(wp[2]);
 
-            vertex_buffer.extend_from_slice(&[
-                wp[0], wp[1], wp[2],
-                wn[0], wn[1], wn[2],
-                uv[0], uv[1],
-            ]);
+            vertex_buffer
+                .extend_from_slice(&[wp[0], wp[1], wp[2], wn[0], wn[1], wn[2], uv[0], uv[1]]);
         }
 
         for &idx in &geo.indices {
