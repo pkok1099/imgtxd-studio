@@ -123,6 +123,40 @@ class TxdEditorViewModel(
         }
     }
 
+    /**
+     * Explicit save action: ensures the active TXD is flushed to disk and synced to original/Shizuku destination,
+     * resetting [TxdEditorUiState.hasUnsavedChanges] to false.
+     */
+    fun saveTxd() {
+        val txdFile = _uiState.value.activeTxdFile ?: return
+        val parentInfo = _uiState.value.parentArchiveInfo
+        val originalPath = _uiState.value.originalPath
+        val isShizuku = _uiState.value.isShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Saving TXD...") }
+            try {
+                withContext(Dispatchers.IO) {
+                    syncTxdBack(txdFile, parentInfo, isShizuku, originalPath)
+                }
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        hasUnsavedChanges = false,
+                        statusMessage = "TXD saved successfully"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "Save failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
     fun exportSingleTexture(entry: TxdEntry, destinationDir: File) {
         val bitmap = entry.bitmap ?: return
         viewModelScope.launch {
@@ -441,18 +475,7 @@ class TxdEditorViewModel(
                     }
 
                     if (added + overwritten > 0) {
-                        if (parentInfo != null) {
-                            ArchiveRepository.updateEntryInArchive(
-                                archiveFile = File(parentInfo.archivePath),
-                                entryName = parentInfo.entryName,
-                                newFile = txdFile,
-                                shizukuDestPath = if (parentInfo.isShizuku) parentInfo.originalRestrictedPath else null
-                            )
-                        } else if (isShizuku && originalPath != null) {
-                            if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
-                                throw IOException("Failed to write TXD back to its source: $originalPath")
-                            }
-                        }
+                        syncTxdBack(txdFile, parentInfo, isShizuku, originalPath)
                     }
                     TxdStore.load(txdFile).entries
                 }
@@ -472,6 +495,202 @@ class TxdEditorViewModel(
                         errorMessage = "Texture import failed: ${e.localizedMessage}"
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Deletes textures at the given [indices] from the active TXD.
+     */
+    fun deleteTextures(indices: List<Int>) {
+        val txdFile = _uiState.value.activeTxdFile ?: return
+        val parentInfo = _uiState.value.parentArchiveInfo
+        val originalPath = _uiState.value.originalPath
+        val isShizuku = _uiState.value.isShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Deleting ${indices.size} textures...") }
+            try {
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    val count = TxdStore.deleteTextures(txdFile, indices)
+                    if (count > 0) {
+                        syncTxdBack(txdFile, parentInfo, isShizuku, originalPath)
+                    }
+                    TxdStore.load(txdFile).entries
+                }
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        txdEntries = updatedEntries,
+                        selectedEntry = null,
+                        hasUnsavedChanges = true,
+                        statusMessage = "${indices.size} texture(s) deleted"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "Delete failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Renames the texture at [index] to [newName].
+     */
+    fun renameTexture(index: Int, newName: String) {
+        val txdFile = _uiState.value.activeTxdFile ?: return
+        val parentInfo = _uiState.value.parentArchiveInfo
+        val originalPath = _uiState.value.originalPath
+        val isShizuku = _uiState.value.isShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Renaming texture...") }
+            try {
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    TxdStore.renameTexture(txdFile, index, newName)
+                    syncTxdBack(txdFile, parentInfo, isShizuku, originalPath)
+                    TxdStore.load(txdFile).entries
+                }
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        txdEntries = updatedEntries,
+                        selectedEntry = updatedEntries.getOrNull(index),
+                        hasUnsavedChanges = true,
+                        statusMessage = "Texture renamed to '$newName'"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "Rename failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Updates properties (maskName, filterFlags) of the texture at [index].
+     */
+    fun updateProperties(index: Int, maskName: String, filterFlags: Int) {
+        val txdFile = _uiState.value.activeTxdFile ?: return
+        val parentInfo = _uiState.value.parentArchiveInfo
+        val originalPath = _uiState.value.originalPath
+        val isShizuku = _uiState.value.isShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Updating properties...") }
+            try {
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    TxdStore.updateProperties(txdFile, index, maskName, filterFlags)
+                    syncTxdBack(txdFile, parentInfo, isShizuku, originalPath)
+                    TxdStore.load(txdFile).entries
+                }
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        txdEntries = updatedEntries,
+                        selectedEntry = updatedEntries.getOrNull(index),
+                        hasUnsavedChanges = true,
+                        statusMessage = "Texture properties updated"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "Properties update failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Imports textures directly from another TXD archive into this active TXD.
+     */
+    fun importFromTxd(
+        context: Context,
+        sourcePath: String,
+        isSourceShizuku: Boolean,
+        policy: com.onlasdan.studio.txd.TextureNames.ConflictPolicy
+    ) {
+        val txdFile = _uiState.value.activeTxdFile ?: return
+        val parentInfo = _uiState.value.parentArchiveInfo
+        val originalPath = _uiState.value.originalPath
+        val isShizuku = _uiState.value.isShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, statusMessage = "Importing textures from TXD archive...") }
+            try {
+                var added = 0
+                var overwritten = 0
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    val sourceFile = if (isSourceShizuku || ShizukuManager.isRestrictedPath(sourcePath)) {
+                        val tmp = File(context.cacheDir, "import_src_" + File(sourcePath).name)
+                        ShizukuManager.copyToLocal(sourcePath, tmp)
+                        tmp
+                    } else {
+                        File(sourcePath)
+                    }
+
+                    try {
+                        val result = TxdStore.importFromTxd(txdFile, sourceFile, policy)
+                        added = result.added
+                        overwritten = result.overwritten
+                    } finally {
+                        if (sourceFile != File(sourcePath)) {
+                            sourceFile.delete()
+                        }
+                    }
+
+                    if (added + overwritten > 0) {
+                        syncTxdBack(txdFile, parentInfo, isShizuku, originalPath)
+                    }
+                    TxdStore.load(txdFile).entries
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        txdEntries = updatedEntries,
+                        hasUnsavedChanges = true,
+                        statusMessage = "Import done: $added textures added, $overwritten overwritten"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSaving = false,
+                        errorMessage = "Import from TXD failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun syncTxdBack(
+        txdFile: File,
+        parentInfo: ParentArchiveInfo?,
+        isShizuku: Boolean,
+        originalPath: String?
+    ) {
+        if (parentInfo != null) {
+            ArchiveRepository.updateEntryInArchive(
+                archiveFile = File(parentInfo.archivePath),
+                entryName = parentInfo.entryName,
+                newFile = txdFile,
+                shizukuDestPath = if (parentInfo.isShizuku) parentInfo.originalRestrictedPath else null
+            )
+        } else if (isShizuku && originalPath != null) {
+            if (!ShizukuManager.copyFromLocal(txdFile, originalPath)) {
+                throw IOException("Failed to write TXD back to its source: $originalPath")
             }
         }
     }

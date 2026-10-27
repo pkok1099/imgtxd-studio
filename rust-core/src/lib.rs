@@ -1050,6 +1050,97 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdAddText
     report_string(&mut env, result)
 }
 
+/// Deletes textures at `indices` in `path`.
+/// Returns "deleted=<count>" or "ERROR <msg>".
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdDeleteTextures(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+    indices: JIntArray,
+) -> jstring {
+    let path_str = jstring_to_string(&mut env, &path);
+    let idx_vec = match int_array_to_vec(&mut env, &indices) {
+        Some(v) => v,
+        None => return report_string(&mut env, Err("Gagal membaca array indeks".to_string())),
+    };
+    let usize_indices: Vec<usize> = idx_vec.into_iter().map(|i| i as usize).collect();
+    let result = txd::delete_in_file(std::path::Path::new(&path_str), &usize_indices)
+        .map(|count| format!("deleted={count}"));
+    report_string(&mut env, result)
+}
+
+/// Renames texture at `index` in `path` to `new_name`.
+/// Returns "renamed" or "ERROR <msg>".
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdRenameTexture(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+    index: jint,
+    new_name: JString,
+) -> jstring {
+    let path_str = jstring_to_string(&mut env, &path);
+    let name_str = jstring_to_string(&mut env, &new_name);
+    let result = txd::rename_in_file(
+        std::path::Path::new(&path_str),
+        index as usize,
+        &name_str,
+    )
+    .map(|_| "renamed".to_string());
+    report_string(&mut env, result)
+}
+
+/// Updates texture properties (mask/alpha name and filter flags) at `index` in `path`.
+/// Returns "updated" or "ERROR <msg>".
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdUpdateProperties(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+    index: jint,
+    mask_name: JString,
+    filter_flags: jint,
+) -> jstring {
+    let path_str = jstring_to_string(&mut env, &path);
+    let mask_str = jstring_to_string(&mut env, &mask_name);
+    let result = txd::update_properties_in_file(
+        std::path::Path::new(&path_str),
+        index as usize,
+        &mask_str,
+        filter_flags as u32,
+    )
+    .map(|_| "updated".to_string());
+    report_string(&mut env, result)
+}
+
+/// Imports textures directly from `source_path` TXD into `dest_path` TXD.
+/// Returns "added=A overwritten=B total=T" or "ERROR <msg>".
+#[no_mangle]
+pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTxdImportFromTxd(
+    mut env: JNIEnv,
+    _class: JClass,
+    dest_path: JString,
+    source_path: JString,
+    policy: jint,
+) -> jstring {
+    let dest_str = jstring_to_string(&mut env, &dest_path);
+    let src_str = jstring_to_string(&mut env, &source_path);
+    let pol = match policy {
+        1 => txd::ConflictPolicy::Overwrite,
+        _ => txd::ConflictPolicy::JustAdd,
+    };
+    let result = txd::import_from_txd_file(
+        std::path::Path::new(&dest_str),
+        std::path::Path::new(&src_str),
+        pol,
+    )
+    .map(|(added, overwritten, total)| {
+        format!("added={added} overwritten={overwritten} total={total}")
+    });
+    report_string(&mut env, result)
+}
+
 /// Creates a new empty TXD dictionary file at `path`.
 /// Returns "OK" or "ERROR <msg>".
 #[no_mangle]

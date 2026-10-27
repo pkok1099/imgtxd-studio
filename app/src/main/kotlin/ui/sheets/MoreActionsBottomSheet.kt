@@ -38,6 +38,7 @@ fun MoreActionsBottomSheet(
     isLargeImage: Boolean = false,
     onToggleTxdViewMode: (() -> Unit)? = null,
     onAddTextures: (() -> Unit)? = null,
+    onImportFromTxd: (() -> Unit)? = null,
     onCloseFile: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -101,6 +102,19 @@ fun MoreActionsBottomSheet(
                                 onClick = {
                                     onDismissRequest()
                                     onAddTextures()
+                                }
+                            )
+                        }
+
+                        if (isTxd && onImportFromTxd != null) {
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            MoreActionRow(
+                                icon = Icons.Outlined.FolderZip,
+                                title = stringResource(R.string.import_from_txd),
+                                subtitle = stringResource(R.string.import_from_txd_desc),
+                                onClick = {
+                                    onDismissRequest()
+                                    onImportFromTxd()
                                 }
                             )
                         }

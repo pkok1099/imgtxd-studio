@@ -10,7 +10,25 @@ export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/workspace/rust/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$HOME/workspace/rust/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
 
-NDK="${ANDROID_NDK_HOME:-$HOME/workspace/android-ndk}/toolchains/llvm/prebuilt/linux-aarch64"
+# Resolve NDK directory: check standard user workspace or home fallback
+NDK_ROOT="${ANDROID_NDK_HOME:-}"
+if [ -z "$NDK_ROOT" ]; then
+    if [ -d "$HOME/android-ndk-r27b" ]; then
+        NDK_ROOT="$HOME/android-ndk-r27b"
+    elif [ -d "$HOME/workspace/android-ndk" ]; then
+        NDK_ROOT="$HOME/workspace/android-ndk"
+    else
+        echo "Error: Android NDK not found" >&2
+        exit 1
+    fi
+fi
+
+# Detect host prebuilt llvm tag (linux-x86_64 or linux-aarch64)
+HOST_TAG="linux-x86_64"
+if [ "$(uname -m)" = "aarch64" ]; then
+    HOST_TAG="linux-aarch64"
+fi
+NDK="$NDK_ROOT/toolchains/llvm/prebuilt/$HOST_TAG"
 API=31
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK/bin/aarch64-linux-android${API}-clang"
 export CC_aarch64_linux_android="$NDK/bin/aarch64-linux-android${API}-clang"

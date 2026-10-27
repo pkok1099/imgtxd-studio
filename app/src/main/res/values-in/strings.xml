@@ -13,6 +13,7 @@
     <string name="add">Add File</string>
     <string name="add_new_texture">Add New Texture</string>
     <string name="add_new_texture_desc">Import images as new textures into this TXD</string>
+    <string name="pick_source_txd_title">Pilih Arsip TXD Sumber</string>
     <string name="all_files_access_req_desc">Android needs storage permission to modify game files in place.</string>
     <string name="all_files_access_req_title">All Files Access Required</string>
     <string name="allocation_mb">Alokasi: %1$d MB</string>
@@ -500,9 +501,15 @@
     <string name="txd_limit_max_size">Batasi ukuran maksimum</string>
     <string name="txd_loading_textures">Loading textures...</string>
     <string name="txd_maker_create_and_open">Buat &amp; Buka</string>
-    <string name="txd_maker_dialog_desc">Masukkan nama file TXD baru. File akan dibuat di folder cache/dokumen dan otomatis dibuka di TXD Editor.</string>
+    <string name="txd_maker_dialog_desc">Buat arsip TXD baru dari awal. Pilih folder tujuan dan nama file.</string>
     <string name="txd_maker_dialog_title">TXD Maker - Buat TXD Baru</string>
     <string name="txd_maker_file_name_label">Nama File (contoh: new_textures.txd)</string>
+    <string name="txd_maker_target_folder_label">Lokasi Simpan</string>
+    <string name="txd_maker_change_folder">Ubah</string>
+    <string name="txd_maker_empty_cta_title">Arsip TXD Kosong</string>
+    <string name="txd_maker_empty_cta_desc">TXD ini masih kosong. Tambahkan tekstur pertamamu dari gambar atau dari arsip TXD lain.</string>
+    <string name="txd_maker_empty_cta_add">Tambah Tekstur</string>
+    <string name="txd_maker_empty_cta_import_txd">Dari Arsip TXD</string>
     <string name="txd_mod_image">Gambar Mod</string>
     <string name="txd_name_collision_desc">%1$d image names collide with existing textures in this TXD. Select resolution policy:</string>
     <string name="txd_no_matching_texture_desc">No image filenames match any texture currently in this TXD.</string>
@@ -547,4 +554,21 @@
     <string name="worker_notif_failed">Operation Failed</string>
     <string name="worker_notif_item_progress">Item %1$d/%2$d (%3$d%%)</string>
     <string name="worker_notif_processing">Processing files...</string>
+    <string name="txd_delete_texture_title">Hapus Tekstur</string>
+    <string name="txd_delete_texture_msg">Yakin ingin menghapus \'%1$s\' dari arsip TXD ini?</string>
+    <string name="txd_delete_selected_title">Hapus Tekstur Terpilih</string>
+    <string name="txd_delete_selected_msg">Yakin ingin menghapus %1$d tekstur terpilih dari arsip TXD ini?</string>
+    <string name="txd_rename_texture_title">Ubah Nama Tekstur</string>
+    <string name="txd_rename_dff_warning">Catatan: Jika model 3D (.dff) merujuk nama tekstur ini, model tersebut juga perlu disesuaikan agar tidak hilang teksturnya.</string>
+    <string name="txd_rename_input_label">Nama Tekstur (Maks 31 karakter)</string>
+    <string name="txd_edit_properties_title">Edit Properti Tekstur</string>
+    <string name="txd_mask_name_label">Nama Mask / Alpha (Maks 31 karakter)</string>
+    <string name="txd_filter_mode_label">Mode Filtering</string>
+    <string name="txd_wrap_u_label">Wrap U (Horizontal)</string>
+    <string name="txd_wrap_v_label">Wrap V (Vertikal)</string>
+    <string name="txd_filter_nearest">Nearest (Tanpa Filter)</string>
+    <string name="txd_filter_linear">Linear (Bilinear)</string>
+    <string name="txd_filter_mip_nearest">Mipmap Nearest</string>
+    <string name="txd_filter_mip_linear">Mipmap Linear (Trilinear)</string>
+    <string name="txd_properties_btn">Properti</string>
 </resources>

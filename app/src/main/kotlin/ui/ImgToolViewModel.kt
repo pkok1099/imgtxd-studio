@@ -1252,6 +1252,269 @@ class ImgToolViewModel : ViewModel() {
         }
     }
 
+    fun deleteTextures(indices: List<Int>) {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Deleting ${indices.size} textures...") }
+            try {
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    val count = TxdStore.deleteTextures(tempTxdFile, indices)
+                    if (count > 0) {
+                        val archive = _uiState.value.archive
+                        if (sourceImgEntry != null && archive != null) {
+                            archive.replace(sourceImgEntry, tempTxdFile)
+                            val imgOriginalPath = _uiState.value.originalPath
+                            if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                                if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                    throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
+                                }
+                            }
+                        }
+                        if (isShizukuTxd && originalPath != null) {
+                            if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                                throw IOException("Failed to write TXD back to its source: $originalPath")
+                            }
+                        }
+                    }
+                    TxdStore.load(tempTxdFile).entries
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        txdEntries = updatedEntries,
+                        hasTxdUnsavedChanges = true,
+                        statusMessage = "${indices.size} texture(s) deleted"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Delete failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun renameTexture(index: Int, newName: String) {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Renaming texture...") }
+            try {
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    TxdStore.renameTexture(tempTxdFile, index, newName)
+                    val archive = _uiState.value.archive
+                    if (sourceImgEntry != null && archive != null) {
+                        archive.replace(sourceImgEntry, tempTxdFile)
+                        val imgOriginalPath = _uiState.value.originalPath
+                        if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                            if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
+                            }
+                        }
+                    }
+                    if (isShizukuTxd && originalPath != null) {
+                        if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                            throw IOException("Failed to write TXD back to its source: $originalPath")
+                        }
+                    }
+                    TxdStore.load(tempTxdFile).entries
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        txdEntries = updatedEntries,
+                        hasTxdUnsavedChanges = true,
+                        statusMessage = "Texture renamed to $newName"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Rename failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun updateProperties(index: Int, maskName: String, filterFlags: Int) {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Updating properties...") }
+            try {
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    TxdStore.updateProperties(tempTxdFile, index, maskName, filterFlags)
+                    val archive = _uiState.value.archive
+                    if (sourceImgEntry != null && archive != null) {
+                        archive.replace(sourceImgEntry, tempTxdFile)
+                        val imgOriginalPath = _uiState.value.originalPath
+                        if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                            if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
+                            }
+                        }
+                    }
+                    if (isShizukuTxd && originalPath != null) {
+                        if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                            throw IOException("Failed to write TXD back to its source: $originalPath")
+                        }
+                    }
+                    TxdStore.load(tempTxdFile).entries
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        txdEntries = updatedEntries,
+                        hasTxdUnsavedChanges = true,
+                        statusMessage = "Texture properties updated"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Properties update failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun importFromTxd(
+        context: Context,
+        sourcePath: String,
+        isSourceShizuku: Boolean,
+        policy: TextureNames.ConflictPolicy
+    ) {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Importing textures from TXD archive...") }
+            try {
+                var added = 0
+                var overwritten = 0
+                val updatedEntries = withContext(Dispatchers.IO) {
+                    val sourceFile = if (isSourceShizuku || ShizukuManager.isRestrictedPath(sourcePath)) {
+                        val tmp = File(context.cacheDir, "import_src_" + File(sourcePath).name)
+                        ShizukuManager.copyToLocal(sourcePath, tmp)
+                        tmp
+                    } else {
+                        File(sourcePath)
+                    }
+
+                    try {
+                        val result = TxdStore.importFromTxd(tempTxdFile, sourceFile, policy)
+                        added = result.added
+                        overwritten = result.overwritten
+                    } finally {
+                        if (sourceFile != File(sourcePath)) {
+                            sourceFile.delete()
+                        }
+                    }
+
+                    if (added + overwritten > 0) {
+                        val archive = _uiState.value.archive
+                        if (sourceImgEntry != null && archive != null) {
+                            archive.replace(sourceImgEntry, tempTxdFile)
+                            val imgOriginalPath = _uiState.value.originalPath
+                            if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                                if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                    throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
+                                }
+                            }
+                        }
+                        if (isShizukuTxd && originalPath != null) {
+                            if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                                throw IOException("Failed to write TXD back to its source: $originalPath")
+                            }
+                        }
+                    }
+                    TxdStore.load(tempTxdFile).entries
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        txdEntries = updatedEntries,
+                        hasTxdUnsavedChanges = true,
+                        statusMessage = "Import done: $added textures added, $overwritten overwritten"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Import from TXD failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Explicit save action for TXD viewer in MainActivity: flushes temp TXD changes and clears hasTxdUnsavedChanges.
+     */
+    fun saveActiveTxd() {
+        val tempTxdFile = _uiState.value.activeTxdTempFile ?: return
+        val sourceImgEntry = _uiState.value.activeTxdSourceEntry
+        val originalPath = _uiState.value.activeTxdOriginalPath
+        val isShizukuTxd = _uiState.value.isTxdShizuku
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTxdLoading = true, statusMessage = "Saving TXD...") }
+            try {
+                withContext(Dispatchers.IO) {
+                    val archive = _uiState.value.archive
+                    if (sourceImgEntry != null && archive != null) {
+                        archive.replace(sourceImgEntry, tempTxdFile)
+                        val imgOriginalPath = _uiState.value.originalPath
+                        if (_uiState.value.isShizukuBacked && imgOriginalPath != null) {
+                            if (!ShizukuManager.copyFromLocal(archive.imgFile, imgOriginalPath)) {
+                                throw IOException("Failed to write IMG archive back to game folder: $imgOriginalPath")
+                            }
+                        }
+                    }
+                    if (isShizukuTxd && originalPath != null) {
+                        if (!ShizukuManager.copyFromLocal(tempTxdFile, originalPath)) {
+                            throw IOException("Failed to write TXD back to its source: $originalPath")
+                        }
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        hasTxdUnsavedChanges = false,
+                        statusMessage = "TXD saved successfully"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isTxdLoading = false,
+                        errorMessage = "Save TXD failed: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
     /**
      * IMG Tool "SA audio fixer" (parity item I13): regenerates the `.idx` companion
      * file for a modified `.osw` audio archive so the game indexes it correctly.

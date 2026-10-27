@@ -19,6 +19,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontFamily
@@ -53,10 +56,19 @@ fun <T> ArchiveScreen(
     onProcessPillClick: () -> Unit = {},
     gridColumns: Int = 1,
     headerTrailingContent: (@Composable () -> Unit)? = null,
+    scrollBehavior: PhysicsDockScrollBehavior? = null,
     dockContent: @Composable () -> Unit,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
+    val density = LocalDensity.current
+    val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val maxDockOffsetPx = remember(density, navBarPadding) {
+        with(density) { (navBarPadding + 110.dp).toPx() }
+    }
+    val effectiveScrollBehavior = scrollBehavior ?: rememberPhysicsDockScrollBehavior(maxOffsetPx = maxDockOffsetPx)
+
     Scaffold(
+        modifier = Modifier.nestedScroll(effectiveScrollBehavior.nestedScrollConnection),
         snackbarHost = {
             Box(
                 modifier = Modifier
@@ -361,6 +373,9 @@ fun <T> ArchiveScreen(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        .graphicsLayer {
+                            translationY = effectiveScrollBehavior.offsetPx
+                        }
                         .navigationBarsPadding()
                         .padding(bottom = 96.dp)
                         .clickable(onClick = onProcessPillClick)
@@ -386,11 +401,14 @@ fun <T> ArchiveScreen(
                 }
             }
 
-            // Dock slot
+            // Dock slot (Synchronized with physics scroll behavior)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .graphicsLayer {
+                        translationY = effectiveScrollBehavior.offsetPx
+                    }
             ) {
                 dockContent()
             }

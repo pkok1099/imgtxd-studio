@@ -1,6 +1,13 @@
 package com.onlasdan.studio.ui
 
 import android.os.Environment
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import androidx.collection.LruCache
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.BorderStroke
@@ -72,6 +79,86 @@ private fun isImageFile(name: String): Boolean {
     val lower = name.lowercase()
     return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
            lower.endsWith(".bmp") || lower.endsWith(".webp")
+}
+
+private val pickerThumbnailCache = object : LruCache<String, Bitmap>(64) {
+    override fun sizeOf(key: String, value: Bitmap): Int = 1
+}
+
+@Composable
+private fun PickerImageThumbnail(
+    path: String,
+    isShizuku: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var bitmap by remember(path) { mutableStateOf(pickerThumbnailCache.get(path)) }
+
+    LaunchedEffect(path) {
+        if (bitmap != null) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            try {
+                val file = File(path)
+                if (file.exists()) {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(file.absolutePath, bounds)
+                    var sampleSize = 1
+                    val req = 96
+                    while (bounds.outWidth / (sampleSize * 2) >= req && bounds.outHeight / (sampleSize * 2) >= req) {
+                        sampleSize *= 2
+                    }
+                    val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                    val loaded = BitmapFactory.decodeFile(file.absolutePath, opts)
+                    if (loaded != null) {
+                        pickerThumbnailCache.put(path, loaded)
+                        withContext(Dispatchers.Main) {
+                            bitmap = loaded
+                        }
+                    }
+                } else if (isShizuku && ShizukuManager.isRestrictedPath(path) && ShizukuManager.hasPermission()) {
+                    val temp = File.createTempFile("picker_thumb_", ".tmp")
+                    if (ShizukuManager.copyToLocal(path, temp)) {
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(temp.absolutePath, bounds)
+                        var sampleSize = 1
+                        val req = 96
+                        while (bounds.outWidth / (sampleSize * 2) >= req && bounds.outHeight / (sampleSize * 2) >= req) {
+                            sampleSize *= 2
+                        }
+                        val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                        val loaded = BitmapFactory.decodeFile(temp.absolutePath, opts)
+                        temp.delete()
+                        if (loaded != null) {
+                            pickerThumbnailCache.put(path, loaded)
+                            withContext(Dispatchers.Main) {
+                                bitmap = loaded
+                            }
+                        }
+                    }
+                }
+            } catch (_: Throwable) {
+                // Ignore thumbnail decode error, fallback to vector icon
+            }
+        }
+    }
+
+    val currentBmp = bitmap
+    if (currentBmp != null) {
+        Image(
+            bitmap = currentBmp.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Icon(
+            imageVector = Icons.Outlined.Image,
+            contentDescription = null,
+            modifier = modifier.size(24.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 private val EaseOutCubic = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1.0f)
@@ -754,13 +841,17 @@ fun FilePickerDialog(
                                                     uncheckedColor = MaterialTheme.colorScheme.outline
                                                 )
                                             )
+                                        } else if (isImageFile(item.name)) {
+                                            PickerImageThumbnail(
+                                                path = item.path,
+                                                isShizuku = item.isShizuku
+                                            )
                                         } else {
                                             val icon = when {
                                                 item.isDirectory -> Icons.Outlined.Folder
                                                 item.name.endsWith(".img", ignoreCase = true) -> Icons.Outlined.Archive
                                                 item.name.endsWith(".dff", ignoreCase = true) -> Icons.Outlined.ViewInAr
                                                 item.name.endsWith(".txd", ignoreCase = true) -> Icons.Outlined.Image
-                                                isImageFile(item.name) -> Icons.Outlined.Image
                                                 else -> Icons.Outlined.Description
                                             }
                                             Icon(

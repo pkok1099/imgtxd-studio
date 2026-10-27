@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 
@@ -25,8 +26,12 @@ import androidx.compose.ui.unit.dp
 fun FloatingSheet(
     onDismissRequest: () -> Unit,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    stackDepth: Int = 0,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val scaleFactor = (1f - (stackDepth.coerceAtLeast(0) * 0.045f)).coerceIn(0.85f, 1f)
+    val verticalShiftDp = (stackDepth.coerceAtLeast(0) * 8).dp
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
@@ -41,10 +46,14 @@ fun FloatingSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp)
-                .padding(bottom = 12.dp)
+                .padding(bottom = 12.dp + verticalShiftDp)
                 .navigationBarsPadding()
                 .imePadding()
-                .heightIn(max = maxHeight),
+                .heightIn(max = maxHeight)
+                .graphicsLayer {
+                    scaleX = scaleFactor
+                    scaleY = scaleFactor
+                },
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)

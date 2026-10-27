@@ -46,6 +46,10 @@ object NativeCore {
     private external fun nativeImgRebuild(path: String, dir: String?): Array<String>?
     private external fun nativeTxdList(path: String): Array<String>?
     private external fun nativeTxdCreate(path: String, rwVersion: Int): String?
+    private external fun nativeTxdDeleteTextures(path: String, indices: IntArray): String?
+    private external fun nativeTxdRenameTexture(path: String, index: Int, newName: String): String?
+    private external fun nativeTxdUpdateProperties(path: String, index: Int, maskName: String, filterFlags: Int): String?
+    private external fun nativeTxdImportFromTxd(destPath: String, sourcePath: String, policy: Int): String?
     private external fun nativeTxdTexturePixels(path: String, index: Int): IntArray?
     private external fun nativeTxdReplaceTextures(
         path: String, indices: IntArray, pixelsList: Array<IntArray>,
@@ -422,6 +426,50 @@ object NativeCore {
     fun txdCreate(path: String, rwVersion: Int = 0): String? = if (isAvailable) {
         try {
             nativeTxdCreate(path, rwVersion)
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /** Deletes textures at [indices] in [path]. Returns "OK deleted=N" or "ERROR <msg>". */
+    fun txdDeleteTextures(path: String, indices: IntArray): String? = if (isAvailable) {
+        try {
+            nativeTxdDeleteTextures(path, indices)
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /** Renames texture at [index] in [path] to [newName]. Returns "OK renamed" or "ERROR <msg>". */
+    fun txdRenameTexture(path: String, index: Int, newName: String): String? = if (isAvailable) {
+        try {
+            nativeTxdRenameTexture(path, index, newName)
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /** Updates properties (maskName, filterFlags) at [index] in [path]. Returns "OK updated" or "ERROR <msg>". */
+    fun txdUpdateProperties(path: String, index: Int, maskName: String, filterFlags: Int): String? = if (isAvailable) {
+        try {
+            nativeTxdUpdateProperties(path, index, maskName, filterFlags)
+        } catch (_: Throwable) {
+            null
+        }
+    } else {
+        null
+    }
+
+    /** Imports textures directly from [sourcePath] TXD into [destPath] TXD. Returns "added=A overwritten=B total=T" or "ERROR <msg>". */
+    fun txdImportFromTxd(destPath: String, sourcePath: String, policy: Int): String? = if (isAvailable) {
+        try {
+            nativeTxdImportFromTxd(destPath, sourcePath, policy)
         } catch (_: Throwable) {
             null
         }

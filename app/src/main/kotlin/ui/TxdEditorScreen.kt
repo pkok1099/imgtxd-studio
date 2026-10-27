@@ -70,6 +70,10 @@ fun TxdEditorScreen(
     onReplaceTexture: (entry: TxdEntry, imagePath: String, isShizuku: Boolean, options: TextureImportOptions) -> Unit,
     onAutoReplace: (matches: List<Pair<TxdEntry, String>>, isShizuku: Boolean, options: TextureImportOptions) -> Unit,
     onAddTextures: ((images: List<Pair<String, Boolean>>, policy: TextureNames.ConflictPolicy, options: TextureImportOptions) -> Unit)? = null,
+    onImportFromTxd: ((sourcePath: String, isSourceShizuku: Boolean, policy: TextureNames.ConflictPolicy) -> Unit)? = null,
+    onDeleteTextures: ((indices: List<Int>) -> Unit)? = null,
+    onRenameTexture: ((index: Int, newName: String) -> Unit)? = null,
+    onUpdateProperties: ((index: Int, maskName: String, filterFlags: Int) -> Unit)? = null,
     onClearMessages: (() -> Unit)? = null,
     showDock: Boolean = true,
     hasUnsavedChanges: Boolean = false,
@@ -154,6 +158,10 @@ fun TxdEditorScreen(
     var entryToReplace by remember { mutableStateOf<TxdEntry?>(null) }
     var singleReplaceCandidate by remember { mutableStateOf<Triple<TxdEntry, String, Boolean>?>(null) }
     var entryToExport by remember { mutableStateOf<TxdEntry?>(null) }
+    var entryToRename by remember { mutableStateOf<TxdEntry?>(null) }
+    var entryToDelete by remember { mutableStateOf<TxdEntry?>(null) }
+    var entryToEditProps by remember { mutableStateOf<TxdEntry?>(null) }
+    var showDeleteSelectedConfirm by remember { mutableStateOf(false) }
     var showExportAllPicker by remember { mutableStateOf(false) }
     var showExportSelectedPicker by remember { mutableStateOf(false) }
 
@@ -165,6 +173,11 @@ fun TxdEditorScreen(
     var pendingAddImages by remember { mutableStateOf<List<Pair<String, Boolean>>?>(null) }
     var pendingAddConflicts by remember { mutableStateOf<List<String>>(emptyList()) }
     var addConflictPolicy by remember { mutableStateOf(TextureNames.ConflictPolicy.JUST_ADD) }
+
+    // Import from TXD Archive State
+    var showImportTxdPicker by remember { mutableStateOf(false) }
+    var pendingImportTxdSource by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    var importTxdConflictPolicy by remember { mutableStateOf(TextureNames.ConflictPolicy.JUST_ADD) }
 
     // Auto Replace State
     var showAutoReplaceModeChoice by rememberSaveable { mutableStateOf(false) }
@@ -232,6 +245,12 @@ fun TxdEditorScreen(
             onClick = { showExportSelectedPicker = true }
         ),
         ContextualDockItem(
+            id = "delete_selected",
+            icon = Icons.Outlined.DeleteOutline,
+            contentDescription = stringResource(R.string.dock_delete_selected),
+            onClick = { showDeleteSelectedConfirm = true }
+        ),
+        ContextualDockItem(
             id = "select_all",
             icon = Icons.Outlined.SelectAll,
             contentDescription = "Select all textures",
@@ -268,12 +287,21 @@ fun TxdEditorScreen(
             isSelected = isSearching,
             onClick = { isSearching = !isSearching }
         ),
-        ContextualDockItem(
-            id = "auto_replace",
-            icon = Icons.Outlined.AutoFixHigh,
-            contentDescription = "Auto Replace Tekstur",
-            onClick = { showAutoReplaceModeChoice = true }
-        ),
+        if (textures.isEmpty()) {
+            ContextualDockItem(
+                id = "add_textures",
+                icon = Icons.Outlined.AddPhotoAlternate,
+                contentDescription = stringResource(R.string.add_new_texture),
+                onClick = { showAddTexturesPicker = true }
+            )
+        } else {
+            ContextualDockItem(
+                id = "auto_replace",
+                icon = Icons.Outlined.AutoFixHigh,
+                contentDescription = "Auto Replace Tekstur",
+                onClick = { showAutoReplaceModeChoice = true }
+            )
+        },
         ContextualDockItem(
             id = "save",
             icon = Icons.Outlined.Save,
@@ -307,8 +335,14 @@ fun TxdEditorScreen(
         },
         items = displayedTextures,
         keyExtractor = { "${it.name}_${it.width}_${it.height}" },
-        emptyTitle = stringResource(R.string.txd_no_textures),
-        emptyDescription = if (isLoading) stringResource(R.string.txd_loading_textures) else stringResource(R.string.txd_empty_desc),
+        emptyTitle = if (textures.isEmpty() && !isLoading) stringResource(R.string.txd_maker_empty_cta_title) else stringResource(R.string.txd_no_textures),
+        emptyDescription = when {
+            isLoading -> stringResource(R.string.txd_loading_textures)
+            textures.isEmpty() -> stringResource(R.string.txd_maker_empty_cta_desc)
+            else -> stringResource(R.string.txd_empty_desc)
+        },
+        emptyActionLabel = if (textures.isEmpty() && !isLoading && onAddTextures != null) stringResource(R.string.txd_maker_empty_cta_add) else null,
+        onEmptyAction = if (textures.isEmpty() && !isLoading && onAddTextures != null) ({ showAddTexturesPicker = true }) else null,
         isSearching = isSearching,
         searchQuery = searchQuery,
         searchPlaceholder = stringResource(R.string.txd_search_placeholder),
@@ -361,13 +395,16 @@ fun TxdEditorScreen(
 
     // --- Floating Sheets & Sub-Dialogs ---
 
-    // 1. Texture Detail Bottom Sheet (Tap Entri TXD: Pratinjau Besar + Ganti + Ekspor)
+    // 1. Texture Detail Bottom Sheet (Tap Entri TXD: Pratinjau Besar + Ganti + Ekspor + Rename + Hapus)
     selectedTextureForDetail?.let { entry ->
         TextureDetailBottomSheet(
             entry = entry,
             onDismissRequest = { selectedTextureForDetail = null },
             onReplaceTexture = { entryToReplace = entry },
-            onExportTexture = { entryToExport = entry }
+            onExportTexture = { entryToExport = entry },
+            onRenameTexture = { entryToRename = entry },
+            onDeleteTexture = { entryToDelete = entry },
+            onEditProperties = { entryToEditProps = entry }
         )
     }
 
@@ -381,6 +418,7 @@ fun TxdEditorScreen(
             isLargeImage = (txdViewMode == TxdViewMode.LARGE),
             onToggleTxdViewMode = { toggleViewMode() },
             onAddTextures = if (onAddTextures != null) ({ showAddTexturesPicker = true }) else null,
+            onImportFromTxd = if (onImportFromTxd != null) ({ showImportTxdPicker = true }) else null,
             onExportAll = { showExportAllPicker = true },
             onCloseFile = { onClose() }
         )
@@ -452,6 +490,222 @@ fun TxdEditorScreen(
                 isSelectionMode = false
             }
         )
+    }
+
+    // 5c. Delete Selected Confirmation Dialog
+    if (showDeleteSelectedConfirm) {
+        val targets = selectedTextures.toList()
+        ConfirmSheet(
+            title = stringResource(R.string.txd_delete_selected_title),
+            message = stringResource(R.string.txd_delete_selected_msg, targets.size),
+            confirmLabel = stringResource(R.string.delete),
+            danger = true,
+            onDismissRequest = { showDeleteSelectedConfirm = false },
+            onConfirm = {
+                showDeleteSelectedConfirm = false
+                val indices = targets.mapNotNull { target ->
+                    val idx = textures.indexOf(target)
+                    if (idx >= 0) idx else null
+                }
+                onDeleteTextures?.invoke(indices)
+                selectedTextures = emptySet()
+                isSelectionMode = false
+            }
+        )
+    }
+
+    // 5d. Delete Single Texture Confirmation Dialog
+    entryToDelete?.let { target ->
+        ConfirmSheet(
+            title = stringResource(R.string.txd_delete_texture_title),
+            message = stringResource(R.string.txd_delete_texture_msg, target.name),
+            confirmLabel = stringResource(R.string.delete),
+            danger = true,
+            onDismissRequest = { entryToDelete = null },
+            onConfirm = {
+                val idx = textures.indexOf(target)
+                entryToDelete = null
+                if (idx >= 0) {
+                    onDeleteTextures?.invoke(listOf(idx))
+                }
+            }
+        )
+    }
+
+    // 5e. Rename Single Texture Dialog
+    entryToRename?.let { target ->
+        var newNameInput by remember(target) { mutableStateOf(target.name) }
+        var inputError by remember { mutableStateOf<String?>(null) }
+
+        FloatingSheet(onDismissRequest = { entryToRename = null }) {
+            SheetTitle(stringResource(R.string.txd_rename_texture_title))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(R.string.txd_rename_dff_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            OutlinedTextField(
+                value = newNameInput,
+                onValueChange = {
+                    if (it.length <= 31) {
+                        newNameInput = it
+                        inputError = null
+                    }
+                },
+                label = { Text(stringResource(R.string.txd_rename_input_label)) },
+                isError = inputError != null,
+                supportingText = inputError?.let { { Text(it) } },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { entryToRename = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        val trimmed = newNameInput.trim()
+                        if (trimmed.isEmpty()) {
+                            inputError = "Name cannot be empty"
+                        } else if (textures.any { it != target && it.name.equals(trimmed, ignoreCase = true) }) {
+                            inputError = "Texture '$trimmed' already exists"
+                        } else {
+                            val idx = textures.indexOf(target)
+                            entryToRename = null
+                            if (idx >= 0) {
+                                onRenameTexture?.invoke(idx, trimmed)
+                            }
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.save))
+                }
+            }
+        }
+    }
+
+    // 5f. Edit Texture Properties Dialog (Mask Name + Filter Flags)
+    entryToEditProps?.let { target ->
+        var maskNameInput by remember(target) { mutableStateOf(target.maskName) }
+        // filterFlags: bits 0..7 = filter mode (1=nearest, 2=linear, 3=mip_nearest, 4=mip_linear, etc.)
+        // bits 8..11 = wrap U (1=wrap, 2=mirror, 3=clamp)
+        // bits 12..15 = wrap V (1=wrap, 2=mirror, 3=clamp)
+        val initialFilter = remember(target) { target.filterFlags and 0xFF }
+        val initialWrapU = remember(target) { (target.filterFlags ushr 8) and 0xF }
+        val initialWrapV = remember(target) { (target.filterFlags ushr 12) and 0xF }
+
+        var filterMode by remember(target) { mutableIntStateOf(if (initialFilter in 1..6) initialFilter else 2) }
+        var wrapU by remember(target) { mutableStateOf(initialWrapU != 3) } // true=wrap, false=clamp
+        var wrapV by remember(target) { mutableStateOf(initialWrapV != 3) } // true=wrap, false=clamp
+
+        FloatingSheet(onDismissRequest = { entryToEditProps = null }) {
+            SheetTitle(stringResource(R.string.txd_edit_properties_title))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            OutlinedTextField(
+                value = maskNameInput,
+                onValueChange = { if (it.length <= 31) maskNameInput = it },
+                label = { Text(stringResource(R.string.txd_mask_name_label)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = stringResource(R.string.txd_filter_mode_label),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val filterOptions = listOf(
+                1 to stringResource(R.string.txd_filter_nearest),
+                2 to stringResource(R.string.txd_filter_linear),
+                3 to stringResource(R.string.txd_filter_mip_nearest),
+                4 to stringResource(R.string.txd_filter_mip_linear)
+            )
+
+            filterOptions.forEach { (mode, label) ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                ) {
+                    RadioButton(
+                        selected = filterMode == mode,
+                        onClick = { filterMode = mode }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = label, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stringResource(R.string.txd_wrap_u_label),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Switch(checked = wrapU, onCheckedChange = { wrapU = it })
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = stringResource(R.string.txd_wrap_v_label),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Switch(checked = wrapV, onCheckedChange = { wrapV = it })
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { entryToEditProps = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        val idx = textures.indexOf(target)
+                        entryToEditProps = null
+                        if (idx >= 0) {
+                            val uVal = if (wrapU) 1 else 3
+                            val vVal = if (wrapV) 1 else 3
+                            val newFilterFlags = (filterMode and 0xFF) or (uVal shl 8) or (vVal shl 12)
+                            onUpdateProperties?.invoke(idx, maskNameInput.trim(), newFilterFlags)
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.save))
+                }
+            }
+        }
     }
 
     // 6. File Picker for Replace Single Texture
@@ -819,6 +1073,98 @@ fun TxdEditorScreen(
                         val images = pendingAddImages ?: return@Button
                         pendingAddImages = null
                         onAddTextures(images, addConflictPolicy, importOptions)
+                    },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("Impor", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    // 15. File Picker for Import From TXD Archive
+    if (showImportTxdPicker && onImportFromTxd != null) {
+        FilePickerDialog(
+            title = stringResource(R.string.pick_source_txd_title),
+            mode = PickerMode.PICK_FILE,
+            onDismissRequest = { showImportTxdPicker = false },
+            onFileSelected = { filePath, isShizuku ->
+                showImportTxdPicker = false
+                if (filePath.endsWith(".txd", ignoreCase = true)) {
+                    pendingImportTxdSource = filePath to isShizuku
+                    importTxdConflictPolicy = TextureNames.ConflictPolicy.JUST_ADD
+                }
+            }
+        )
+    }
+
+    // 16. Import From TXD Conflict Policy Dialog (TXD Tool: Just add / Overwrite)
+    if (pendingImportTxdSource != null && onImportFromTxd != null) {
+        val (sourcePath, isSourceShizuku) = pendingImportTxdSource!!
+        FloatingSheet(onDismissRequest = { pendingImportTxdSource = null }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Outlined.FolderZip,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                SheetTitle(stringResource(R.string.import_from_txd))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Importing textures from ${File(sourcePath).name}. Choose how to resolve texture name conflicts with the current TXD:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextureNames.ConflictPolicy.values().forEach { policy ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        RadioButton(
+                            selected = importTxdConflictPolicy == policy,
+                            onClick = { importTxdConflictPolicy = policy }
+                        )
+                        Column {
+                            Text(
+                                text = policy.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = if (policy == TextureNames.ConflictPolicy.JUST_ADD) {
+                                    "Tetap ditambahkan, nama diberi akhiran _1, _2, …"
+                                } else {
+                                    "Overwrite existing textures with imported ones"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = { pendingImportTxdSource = null }) {
+                    Text("Cancel")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        val src = pendingImportTxdSource ?: return@Button
+                        pendingImportTxdSource = null
+                        onImportFromTxd(src.first, src.second, importTxdConflictPolicy)
                     },
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(

@@ -1217,6 +1217,140 @@ pub fn add_in_file(
     Ok((added, overwritten))
 }
 
+/// Imports textures directly from another TXD archive file into `dest_path`.
+/// Returns (added, overwritten, total).
+pub fn import_from_txd_file(
+    dest_path: &std::path::Path,
+    source_path: &std::path::Path,
+    policy: ConflictPolicy,
+) -> Result<(usize, usize, usize), String> {
+    let source_txd = parse_file(source_path)?;
+    if source_txd.textures.is_empty() {
+        return Ok((0, 0, 0));
+    }
+    let mut dest_txd = parse_file(dest_path)?;
+    let mut added = 0usize;
+    let mut overwritten = 0usize;
+
+    for src_entry in source_txd.textures {
+        let desired = &src_entry.name;
+        let existing = dest_txd
+            .textures
+            .iter()
+            .position(|e| e.name.eq_ignore_ascii_case(desired));
+
+        match existing {
+            Some(idx) if policy == ConflictPolicy::Overwrite => {
+                dest_txd.textures[idx] = src_entry;
+                overwritten += 1;
+            }
+            Some(_) => {
+                let all_names: Vec<String> = dest_txd.textures.iter().map(|e| e.name.clone()).collect();
+                let unique = unique_name(&all_names, desired);
+                let mut new_entry = src_entry;
+                new_entry.name = unique;
+                dest_txd.textures.push(new_entry);
+                added += 1;
+            }
+            None => {
+                dest_txd.textures.push(src_entry);
+                added += 1;
+            }
+        }
+    }
+
+    if added + overwritten > 0 {
+        check_entry_count(dest_txd.textures.len())?;
+        let bytes = build_to_bytes(&dest_txd.textures, dest_txd.rw_version);
+        crate::fsutil::write_atomic(dest_path, &bytes).map_err(|e| e.to_string())?;
+    }
+
+    let total = dest_txd.textures.len();
+    Ok((added, overwritten, total))
+}
+
+/// Deletes textures at the given indices and rewrites the file in place.
+pub fn delete_in_file(
+    path: &std::path::Path,
+    indices: &[usize],
+) -> Result<usize, String> {
+    if indices.is_empty() {
+        return Ok(0);
+    }
+    let mut txd = parse_file(path)?;
+    let mut to_remove = indices.to_vec();
+    to_remove.sort_unstable();
+    to_remove.dedup();
+
+    for &idx in to_remove.iter().rev() {
+        if idx >= txd.textures.len() {
+            return Err("Indeks tekstur di luar jangkauan".to_string());
+        }
+        txd.textures.remove(idx);
+    }
+
+    let bytes = build_to_bytes(&txd.textures, txd.rw_version);
+    crate::fsutil::write_atomic(path, &bytes).map_err(|e| e.to_string())?;
+    Ok(to_remove.len())
+}
+
+/// Renames a texture at the given index and rewrites the file in place.
+pub fn rename_in_file(
+    path: &std::path::Path,
+    index: usize,
+    new_name: &str,
+) -> Result<(), String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("Nama tekstur tidak boleh kosong".to_string());
+    }
+    if trimmed.len() > 31 {
+        return Err("Nama tekstur melebihi batas 31 karakter".to_string());
+    }
+
+    let mut txd = parse_file(path)?;
+    if index >= txd.textures.len() {
+        return Err("Indeks tekstur di luar jangkauan".to_string());
+    }
+
+    // Check duplicate name within the same dictionary
+    for (i, tex) in txd.textures.iter().enumerate() {
+        if i != index && tex.name.eq_ignore_ascii_case(trimmed) {
+            return Err(format!("Tekstur dengan nama '{}' sudah ada", trimmed));
+        }
+    }
+
+    txd.textures[index].name = trimmed.to_string();
+    let bytes = build_to_bytes(&txd.textures, txd.rw_version);
+    crate::fsutil::write_atomic(path, &bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Updates texture properties (filter flags and mask/alpha name) at [index] and rewrites the file in place.
+pub fn update_properties_in_file(
+    path: &std::path::Path,
+    index: usize,
+    mask_name: &str,
+    filter_flags: u32,
+) -> Result<(), String> {
+    let trimmed_mask = mask_name.trim();
+    if trimmed_mask.len() > 31 {
+        return Err("Nama mask melebihi batas 31 karakter".to_string());
+    }
+
+    let mut txd = parse_file(path)?;
+    if index >= txd.textures.len() {
+        return Err("Indeks tekstur di luar jangkauan".to_string());
+    }
+
+    txd.textures[index].mask_name = trimmed_mask.to_string();
+    txd.textures[index].filter_flags = filter_flags;
+
+    let bytes = build_to_bytes(&txd.textures, txd.rw_version);
+    crate::fsutil::write_atomic(path, &bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Creates a new empty TXD dictionary file on disk.
 /// Default rw_version is RW_VERSION_SA (0x1803FFFF) if 0 passed.
 pub fn create_empty_file(path: &std::path::Path, rw_version: u32) -> Result<(), String> {
@@ -1593,4 +1727,103 @@ mod tests {
         assert_eq!(after.textures.len(), MAX_TXD_ENTRIES);
         std::fs::remove_file(&path).ok();
     }
+}
+
+#[test]
+fn test_delete_and_rename_in_file() {
+    let path = std::env::temp_dir().join("test_delete_rename.txd");
+    let _ = std::fs::remove_file(&path);
+    create_empty_file(&path, RW_VERSION_SA).unwrap();
+
+    let opt = ImportOptions::default();
+    let px = vec![0xFF0000FF; 4 * 4];
+    let images = vec![(px.clone(), 4, 4), (px.clone(), 4, 4), (px.clone(), 4, 4)];
+    let names = vec!["tex1".to_string(), "tex2".to_string(), "tex3".to_string()];
+    add_in_file(&path, &names, &images, ConflictPolicy::JustAdd, &opt).unwrap();
+
+    let parsed = parse_file(&path).unwrap();
+    assert_eq!(parsed.textures.len(), 3);
+
+    // Test rename
+    rename_in_file(&path, 1, "tex2_renamed").unwrap();
+    let parsed2 = parse_file(&path).unwrap();
+    assert_eq!(parsed2.textures[1].name, "tex2_renamed");
+
+    // Test duplicate rename fails
+    assert!(rename_in_file(&path, 1, "tex1").is_err());
+
+    // Test delete
+    let deleted = delete_in_file(&path, &[1]).unwrap();
+    assert_eq!(deleted, 1);
+    let parsed3 = parse_file(&path).unwrap();
+    assert_eq!(parsed3.textures.len(), 2);
+    assert_eq!(parsed3.textures[0].name, "tex1");
+    assert_eq!(parsed3.textures[1].name, "tex3");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_update_properties_in_file() {
+    let path = std::env::temp_dir().join("test_update_props.txd");
+    let _ = std::fs::remove_file(&path);
+    create_empty_file(&path, RW_VERSION_SA).unwrap();
+
+    let opt = ImportOptions::default();
+    let px = vec![0xFF0000FF; 4 * 4];
+    let images = vec![(px, 4, 4)];
+    let names = vec!["prop_tex".to_string()];
+    add_in_file(&path, &names, &images, ConflictPolicy::JustAdd, &opt).unwrap();
+
+    let parsed = parse_file(&path).unwrap();
+    assert_eq!(parsed.textures[0].mask_name, "");
+
+    update_properties_in_file(&path, 0, "prop_mask", 0x1103).unwrap();
+    let parsed2 = parse_file(&path).unwrap();
+    assert_eq!(parsed2.textures[0].mask_name, "prop_mask");
+    assert_eq!(parsed2.textures[0].filter_flags, 0x1103);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_import_from_txd_file() {
+    let src_path = std::env::temp_dir().join("test_src.txd");
+    let dst_path = std::env::temp_dir().join("test_dst.txd");
+    let _ = std::fs::remove_file(&src_path);
+    let _ = std::fs::remove_file(&dst_path);
+
+    create_empty_file(&src_path, RW_VERSION_SA).unwrap();
+    create_empty_file(&dst_path, RW_VERSION_SA).unwrap();
+
+    let opt = ImportOptions::default();
+    let px = vec![0xFF0000FF; 4 * 4];
+    let src_imgs = vec![(px.clone(), 4, 4), (px.clone(), 4, 4)];
+    let src_names = vec!["shared".to_string(), "unique_src".to_string()];
+    add_in_file(&src_path, &src_names, &src_imgs, ConflictPolicy::JustAdd, &opt).unwrap();
+
+    let dst_imgs = vec![(px.clone(), 4, 4)];
+    let dst_names = vec!["shared".to_string()];
+    add_in_file(&dst_path, &dst_names, &dst_imgs, ConflictPolicy::JustAdd, &opt).unwrap();
+
+    // 1. JustAdd policy: "shared" should become "shared_1"
+    let (added, overw, total) = import_from_txd_file(&dst_path, &src_path, ConflictPolicy::JustAdd).unwrap();
+    assert_eq!(added, 2);
+    assert_eq!(overw, 0);
+    assert_eq!(total, 3);
+
+    let parsed = parse_file(&dst_path).unwrap();
+    assert_eq!(parsed.textures.len(), 3);
+    assert_eq!(parsed.textures[0].name, "shared");
+    assert_eq!(parsed.textures[1].name, "shared_1");
+    assert_eq!(parsed.textures[2].name, "unique_src");
+
+    // 2. Overwrite policy:
+    let (added2, overw2, total2) = import_from_txd_file(&dst_path, &src_path, ConflictPolicy::Overwrite).unwrap();
+    assert_eq!(overw2, 2); // "shared" and "unique_src" exist
+    assert_eq!(added2, 0);
+    assert_eq!(total2, 3);
+
+    let _ = std::fs::remove_file(&src_path);
+    let _ = std::fs::remove_file(&dst_path);
 }

@@ -152,6 +152,9 @@ class TxdEditorActivity : ComponentActivity() {
                             errorMessage = uiState.errorMessage,
                             hasUnsavedChanges = uiState.hasUnsavedChanges,
                             activeProcess = if (isFileBusy) currentProcess else null,
+                            onSaveTxd = {
+                                viewModel.saveTxd()
+                            },
                             onClose = {
                                 ActiveSessionManager.setTxdClosed()
                                 finish()
@@ -173,6 +176,18 @@ class TxdEditorActivity : ComponentActivity() {
                             },
                             onAddTextures = { images, policy, options ->
                                 viewModel.addTextures(this@TxdEditorActivity, images, policy, options)
+                            },
+                            onDeleteTextures = { indices ->
+                                viewModel.deleteTextures(indices)
+                            },
+                            onRenameTexture = { index, newName ->
+                                viewModel.renameTexture(index, newName)
+                            },
+                            onUpdateProperties = { index, maskName, filterFlags ->
+                                viewModel.updateProperties(index, maskName, filterFlags)
+                            },
+                            onImportFromTxd = { sourcePath, isSourceShizuku, policy ->
+                                viewModel.importFromTxd(this@TxdEditorActivity, sourcePath, isSourceShizuku, policy)
                             },
                             onClearMessages = {
                                 viewModel.clearMessages()

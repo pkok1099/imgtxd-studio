@@ -13,6 +13,7 @@
     <string name="add">Add File</string>
     <string name="add_new_texture">Add New Texture</string>
     <string name="add_new_texture_desc">Import images as new textures into this TXD</string>
+    <string name="pick_source_txd_title">Select Source TXD Archive</string>
     <string name="all_files_access_req_desc">Android needs storage permission to modify game files in place.</string>
     <string name="all_files_access_req_title">All Files Access Required</string>
     <string name="allocation_mb">Allocation: %1 MB</string>
@@ -508,9 +509,15 @@ Folder: %6</string>
     <string name="txd_limit_max_size">Limit maximum size</string>
     <string name="txd_loading_textures">Loading textures...</string>
     <string name="txd_maker_create_and_open">Create &amp; Open</string>
-    <string name="txd_maker_dialog_desc">Enter the new TXD file name. The file will be created in cache/documents folder and automatically opened in TXD Editor.</string>
+    <string name="txd_maker_dialog_desc">Create a new empty TXD archive from scratch. Choose a destination folder and file name.</string>
     <string name="txd_maker_dialog_title">TXD Maker - Create New TXD</string>
     <string name="txd_maker_file_name_label">File Name (e.g. new_textures.txd)</string>
+    <string name="txd_maker_target_folder_label">Save Location</string>
+    <string name="txd_maker_change_folder">Change</string>
+    <string name="txd_maker_empty_cta_title">Empty TXD Archive</string>
+    <string name="txd_maker_empty_cta_desc">This TXD is empty. Add your first textures or import from images / other TXDs.</string>
+    <string name="txd_maker_empty_cta_add">Add Textures</string>
+    <string name="txd_maker_empty_cta_import_txd">From TXD Archive</string>
     <string name="txd_mod_image">Mod Image</string>
     <string name="txd_name_collision_desc">%1$d image names collide with existing textures in this TXD. Select resolution policy:</string>
     <string name="txd_no_matching_texture_desc">No image filenames match any texture currently in this TXD.</string>
@@ -555,4 +562,21 @@ Folder: %6</string>
     <string name="worker_notif_failed">Operation Failed</string>
     <string name="worker_notif_item_progress">Item %1$d/%2$d (%3$d%%)</string>
     <string name="worker_notif_processing">Processing files...</string>
+    <string name="txd_delete_texture_title">Delete Texture</string>
+    <string name="txd_delete_texture_msg">Are you sure you want to delete \'%1$s\' from this TXD?</string>
+    <string name="txd_delete_selected_title">Delete Selected Textures</string>
+    <string name="txd_delete_selected_msg">Are you sure you want to delete %1$d selected textures from this TXD?</string>
+    <string name="txd_rename_texture_title">Rename Texture</string>
+    <string name="txd_rename_dff_warning">Note: If 3D models (.dff) reference this texture name, they must also be updated or the model will render white/missing textures.</string>
+    <string name="txd_rename_input_label">Texture Name (Max 31 chars)</string>
+    <string name="txd_edit_properties_title">Edit Texture Properties</string>
+    <string name="txd_mask_name_label">Mask / Alpha Name (Max 31 chars)</string>
+    <string name="txd_filter_mode_label">Filtering Mode</string>
+    <string name="txd_wrap_u_label">Wrap U (Horizontal)</string>
+    <string name="txd_wrap_v_label">Wrap V (Vertical)</string>
+    <string name="txd_filter_nearest">Nearest (No Filtering)</string>
+    <string name="txd_filter_linear">Linear (Bilinear)</string>
+    <string name="txd_filter_mip_nearest">Mipmap Nearest</string>
+    <string name="txd_filter_mip_linear">Mipmap Linear (Trilinear)</string>
+    <string name="txd_properties_btn">Properties</string>
 </resources>

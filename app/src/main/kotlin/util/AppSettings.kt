@@ -35,6 +35,19 @@ enum class TxdViewMode(val title: String) {
     LARGE("Gambar Besar")
 }
 
+enum class TxdBgColor(val label: String, val argb: Long) {
+    DEFAULT("Theme", 0L),
+    BLACK("Black", 0xFF000000),
+    WHITE("White", 0xFFFFFFFF),
+    GRAY("Gray", 0xFF808080),
+    RED("Red", 0xFFFF0000),
+    GREEN("Green", 0xFF00FF00),
+    BLUE("Blue", 0xFF0000FF),
+    YELLOW("Yellow", 0xFFFFFF00),
+    CYAN("Cyan", 0xFF00FFFF),
+    MAGENTA("Magenta", 0xFFFF00FF)
+}
+
 data class RecentFileItem(
     val path: String,
     val name: String,
@@ -49,6 +62,7 @@ object AppSettings {
 
     private val KEY_WINDOW_MODE = stringPreferencesKey("window_mode")
     private val KEY_TXD_VIEW_MODE = stringPreferencesKey("txd_view_mode")
+    private val KEY_TXD_BG_COLOR = stringPreferencesKey("txd_bg_color")
     private val KEY_RECENT_FILES = stringPreferencesKey("recent_files_json")
     private val KEY_LAST_FILE_DIR = stringPreferencesKey("picker_last_file_dir")
     private val KEY_LAST_FOLDER_DIR = stringPreferencesKey("picker_last_folder_dir")
@@ -59,6 +73,10 @@ object AppSettings {
 
     @Volatile
     var cachedTxdViewMode: TxdViewMode = TxdViewMode.SMALL
+        private set
+
+    @Volatile
+    var cachedTxdBgColor: TxdBgColor = TxdBgColor.DEFAULT
         private set
 
     @Volatile
@@ -82,6 +100,11 @@ object AppSettings {
         CoroutineScope(Dispatchers.IO).launch {
             getTxdViewModeFlow(context).collect { mode ->
                 cachedTxdViewMode = mode
+            }
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            getTxdBgColorFlow(context).collect { color ->
+                cachedTxdBgColor = color
             }
         }
         CoroutineScope(Dispatchers.IO).launch {
@@ -165,6 +188,24 @@ object AppSettings {
         cachedTxdViewMode = mode
         context.appDataStore.edit { preferences ->
             preferences[KEY_TXD_VIEW_MODE] = mode.name
+        }
+    }
+
+    fun getTxdBgColorFlow(context: Context): Flow<TxdBgColor> {
+        return context.appDataStore.data.map { preferences ->
+            val colorStr = preferences[KEY_TXD_BG_COLOR] ?: TxdBgColor.DEFAULT.name
+            try {
+                TxdBgColor.valueOf(colorStr)
+            } catch (e: Exception) {
+                TxdBgColor.DEFAULT
+            }
+        }
+    }
+
+    suspend fun setTxdBgColor(context: Context, color: TxdBgColor) {
+        cachedTxdBgColor = color
+        context.appDataStore.edit { preferences ->
+            preferences[KEY_TXD_BG_COLOR] = color.name
         }
     }
 

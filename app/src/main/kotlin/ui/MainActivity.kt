@@ -17,6 +17,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,7 +38,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,6 +64,7 @@ import com.onlasdan.studio.ui.framework.ArchiveEntryCard
 import com.onlasdan.studio.ui.framework.ArchiveScreen
 import com.onlasdan.studio.ui.framework.ContextualDockItem
 import com.onlasdan.studio.ui.framework.ContextualPillDock
+import com.onlasdan.studio.ui.framework.rememberPhysicsDockScrollBehavior
 import com.onlasdan.studio.ui.sheets.AboutBottomSheet
 import com.onlasdan.studio.ui.sheets.ImgEntryBottomSheet
 import com.onlasdan.studio.ui.sheets.MoreActionsBottomSheet
@@ -385,6 +391,14 @@ fun MainScreen(
     var showDffInspectPicker by remember { mutableStateOf(false) }
     var showOpenTxdPicker by remember { mutableStateOf(false) }
     var showCreateTxdDialog by remember { mutableStateOf(false) }
+    var createTxdTargetFolder by remember {
+        mutableStateOf(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)?.absolutePath
+                ?: "/sdcard/Download"
+        )
+    }
+    var isCreateTxdFolderShizuku by remember { mutableStateOf(false) }
+    var showCreateTxdFolderPicker by remember { mutableStateOf(false) }
     var imgVerifyReport by remember { mutableStateOf<String?>(null) }
     var showAuditFolderPicker by remember { mutableStateOf(false) }
     var auditReport by remember { mutableStateOf<String?>(null) }
@@ -843,228 +857,262 @@ fun MainScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        when (activeDockTab) {
-            "home" -> {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    HomeScreen(
-                        listState = homeListState,
-                        hasStoragePermission = uiState.hasStoragePermission,
-                        onGrantStorage = {
-                            manageStorageLauncher.launch(StorageHelper.getManageStorageIntent(context))
-                        },
-                        recentFiles = recentFiles,
-                        onOpenImg = {
-                            if (uiState.archive != null) {
-                                activeDockTab = "archive"
-                            } else {
-                                showOpenArchivePicker = true
-                            }
-                        },
-                        onOpenTxdEditor = {
-                            showOpenTxdPicker = true
-                        },
-                        onCreateNewTxd = {
-                            showCreateTxdDialog = true
-                        },
-                        onInspectDff = {
-                            showDffInspectPicker = true
-                        },
-                        onOpenTexdb = {
-                            showTexdbPicker = true
-                        },
-                        onGameAudit = { showAuditFolderPicker = true },
-                        onDataLines = { showDataFilePicker = true },
-                        onFixAudio = { showOswPicker = true },
-                        onExportMultipleTxd = { showMultiTxdPicker = true },
-                        onOpenHistory = { activeDockTab = "history" },
-                        onOpenRecent = { item ->
-                            if (item.type == LauncherFileType.FOLDER) {
-                                openTexdbFolder(item.path, item.isShizuku)
-                            } else {
-                                WindowLauncher.open(
-                                    context = context,
-                                    filePath = item.path,
-                                    fileType = item.type,
-                                    isShizuku = item.isShizuku,
-                                    onSingleWindowAction = {
-                                        if (item.type == LauncherFileType.IMG) {
-                                            viewModel.openArchiveFromPath(context, item.path, item.isShizuku)
-                                            activeDockTab = "archive"
-                                        } else {
-                                            viewModel.openStandaloneTxd(context, item.path, item.isShizuku)
-                                            activeDockTab = "txd"
-                                        }
-                                    }
-                                )
-                            }
-                        }
+        AnimatedContent(
+            targetState = activeDockTab,
+            transitionSpec = {
+                (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                        scaleIn(initialScale = 0.98f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)))
+                    .togetherWith(
+                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                scaleOut(targetScale = 0.98f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
                     )
-
-                    ContextualPillDock(
-                        items = homeDockItems,
-                        modifier = Modifier.align(Alignment.BottomCenter)
-                    )
-                }
-            }
-
-            "history" -> {
-                OperationsHistoryScreen(
-                    dockItems = historyDockItems,
-                    isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
-                    onShizukuClick = {
-                        if (!ShizukuManager.isShizukuAvailable()) {
-                            Toast.makeText(context, "Shizuku service not detected. Open the Shizuku app first.", Toast.LENGTH_LONG).show()
-                        } else if (!ShizukuManager.hasPermission()) {
-                            ShizukuManager.requestPermission()
-                        } else {
-                            Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
-            }
-
-            "settings" -> {
-                SettingsScreen(
-                    dockItems = settingsDockItems,
-                    isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
-                    onShizukuClick = {
-                        if (!ShizukuManager.isShizukuAvailable()) {
-                            Toast.makeText(context, "Shizuku service not detected. Open the Shizuku app first.", Toast.LENGTH_LONG).show()
-                        } else if (!ShizukuManager.hasPermission()) {
-                            ShizukuManager.requestPermission()
-                        } else {
-                            Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
-            }
-
-            "archive" -> {
-                val activeArchiveProcess = if (currentProcess?.targetFile == uiState.archive?.archiveName) currentProcess else null
-
-                ArchiveScreen(
-                    title = uiState.archive?.archiveName ?: stringResource(R.string.img_archive_default_title),
-                    subtitle = if (uiState.archive != null)
-                        stringResource(R.string.archive_subtitle_format, uiState.archive?.version?.name ?: "IMG", uiState.entries.size)
-                    else
-                        stringResource(R.string.no_archive_open),
-                    isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
-                    onShizukuClick = {
-                        if (!ShizukuManager.isShizukuAvailable()) {
-                            Toast.makeText(context, context.getString(R.string.shizuku_not_detected_open_app), Toast.LENGTH_LONG).show()
-                        } else if (!ShizukuManager.hasPermission()) {
-                            ShizukuManager.requestPermission()
-                        } else {
-                            Toast.makeText(context, context.getString(R.string.shizuku_active_toast), Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    items = uiState.displayedEntries,
-                    keyExtractor = { "${it.cleanName}_${it.offsetInSectors}" },
-                    listState = archiveListState,
-                    emptyTitle = stringResource(R.string.archive_empty_title_none),
-                    emptyDescription = stringResource(R.string.archive_empty_desc_manage),
-                    emptyActionLabel = stringResource(R.string.archive_empty_action_open),
-                    onEmptyAction = { showOpenArchivePicker = true },
-                    isSearching = isSearchExpanded,
-                    searchQuery = uiState.searchQuery,
-                    searchPlaceholder = stringResource(R.string.archive_search_placeholder_img),
-                    onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                    onCloseSearch = {
-                        isSearchExpanded = false
-                        viewModel.setSearchQuery("")
-                    },
-                    activeProcess = activeArchiveProcess,
-                    isLoading = uiState.isLoading,
-                    onProcessPillClick = {
-                        activeArchiveProcess?.let { selectedProcessForDetail = it }
-                    },
-                    dockContent = {
-                        ContextualPillDock(
-                            items = if (uiState.isSelecting) archiveSelectionDockItems else archiveStandardDockItems
-                        )
-                    },
-                    itemContent = { entry ->
-                        val isTxd = entry.cleanName.endsWith(".txd", ignoreCase = true)
-                        val icon = when {
-                            entry.cleanName.endsWith(".dff", ignoreCase = true) -> Icons.Outlined.ViewInAr
-                            entry.cleanName.endsWith(".txd", ignoreCase = true) -> Icons.Outlined.Image
-                            entry.cleanName.endsWith(".col", ignoreCase = true) -> Icons.Outlined.Shield
-                            entry.cleanName.endsWith(".ipl", ignoreCase = true) -> Icons.Outlined.Map
-                            else -> Icons.Outlined.Description
-                        }
-                        val sizeKb = entry.sizeInBytes / 1024
-
-                        ArchiveEntryCard(
-                            title = entry.cleanName,
-                            subtitle = stringResource(R.string.img_sector_format, entry.offsetInSectors, entry.sizeInSectors, sizeKb),
-                            icon = icon,
-                            bitmap = null,
-                            isSelected = uiState.selectedEntries.contains(entry),
-                            isSelectionMode = uiState.isSelecting,
-                            onClick = {
-                                if (uiState.isSelecting) {
-                                    viewModel.toggleSelection(entry)
+            },
+            label = "activeDockTabContent"
+        ) { currentTab ->
+            when (currentTab) {
+                "home" -> {
+                    val homeDockScrollBehavior = rememberPhysicsDockScrollBehavior(maxOffsetPx = with(LocalDensity.current) { 150.dp.toPx() })
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(homeDockScrollBehavior.nestedScrollConnection)
+                    ) {
+                        HomeScreen(
+                            listState = homeListState,
+                            hasStoragePermission = uiState.hasStoragePermission,
+                            onGrantStorage = {
+                                manageStorageLauncher.launch(StorageHelper.getManageStorageIntent(context))
+                            },
+                            recentFiles = recentFiles,
+                            onOpenImg = {
+                                if (uiState.archive != null) {
+                                    activeDockTab = "archive"
                                 } else {
-                                    selectedImgEntryForSheet = entry
+                                    showOpenArchivePicker = true
                                 }
                             },
-                            onLongClick = {
-                                viewModel.toggleSelection(entry)
+                            onOpenTxdEditor = {
+                                showOpenTxdPicker = true
+                            },
+                            onCreateNewTxd = {
+                                showCreateTxdDialog = true
+                            },
+                            onInspectDff = {
+                                showDffInspectPicker = true
+                            },
+                            onOpenTexdb = {
+                                showTexdbPicker = true
+                            },
+                            onGameAudit = { showAuditFolderPicker = true },
+                            onDataLines = { showDataFilePicker = true },
+                            onFixAudio = { showOswPicker = true },
+                            onExportMultipleTxd = { showMultiTxdPicker = true },
+                            onOpenHistory = { activeDockTab = "history" },
+                            onOpenRecent = { item ->
+                                if (item.type == LauncherFileType.FOLDER) {
+                                    openTexdbFolder(item.path, item.isShizuku)
+                                } else {
+                                    WindowLauncher.open(
+                                        context = context,
+                                        filePath = item.path,
+                                        fileType = item.type,
+                                        isShizuku = item.isShizuku,
+                                        onSingleWindowAction = {
+                                            if (item.type == LauncherFileType.IMG) {
+                                                viewModel.openArchiveFromPath(context, item.path, item.isShizuku)
+                                                activeDockTab = "archive"
+                                            } else {
+                                                viewModel.openStandaloneTxd(context, item.path, item.isShizuku)
+                                                activeDockTab = "txd"
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         )
-                    },
-                    snackbarHostState = snackbarHostState
-                )
-            }
 
-            "txd" -> {
-                val activeTxdProcess = if (currentProcess?.targetFile == (uiState.activeTxdName ?: "TXD Textures")) currentProcess else null
+                        ContextualPillDock(
+                            items = homeDockItems,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .graphicsLayer {
+                                translationY = homeDockScrollBehavior.offsetPx
+                            }
+                        )
+                    }
+                }
 
-                TxdEditorScreen(
-                    txdName = uiState.activeTxdName ?: "TXD Textures",
-                    textures = uiState.txdEntries,
-                    isLoading = uiState.isTxdLoading,
-                    statusMessage = uiState.statusMessage,
-                    errorMessage = uiState.errorMessage,
-                    hasUnsavedChanges = uiState.hasTxdUnsavedChanges,
-                    activeProcess = activeTxdProcess,
-                    onSaveTxd = {
-                        // In single window mode, TXD saved inside IMG is rebuilt automatically
-                    },
-                    onProcessClick = {
-                        activeTxdProcess?.let { selectedProcessForDetail = it }
-                    },
-                    onClose = {
-                        viewModel.closeTxdViewer()
-                        ActiveSessionManager.setTxdClosed()
-                        activeDockTab = if (uiState.archive != null) "archive" else "home"
-                    },
-                    onExportSingle = { entry, destDir ->
-                        viewModel.exportSingleTexture(entry, destDir)
-                    },
-                    onExportAll = { destDir ->
-                        viewModel.exportAllTextures(destDir)
-                    },
-                    onExportSelected = { entries, destDir ->
-                        viewModel.exportSelectedTextures(entries, destDir)
-                    },
-                    onReplaceTexture = { entry, imagePath, isShizuku, options ->
-                        viewModel.replaceTexture(context, entry, imagePath, isShizuku, options)
-                    },
-                    onAutoReplace = { matches, isShizuku, options ->
-                        viewModel.autoReplaceTextures(context, matches, isShizuku, options)
-                    },
-                    onAddTextures = { images, policy, options ->
-                        viewModel.addTextures(context, images, policy, options)
-                    },
-                    onClearMessages = { viewModel.clearMessages() },
-                    showDock = true,
-                    onNavigateHome = { activeDockTab = "home" },
-                    onOpenImg = { activeDockTab = "archive" },
-                    onOpenWindowMode = { showSettingsSheet = true },
-                    onOpenSettings = { showSettingsSheet = true },
-                    onOpenAbout = { showAboutSheet = true }
-                )
+                "history" -> {
+                    OperationsHistoryScreen(
+                        dockItems = historyDockItems,
+                        isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
+                        onShizukuClick = {
+                            if (!ShizukuManager.isShizukuAvailable()) {
+                                Toast.makeText(context, "Shizuku service not detected. Open the Shizuku app first.", Toast.LENGTH_LONG).show()
+                            } else if (!ShizukuManager.hasPermission()) {
+                                ShizukuManager.requestPermission()
+                            } else {
+                                Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+
+                "settings" -> {
+                    SettingsScreen(
+                        dockItems = settingsDockItems,
+                        isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
+                        onShizukuClick = {
+                            if (!ShizukuManager.isShizukuAvailable()) {
+                                Toast.makeText(context, "Shizuku service not detected. Open the Shizuku app first.", Toast.LENGTH_LONG).show()
+                            } else if (!ShizukuManager.hasPermission()) {
+                                ShizukuManager.requestPermission()
+                            } else {
+                                Toast.makeText(context, "Shizuku active: full Android/data access available.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+
+                "archive" -> {
+                    val activeArchiveProcess = if (currentProcess?.targetFile == uiState.archive?.archiveName) currentProcess else null
+
+                    ArchiveScreen(
+                        title = uiState.archive?.archiveName ?: stringResource(R.string.img_archive_default_title),
+                        subtitle = if (uiState.archive != null)
+                            stringResource(R.string.archive_subtitle_format, uiState.archive?.version?.name ?: "IMG", uiState.entries.size)
+                        else
+                            stringResource(R.string.no_archive_open),
+                        isShizukuActive = ShizukuManager.isShizukuAvailable() && ShizukuManager.hasPermission(),
+                        onShizukuClick = {
+                            if (!ShizukuManager.isShizukuAvailable()) {
+                                Toast.makeText(context, context.getString(R.string.shizuku_not_detected_open_app), Toast.LENGTH_LONG).show()
+                            } else if (!ShizukuManager.hasPermission()) {
+                                ShizukuManager.requestPermission()
+                            } else {
+                                Toast.makeText(context, context.getString(R.string.shizuku_active_toast), Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        items = uiState.displayedEntries,
+                        keyExtractor = { "${it.cleanName}_${it.offsetInSectors}" },
+                        listState = archiveListState,
+                        emptyTitle = stringResource(R.string.archive_empty_title_none),
+                        emptyDescription = stringResource(R.string.archive_empty_desc_manage),
+                        emptyActionLabel = stringResource(R.string.archive_empty_action_open),
+                        onEmptyAction = { showOpenArchivePicker = true },
+                        isSearching = isSearchExpanded,
+                        searchQuery = uiState.searchQuery,
+                        searchPlaceholder = stringResource(R.string.archive_search_placeholder_img),
+                        onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                        onCloseSearch = {
+                            isSearchExpanded = false
+                            viewModel.setSearchQuery("")
+                        },
+                        activeProcess = activeArchiveProcess,
+                        isLoading = uiState.isLoading,
+                        onProcessPillClick = {
+                            activeArchiveProcess?.let { selectedProcessForDetail = it }
+                        },
+                        dockContent = {
+                            ContextualPillDock(
+                                items = if (uiState.isSelecting) archiveSelectionDockItems else archiveStandardDockItems
+                            )
+                        },
+                        itemContent = { entry ->
+                            val isTxd = entry.cleanName.endsWith(".txd", ignoreCase = true)
+                            val icon = when {
+                                entry.cleanName.endsWith(".dff", ignoreCase = true) -> Icons.Outlined.ViewInAr
+                                entry.cleanName.endsWith(".txd", ignoreCase = true) -> Icons.Outlined.Image
+                                entry.cleanName.endsWith(".col", ignoreCase = true) -> Icons.Outlined.Shield
+                                entry.cleanName.endsWith(".ipl", ignoreCase = true) -> Icons.Outlined.Map
+                                else -> Icons.Outlined.Description
+                            }
+                            val sizeKb = entry.sizeInBytes / 1024
+
+                            ArchiveEntryCard(
+                                title = entry.cleanName,
+                                subtitle = stringResource(R.string.img_sector_format, entry.offsetInSectors, entry.sizeInSectors, sizeKb),
+                                icon = icon,
+                                bitmap = null,
+                                isSelected = uiState.selectedEntries.contains(entry),
+                                isSelectionMode = uiState.isSelecting,
+                                onClick = {
+                                    if (uiState.isSelecting) {
+                                        viewModel.toggleSelection(entry)
+                                    } else {
+                                        selectedImgEntryForSheet = entry
+                                    }
+                                },
+                                onLongClick = {
+                                    viewModel.toggleSelection(entry)
+                                }
+                            )
+                        },
+                        snackbarHostState = snackbarHostState
+                    )
+                }
+
+                "txd" -> {
+                    val activeTxdProcess = if (currentProcess?.targetFile == (uiState.activeTxdName ?: "TXD Textures")) currentProcess else null
+
+                    TxdEditorScreen(
+                        txdName = uiState.activeTxdName ?: "TXD Textures",
+                        textures = uiState.txdEntries,
+                        isLoading = uiState.isTxdLoading,
+                        statusMessage = uiState.statusMessage,
+                        errorMessage = uiState.errorMessage,
+                        hasUnsavedChanges = uiState.hasTxdUnsavedChanges,
+                        activeProcess = activeTxdProcess,
+                        onSaveTxd = {
+                            viewModel.saveActiveTxd()
+                        },
+                        onProcessClick = {
+                            activeTxdProcess?.let { selectedProcessForDetail = it }
+                        },
+                        onClose = {
+                            viewModel.closeTxdViewer()
+                            ActiveSessionManager.setTxdClosed()
+                            activeDockTab = if (uiState.archive != null) "archive" else "home"
+                        },
+                        onExportSingle = { entry, destDir ->
+                            viewModel.exportSingleTexture(entry, destDir)
+                        },
+                        onExportAll = { destDir ->
+                            viewModel.exportAllTextures(destDir)
+                        },
+                        onExportSelected = { entries, destDir ->
+                            viewModel.exportSelectedTextures(entries, destDir)
+                        },
+                        onReplaceTexture = { entry, imagePath, isShizuku, options ->
+                            viewModel.replaceTexture(context, entry, imagePath, isShizuku, options)
+                        },
+                        onAutoReplace = { matches, isShizuku, options ->
+                            viewModel.autoReplaceTextures(context, matches, isShizuku, options)
+                        },
+                        onAddTextures = { images, policy, options ->
+                            viewModel.addTextures(context, images, policy, options)
+                        },
+                        onDeleteTextures = { indices ->
+                            viewModel.deleteTextures(indices)
+                        },
+                        onRenameTexture = { index, newName ->
+                            viewModel.renameTexture(index, newName)
+                        },
+                        onUpdateProperties = { index, maskName, filterFlags ->
+                            viewModel.updateProperties(index, maskName, filterFlags)
+                        },
+                        onImportFromTxd = { sourcePath, isSourceShizuku, policy ->
+                            viewModel.importFromTxd(context, sourcePath, isSourceShizuku, policy)
+                        },
+                        onClearMessages = { viewModel.clearMessages() },
+                        showDock = true,
+                        onNavigateHome = { activeDockTab = "home" },
+                        onOpenImg = { activeDockTab = "archive" },
+                        onOpenWindowMode = { showSettingsSheet = true },
+                        onOpenSettings = { showSettingsSheet = true },
+                        onOpenAbout = { showAboutSheet = true }
+                    )
+                }
             }
         }
     }
@@ -1315,6 +1363,34 @@ fun MainScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    // Folder tujuan penyimpanan TXD baru
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.txd_maker_target_folder_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = createTxdTargetFolder,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = { showCreateTxdFolderPicker = true },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Text(stringResource(R.string.txd_maker_change_folder), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -1327,13 +1403,15 @@ fun MainScreen(
                         }
                         if (cleanName.isNotBlank() && cleanName != ".txd") {
                             showCreateTxdDialog = false
-                            val targetFile = File(context.cacheDir, cleanName)
+                            val destFolder = File(createTxdTargetFolder)
+                            destFolder.mkdirs()
+                            val targetFile = File(destFolder, cleanName)
                             val res = NativeCore.txdCreate(targetFile.absolutePath, selectedVersion)
                             if (res != null && res.startsWith("OK")) {
                                 Toast.makeText(context, context.getString(R.string.txd_created_toast, cleanName), Toast.LENGTH_SHORT).show()
                                 val intent = Intent(context, TxdEditorActivity::class.java).apply {
                                     putExtra(WindowLauncher.EXTRA_FILE_PATH, targetFile.absolutePath)
-                                    putExtra("is_shizuku", false)
+                                    putExtra("is_shizuku", isCreateTxdFolderShizuku)
                                 }
                                 context.startActivity(intent)
                             } else {
@@ -1350,6 +1428,19 @@ fun MainScreen(
                 TextButton(onClick = { showCreateTxdDialog = false }) {
                     Text(stringResource(R.string.cancel_indonesian))
                 }
+            }
+        )
+    }
+
+    if (showCreateTxdFolderPicker) {
+        FilePickerDialog(
+            title = stringResource(R.string.extract_all_title),
+            mode = PickerMode.SELECT_FOLDER,
+            onDismissRequest = { showCreateTxdFolderPicker = false },
+            onFileSelected = { path, isShizuku ->
+                showCreateTxdFolderPicker = false
+                createTxdTargetFolder = path
+                isCreateTxdFolderShizuku = isShizuku
             }
         )
     }

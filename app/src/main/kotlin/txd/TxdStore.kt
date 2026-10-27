@@ -144,6 +144,86 @@ object TxdStore {
         )
     }
 
+    /**
+     * Deletes textures at the given indices and rewrites the TXD file in place.
+     */
+    @Throws(IOException::class)
+    fun deleteTextures(file: File, indices: List<Int>): Int {
+        AppIntegrity.verifyOrThrow()
+        if (indices.isEmpty()) return 0
+        val result = requireOk(
+            NativeCore.txdDeleteTextures(
+                path = file.absolutePath,
+                indices = indices.toIntArray()
+            )
+        )
+        // result: "deleted=N"
+        val countStr = result.removePrefix("OK ").removePrefix("deleted=")
+        return countStr.toIntOrNull() ?: indices.size
+    }
+
+    /**
+     * Renames a texture at [index] inside the TXD file to [newName].
+     */
+    @Throws(IOException::class)
+    fun renameTexture(file: File, index: Int, newName: String) {
+        AppIntegrity.verifyOrThrow()
+        requireOk(
+            NativeCore.txdRenameTexture(
+                path = file.absolutePath,
+                index = index,
+                newName = newName
+            )
+        )
+    }
+
+    /**
+     * Updates texture properties (maskName, filterFlags) at [index] inside the TXD file.
+     */
+    @Throws(IOException::class)
+    fun updateProperties(file: File, index: Int, maskName: String, filterFlags: Int) {
+        AppIntegrity.verifyOrThrow()
+        requireOk(
+            NativeCore.txdUpdateProperties(
+                path = file.absolutePath,
+                index = index,
+                maskName = maskName,
+                filterFlags = filterFlags
+            )
+        )
+    }
+
+    /**
+     * Imports textures directly from another TXD file [sourceFile] into [destFile].
+     */
+    @Throws(IOException::class)
+    fun importFromTxd(
+        destFile: File,
+        sourceFile: File,
+        policy: TextureNames.ConflictPolicy
+    ): AddResult {
+        AppIntegrity.verifyOrThrow()
+        val result = requireOk(
+            NativeCore.txdImportFromTxd(
+                destPath = destFile.absolutePath,
+                sourcePath = sourceFile.absolutePath,
+                policy = if (policy == TextureNames.ConflictPolicy.OVERWRITE) 1 else 0
+            )
+        )
+        // result: "added=A overwritten=B total=T"
+        val fields = result.removePrefix("OK ").split(' ')
+            .mapNotNull {
+                val kv = it.split('=', limit = 2)
+                if (kv.size == 2) kv[0] to (kv[1].toIntOrNull() ?: 0) else null
+            }
+            .toMap()
+        return AddResult(
+            added = fields["added"] ?: 0,
+            overwritten = fields["overwritten"] ?: 0,
+            total = fields["total"] ?: 0
+        )
+    }
+
     @Throws(IOException::class)
     private fun requireOk(result: String?): String {
         when {
