@@ -1,5 +1,5 @@
 //! ide_check — verifikasi parser indeks IDE (rust-core/src/ide.rs) atas
-//! pohon data/ dataset GTA asli: mencetak jumlah berkas/pasangan terindeks
+//! pohon data/ dataset game asli: mencetak jumlah berkas/pasangan terindeks
 //! dan hasil lookup nama-nama jangkar yang diberikan sebagai argumen.
 //!
 //! Pemakaian:

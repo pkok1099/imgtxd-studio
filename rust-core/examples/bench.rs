@@ -143,7 +143,7 @@ fn main() {
     // ---- 2b. small-texture batch (below every internal band threshold) -----
     // 64x64 = 256 blocks: DXT/ETC1 encode and resample all run inline serial,
     // so per-image parallelism is the ONLY parallelism — this is the common
-    // GTA texture size on the 8-core phones this app targets.
+    // game texture size on the 8-core phones this app targets.
     let mut small: Vec<(String, Vec<u8>)> = Vec::new();
     for i in 0..96 {
         small.push((

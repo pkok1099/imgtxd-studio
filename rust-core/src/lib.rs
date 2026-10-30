@@ -526,7 +526,7 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeImgVerify(
         .unwrap_or(std::ptr::null_mut())
 }
 
-/// Whole-game texture audit over a GTA files/ folder. "OK\n<report>".
+/// Whole-game texture audit over a game files/ folder. "OK\n<report>".
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeGameAudit(
     mut env: JNIEnv,
@@ -1265,7 +1265,7 @@ pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeTexdbExtra
     report_string(&mut env, result)
 }
 
-/// Regenerates the `.idx` next to a GTA SA `.osw` audio archive.
+/// Regenerates the `.idx` next to a SA `.osw` audio archive.
 #[no_mangle]
 pub extern "system" fn Java_com_onlasdan_studio_core_NativeCore_nativeAudioFixOsw(
     mut env: JNIEnv,

@@ -1,4 +1,4 @@
-//! Profiling of the app's real read paths against actual GTA data
+//! Profiling of the app's real read paths against actual game data
 //! (measurement only; not production code). Everything is deterministic:
 //! sampling uses xorshift32, output integrity uses FNV-1a 64 checksums.
 //!

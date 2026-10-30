@@ -43,7 +43,7 @@ class ImgArchive private constructor(
         }
 
         /**
-         * Opens a GTA .img archive via the Rust engine. Auto-detects VER1 vs
+         * Opens a .img archive via the Rust engine. Auto-detects VER1 vs
          * VER2; for VER1 the corresponding .dir file is resolved by the engine
          * when not provided.
          */

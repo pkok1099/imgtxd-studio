@@ -1,7 +1,7 @@
 package com.onlasdan.studio.core
 
 /**
- * Represents a single file entry in a GTA .img archive.
+ * Represents a single file entry in a .img archive.
  *
  * @property offsetInSectors Sector offset in the .img archive (each sector is 2048 bytes).
  * @property sizeInSectors Size of the entry in 2048-byte sectors.

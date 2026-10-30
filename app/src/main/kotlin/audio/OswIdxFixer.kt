@@ -6,7 +6,7 @@ import java.io.IOException
 
 /**
  * SA Audio Fixer (IMG Tool parity item I13): regenerates the `.idx` index
- * file for a GTA SA Android audio archive (`.osw`).
+ * file for a SA Android audio archive (`.osw`).
  *
  * Facade over the Rust engine (`rust-core/src/audio.rs`) since the
  * full-Rust migration (2026-10-23): ZIP central-directory parsing, the

@@ -88,13 +88,13 @@ jobs:
       - name: Prepare Artifact
         run: |
           mkdir -p output
-          cp app/build/outputs/apk/release/app-release.apk output/GTA_Img_Studio.apk
+          cp app/build/outputs/apk/release/app-release.apk output/ImgTxdStudio.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GTA_Img_Studio
-          path: output/GTA_Img_Studio.apk
+          name: ImgTxdStudio
+          path: output/ImgTxdStudio.apk
           if-no-files-found: error
 
   attach-release:
@@ -111,7 +111,7 @@ jobs:
       - name: Download Built APK Artifact
         uses: actions/download-artifact@v4
         with:
-          name: GTA_Img_Studio
+          name: ImgTxdStudio
           path: release-apk
 
       - name: Attach APK to Release
@@ -119,5 +119,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.release.tag_name || inputs.release_tag }}"
-          echo "Attaching GTA_Img_Studio.apk to release $TAG in ${{ github.repository }}"
-          gh release upload "$TAG" release-apk/GTA_Img_Studio.apk --clobber --repo "${{ github.repository }}"
+          echo "Attaching ImgTxdStudio.apk to release $TAG in ${{ github.repository }}"
+          gh release upload "$TAG" release-apk/ImgTxdStudio.apk --clobber --repo "${{ github.repository }}"

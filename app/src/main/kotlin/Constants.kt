@@ -41,9 +41,9 @@ object Constants {
         const val NAME_SIZE = 24
 
         // RenderWare version identifiers
-        const val VERSION_SA = 0x1803FFFF  // RenderWare 3.6.0.3 (GTA San Andreas)
-        const val VERSION_VC = 0x0C02FFFF  // RenderWare 3.4.0.3 (GTA Vice City)
-        const val VERSION_III = 0x0800FFFF // RenderWare 3.3.0.2 (GTA III)
+        const val VERSION_SA = 0x1803FFFF  // RenderWare 3.6.0.3 (San Andreas)
+        const val VERSION_VC = 0x0C02FFFF  // RenderWare 3.4.0.3 (Vice City)
+        const val VERSION_III = 0x0800FFFF // RenderWare 3.3.0.2 (III)
     }
 
     /**

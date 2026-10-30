@@ -1,6 +1,6 @@
 //! game_check — validator artefak ImgTxd Studio memakai aturan loader
-//! ASLI GTA SA Android 2.00 (libGTASA.so), sesuai
-//! ~/workspace/gta-re/GAME-LOADER-RULES.md (B1..B6, perilaku lunak (c),
+//! ASLI SA Android 2.00 (libGTASA.so), sesuai
+//! the local game-loader rules doc (B1..B6, perilaku lunak (c),
 //! dan daftar "tidak dicek" (d)). Sengaja BUKAN aturan TXD Tool:
 //! toc[0] mismatch = fallback game (bukan gagal), kegagalan .tmb ditelan
 //! game (WARN), png=/img= diabaikan, encoding tak dikenal = WARN.

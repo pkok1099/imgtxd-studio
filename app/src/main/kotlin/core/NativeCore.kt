@@ -524,7 +524,7 @@ object NativeCore {
         null
     }
 
-    /** Whole-game texture audit (missing/unused) over a GTA files/ folder. */
+    /** Whole-game texture audit (missing/unused) over a game files/ folder. */
     fun gameAudit(filesDir: String): String? = if (isAvailable) {
         try {
             nativeGameAudit(filesDir)

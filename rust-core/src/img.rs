@@ -1,4 +1,4 @@
-//! GTA .img archive (VER1 + VER2) — faithful port of the Kotlin `ImgArchive`
+//! .img archive (VER1 + VER2) — faithful port of the Kotlin `ImgArchive`
 //! and `ImgEntry`.
 //!
 //! Layout: 2048-byte sectors; 32-byte directory entries

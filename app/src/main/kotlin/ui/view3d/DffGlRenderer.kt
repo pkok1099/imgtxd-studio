@@ -123,7 +123,7 @@ class DffGlRenderer : GLSurfaceView.Renderer {
         // Orbit rotation
         Matrix.rotateM(mMatrix, 0, rotX, 1f, 0f, 0f)
         Matrix.rotateM(mMatrix, 0, rotY, 0f, 1f, 0f)
-        // RenderWare GTA coordinates typically have Z up. Rotate so Z is up/Y is forward:
+        // RenderWare coordinates typically have Z up. Rotate so Z is up/Y is forward:
         Matrix.rotateM(mMatrix, 0, -90f, 1f, 0f, 0f)
         // Recenter geometry bounding box at origin
         Matrix.translateM(mMatrix, 0, -m.center[0], -m.center[1], -m.center[2])
@@ -161,7 +161,7 @@ class DffGlRenderer : GLSurfaceView.Renderer {
         } else {
             // Solid shaded render with steel-blue tone
             GLES20.glUniform4f(uColorLoc, 0.78f, 0.82f, 0.88f, 1.0f)
-            GLES20.glDisable(GLES20.GL_CULL_FACE) // Many GTA DFFs are double-sided or open meshes
+            GLES20.glDisable(GLES20.GL_CULL_FACE) // Many DFFs are double-sided or open meshes
             GLES20.glDrawElements(GLES20.GL_TRIANGLES, m.indexCount, GLES20.GL_UNSIGNED_INT, m.indexBuffer)
         }
 

@@ -16,13 +16,13 @@
 
 | Channel | Version | Direct APK download | Release notes |
 |---|---|---|---|
-| Stable | v3.4.1 | [GTA_Img_Studio.apk](https://github.com/pkok1099/imgtxd-studio/releases/download/v3.4.1/GTA_Img_Studio.apk) (~4.2 MB) | [v3.4.1](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.4.1) |
+| Stable | v3.4.1 | [ImgTxdStudio.apk](https://github.com/pkok1099/imgtxd-studio/releases/download/v3.4.1/GTA_Img_Studio.apk) (~4.2 MB) | [v3.4.1](https://github.com/pkok1099/imgtxd-studio/releases/tag/v3.4.1) |
 
 ---
 
 ## 🔍 Overview
 
-Modding RenderWare games like **GTA San Andreas** on newer Android versions (Android 12, 13, 14, 15, and 16) has become difficult due to Scoped Storage restrictions preventing apps from writing to `Android/data/`.
+Modding RenderWare games like **San Andreas** on newer Android versions (Android 12, 13, 14, 15, and 16) has become difficult due to Scoped Storage restrictions preventing apps from writing to `Android/data/`.
 
 **ImgTxd Studio** solves this completely:
 - 🚀 **Full `.img` Archive Tool:** Add, replace, extract, rename, delete, and rebuild `.img` archives (VER1 & VER2).
@@ -45,7 +45,7 @@ Every byte of format work in ImgTxd Studio is done by a **native Rust core** (`r
 
 Correctness is pinned by **121 Rust unit tests** plus byte-exact golden checks: rebuilt archives and caches are hash-identical to reference outputs, and codec/resampler changes must reproduce identical FNV hashes before they ship.
 
-Measured on the development VM against the previous engine, on a real GTA SA Lite dataset (`gta3.img` — 283 MB, 13,557 entries; texdb cache — 12,445 textures):
+Measured on the development VM against the previous engine, on a real SA Lite dataset (`gta3.img` — 283 MB, 13,557 entries; texdb cache — 12,445 textures):
 
 | Operation | Before | Rust engine | Result |
 |---|---|---|---|
@@ -143,7 +143,7 @@ cd imgtxd-studio
 
 ## ⚖️ Legal Disclaimer
 
-ImgTxd Studio is an independent, free, and open-source file modification tool. All trademarks, game titles, and brand names (including Grand Theft Auto, GTA, Bully, and Rockstar Games) are the property of their respective owners. ImgTxd Studio is not affiliated with, endorsed by, or sponsored by Rockstar Games or Take-Two Interactive.
+ImgTxd Studio is an independent, free, and open-source file modification tool. All trademarks, game titles, and brand names (including Bully, and Rockstar Games) are the property of their respective owners. ImgTxd Studio is not affiliated with, endorsed by, or sponsored by Rockstar Games or Take-Two Interactive.
 
 ---
 

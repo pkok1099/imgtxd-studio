@@ -1,7 +1,7 @@
 <resources>
     <string name="about_app_item_desc">v3.4.1 • High-speed Rust core &amp; open-source licenses</string>
     <string name="about_app_item_title">About ImgTxd Studio</string>
-    <string name="about_desc_1">ImgTxd Studio is a modern Android tool for editing .img archives and .txd textures, supporting the RenderWare architecture of 3D-era GTA games (San Andreas, Vice City, III) and Bully.</string>
+    <string name="about_desc_1">ImgTxd Studio is a modern Android tool for editing .img archives and .txd textures, supporting the RenderWare architecture of 3D-era games (San Andreas, Vice City, III) and Bully.</string>
     <string name="about_desc_2">Includes Shizuku integration for direct access to the restricted Android/data folder without root.</string>
     <string name="about_design_arch">ProcessRepository Runtime Queue • Multi-Window Strategy</string>
     <string name="about_design_theme">Noir &amp; Blush Dark Theme • Jetpack Compose • Material 3</string>
@@ -18,7 +18,7 @@
     <string name="all_files_access_req_title">All Files Access Required</string>
     <string name="allocation_mb">Alokasi: %1$d MB</string>
     <string name="always_dark_mode">Mode Gelap Tetap</string>
-    <string name="app_hero_desc">Archive manager &amp; texture editor for GTA (SA, VC, III) &amp; Bully. High-speed Rust core with direct Shizuku support.</string>
+    <string name="app_hero_desc">Archive manager &amp; texture editor for (SA, VC, III) &amp; Bully. High-speed Rust core with direct Shizuku support.</string>
     <string name="app_info_section">APPLICATION INFO</string>
     <string name="app_integrity_violation_desc">The app detected package renaming (repackaging) or unauthorized code changes. For system integrity and your game files\' safety, ImgTxd Studio is not allowed to run in a modified state.\n\nThe app will close automatically.</string>
     <string name="app_integrity_violation_title">App Integrity Violation</string>
@@ -229,7 +229,7 @@
     <string name="menu_fix_audio">Fix SA Audio (.osw)</string>
     <string name="menu_fix_audio_desc">Rebuild index .idx untuk arsip audio .osw yang dimodifikasi</string>
     <string name="menu_open_img">Open IMG Archive</string>
-    <string name="menu_open_img_desc">Buka arsip .img (GTA SA / VC / III) untuk modifikasi model &amp; tekstur</string>
+    <string name="menu_open_img_desc">Buka arsip .img (SA / VC / III) untuk modifikasi model &amp; tekstur</string>
     <string name="menu_operations_history">Operations History</string>
     <string name="menu_operations_history_desc">Latest export, rebuild, and background op results</string>
     <string name="menu_paste_data_lines">Paste Mod Data Lines</string>
@@ -277,7 +277,7 @@
     <string name="pick_destination_folder">Pick Destination Folder</string>
     <string name="pick_dff_model_file">Pick .dff Model File</string>
     <string name="pick_files_to_add">Pick Files to Add</string>
-    <string name="pick_gta_files_folder">Pick GTA files/ Folder (contains texdb/ and .img)</string>
+    <string name="pick_game_files_folder">Pick game files/ Folder (contains texdb/ and .img)</string>
     <string name="pick_multi_txd_dest">Pick Multi-TXD Export Destination Folder</string>
     <string name="pick_osw_audio">Pick .osw Audio Archive</string>
     <string name="pick_txd_file">Pilih File .txd</string>

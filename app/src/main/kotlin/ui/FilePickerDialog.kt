@@ -545,10 +545,10 @@ fun FilePickerDialog(
 
                 // Shortcut chips
                 val shortcuts = listOf(
-                    "GTA SA texdb" to "/storage/emulated/0/Android/data/com.rockstargames.gtasa/files/texdb",
-                    "GTA SA files" to "/storage/emulated/0/Android/data/com.rockstargames.gtasa/files",
-                    "GTA VC" to "/storage/emulated/0/Android/data/com.rockstargames.gtavc/files",
-                    "GTA III" to "/storage/emulated/0/Android/data/com.rockstargames.gta3/files",
+                    "SA texdb" to "/storage/emulated/0/Android/data/com.rockstargames.gtasa/files/texdb",
+                    "SA files" to "/storage/emulated/0/Android/data/com.rockstargames.gtasa/files",
+                    "VC" to "/storage/emulated/0/Android/data/com.rockstargames.gtavc/files",
+                    "III" to "/storage/emulated/0/Android/data/com.rockstargames.gta3/files",
                     "Downloads" to "/storage/emulated/0/Download",
                     "Storage" to defaultRoot
                 )
@@ -566,7 +566,7 @@ fun FilePickerDialog(
                             shape = CircleShape,
                             label = { Text(label, color = MaterialTheme.colorScheme.onSurface) },
                             leadingIcon = {
-                                if (label.startsWith("GTA")) {
+                                if (targetPath.contains("com.rockstargames")) {
                                     Icon(Icons.Outlined.SportsEsports, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                                 } else {
                                     Icon(Icons.Outlined.Folder, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)

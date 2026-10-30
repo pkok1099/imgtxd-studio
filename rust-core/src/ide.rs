@@ -1,4 +1,4 @@
-//! GTA IDE definition index: model name -> streaming model id, plus the
+//! IDE definition index: model name -> streaming model id, plus the
 //! txd name -> candidate ids map (several models can share one TXD).
 //!
 //! IDE files (`vehicles.ide`, `peds.ide`, `default.ide`, `data/maps/**`)

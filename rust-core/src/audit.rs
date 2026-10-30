@@ -13,7 +13,7 @@ use crate::dff;
 use crate::img::ImgArchive;
 use crate::texdb::TexdbCache;
 
-/// Audits a GTA `files/` folder (the one containing `texdb/` and the .img
+/// Audits a game `files/` folder (the one containing `texdb/` and the .img
 /// archives). Returns an Indonesian report.
 pub fn audit_game_folder(files_dir: &Path) -> Result<String, String> {
     if !files_dir.is_dir() {

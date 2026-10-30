@@ -1,4 +1,4 @@
-//! GTA SA audio fixer (IMG Tool parity item I13) — faithful port of the
+//! SA audio fixer (IMG Tool parity item I13) — faithful port of the
 //! Kotlin `OswIdxFixer`.
 //!
 //! The `.osw` file is a ZIP container. This module recomputes every entry's

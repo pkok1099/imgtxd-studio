@@ -9,7 +9,7 @@ import kotlin.system.exitProcess
 
 /**
  * Multi-layer anti-tampering, anti-repackaging, and cryptographic signature verification.
- * Protects the package name and identity of GTA Img Studio against unauthorized cloning or re-signing.
+ * Protects the package name and identity of ImgTxd Studio against unauthorized cloning or re-signing.
  */
 object AppIntegrity {
 

@@ -1258,10 +1258,10 @@ fun MainScreen(
         )
     }
 
-    // 3b2a2. Game texture audit: pick the GTA files/ folder, run, show report
+    // 3b2a2. Game texture audit: pick the game files/ folder, run, show report
     if (showAuditFolderPicker) {
         FilePickerDialog(
-            title = stringResource(R.string.pick_gta_files_folder),
+            title = stringResource(R.string.pick_game_files_folder),
             mode = PickerMode.PICK_FOLDER,
             onDismissRequest = { showAuditFolderPicker = false },
             onFileSelected = { path, _ ->
@@ -1872,7 +1872,7 @@ private fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Archive manager & texture editor for GTA (SA, VC, III) & Bully. High-speed Rust core with direct Shizuku support.",
+                        text = "Archive manager & texture editor for (SA, VC, III) & Bully. High-speed Rust core with direct Shizuku support.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center

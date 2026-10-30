@@ -5,7 +5,7 @@ import java.io.File
 import java.io.IOException
 
 /**
- * UI model of one texture in a GTA mobile texdb cache.
+ * UI model of one texture in a mobile texdb cache.
  *
  * The values come from the Rust engine (`texdb::describe_cache`); see
  * [TexdbCache] — this class no longer parses anything itself.

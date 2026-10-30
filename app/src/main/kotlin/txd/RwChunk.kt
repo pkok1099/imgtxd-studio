@@ -2,7 +2,7 @@ package com.onlasdan.studio.txd
 
 /**
  * RenderWare binary stream chunk identifiers and texture format constants.
- * Used for parsing and generating GTA RenderWare .txd (Texture Dictionary) files.
+ * Used for parsing and generating RenderWare .txd (Texture Dictionary) files.
  */
 object RwChunk {
     // Core RenderWare Chunk IDs
@@ -13,9 +13,9 @@ object RwChunk {
     const val CHUNK_TEXTURE_DICTIONARY = 0x0016
 
     // RenderWare Version Tokens
-    const val RW_VERSION_SA = com.onlasdan.studio.Constants.RenderWare.VERSION_SA  // RenderWare 3.6.0.3 (GTA San Andreas)
-    const val RW_VERSION_VC = com.onlasdan.studio.Constants.RenderWare.VERSION_VC  // RenderWare 3.4.0.3 (GTA Vice City)
-    const val RW_VERSION_III = com.onlasdan.studio.Constants.RenderWare.VERSION_III // RenderWare 3.3.0.2 (GTA III)
+    const val RW_VERSION_SA = com.onlasdan.studio.Constants.RenderWare.VERSION_SA  // RenderWare 3.6.0.3 (San Andreas)
+    const val RW_VERSION_VC = com.onlasdan.studio.Constants.RenderWare.VERSION_VC  // RenderWare 3.4.0.3 (Vice City)
+    const val RW_VERSION_III = com.onlasdan.studio.Constants.RenderWare.VERSION_III // RenderWare 3.3.0.2 (III)
 
     // Platform IDs (stored in Texture Native Struct)
     const val PLATFORM_DEFAULT = 0x00

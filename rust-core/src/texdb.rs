@@ -1,7 +1,7 @@
-//! GTA mobile texture database (texdb) — `.txt` manifest + `.toc` offsets +
+//! mobile texture database (texdb) — `.txt` manifest + `.toc` offsets +
 //! `.dat` listings, with the RLE payload codec.
 //!
-//! Format reverse-engineered from the GTAMods Wiki ("Mobile textures (SA/VC)")
+//! Format reverse-engineered from the the community modding wiki ("Mobile textures (SA/VC)")
 //! and verified against real game caches on 2026-10-23 (see
 //! `~/workspace/txd-tool-rea/FORMAT-TEXDB.md`):
 //! - Listing (16 bytes): u16 name hash, u16 encoding (GL enum), u16 width,

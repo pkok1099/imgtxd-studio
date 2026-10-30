@@ -40,7 +40,7 @@ fn u32le(data: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(data[at..at + 4].try_into().unwrap())
 }
 
-/// Friendly RW version from a chunk library id (GTA-era values 3.1–3.7).
+/// Friendly RW version from a chunk library id (RenderWare-era values 3.1–3.7).
 fn rw_version_name(lib: u32) -> String {
     if lib & 0xFFFF_0000 != 0 {
         let minor = ((lib >> 14) & 0x3FF00) >> 12;
